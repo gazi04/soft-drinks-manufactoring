@@ -1,0 +1,21 @@
+services:
+  openplc:
+    image: ghcr.io/autonomy-logic/openplc-runtime:latest
+    ports:
+      - "8443:8443" # editor connection
+      - "502:502" # Modbus TCP
+    cap_add: [SYS_NICE, SYS_RESOURCE]
+    volumes:
+      - openplc-data:/var/run/runtime
+    restart: unless-stopped
+
+  fuxa:
+    image: frangoteam/fuxa:latest
+    ports:
+      - "1881:1881" # FUXA web interface
+    volumes:
+      - ./hmi:/usr/src/app/FUXA/server/_appdata
+    restart: unless-stopped
+
+volumes:
+  openplc-data:
