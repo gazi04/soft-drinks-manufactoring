@@ -32,9 +32,14 @@
       "pous": {
         "main": [
           "Cmd",
-          "Start_Cmd",
-          "Stop_Cmd",
-          "Reset_Cmd"
+          "valvetest",
+          "testopen",
+          "testvalveenable",
+          "testvalveout",
+          "testcycles",
+          "testopentime",
+          "testlastopen",
+          "FB_VALVE0"
         ]
       }
     }

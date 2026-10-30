@@ -51,6 +51,20 @@ PROGRAM main
     Hb_Timer : TON;
 
     TON0 : TON;
+    motortest : FB_MOTOR;
+    testrun : BOOL AT %MX7.0;
+    testenable : BOOL AT %MX7.1;
+    testout : BOOL AT %MX7.2;
+    teststart : DINT AT %MD0;
+    testruntime : DINT AT %MD1;
+    valvetest : FB_VALVE;
+    testopen : BOOL AT %MX7.3;
+    testvalveenable : BOOL AT %MX7.4;
+    testvalveout : BOOL AT %MX7.5;
+    testcycles : DINT AT %MD2;
+    testopentime : LINT AT %ML0;
+    testlastopen : LINT AT %ML1;
+    FB_VALVE0 : FB_Valve;
   END_VAR
 
 {
@@ -2098,7 +2112,7 @@ PROGRAM main
     },
     {
       "id": "rung_main_2bb7ff2d-7a6c-47c0-bcf6-5cc4230dcaef",
-      "comment": "",
+      "comment": "Mode decode: ModeReq = 0 -> Mode_Stop (machine switched off)",
       "defaultBounds": [
         300,
         100
@@ -2949,11 +2963,12 @@ PROGRAM main
           "targetHandle": "input"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_ca761e80-8f97-43e0-9585-f0da37291f88",
-      "comment": "",
+      "comment": "Mode decode: ModeReq = 1 -> Mode_Auto (sequencer controls the machine)",
       "defaultBounds": [
         300,
         100
@@ -3805,11 +3820,12 @@ PROGRAM main
           "sourceHandle": "OUT",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_11b24be0-59cc-4def-9062-283f0fb273b4",
-      "comment": "",
+      "comment": "Mode decode: ModeReq = 2 -> Mode_Manual (operator controls single actuators from the HMI)",
       "defaultBounds": [
         300,
         100
@@ -4661,11 +4677,12 @@ PROGRAM main
           "sourceHandle": "OUT",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_0a5b027f-038e-43f0-b79d-11bf21b2b40e",
-      "comment": "",
+      "comment": "Command decode: Cmd = 1  -> Start_Cmd (TRUE for one scan only)",
       "defaultBounds": [
         300,
         100
@@ -5517,11 +5534,12 @@ PROGRAM main
           "sourceHandle": "OUT",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_d913212d-9ff0-419d-ac6d-40b0b5f15ad0",
-      "comment": "",
+      "comment": "Command decode: Cmd = 2 -> Stop_Cmd (TRUE for one scan only)",
       "defaultBounds": [
         300,
         100
@@ -6373,11 +6391,12 @@ PROGRAM main
           "sourceHandle": "OUT",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_53d1eabb-088d-4a8b-b193-3529b24f1035",
-      "comment": "",
+      "comment": "Command decode: Cmd = 3 -> Reset_Cmd (TRUE for one scan only)",
       "defaultBounds": [
         300,
         100
@@ -7229,11 +7248,12 @@ PROGRAM main
           "sourceHandle": "OUT",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_108d31b6-b9ca-4c83-b3a2-d5f9eb2a550a",
-      "comment": "",
+      "comment": "Clear the command: Cmd := 0 after rungs 4-6 have read it, so every HMI command acts only once. Must stay below rungs 4-6",
       "defaultBounds": [
         300,
         100
@@ -7919,11 +7939,12 @@ PROGRAM main
           "targetHandle": "input"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_5df75dd3-ad77-4c63-8343-12114a83ef06",
-      "comment": "One singal that says \"it's safe to run\", it checks the alarm for communication is lost",
+      "comment": "Master enable (MCR equivalent): outputs may run only  if the E-stop chain is healthy AND communication is alive (Alm_CommLost = FALSE)",
       "defaultBounds": [
         300,
         100
@@ -8579,11 +8600,12 @@ PROGRAM main
           "targetHandle": "input"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_f816b467-65e9-4a37-a37d-8b2bccc8bc8f",
-      "comment": "Detect a  change (XOR made from contacts)",
+      "comment": "Heartbeat watchdog 1/4: Hb_Changed = Heartbeat XOR Hb_Last, TRUE for one scan whenever the heartbeat bit changed.",
       "defaultBounds": [
         300,
         100
@@ -10058,11 +10080,12 @@ PROGRAM main
           "targetHandle": "right-rail"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_451f4d07-debf-474d-9f5c-404d39aad5dc",
-      "comment": "Remember the value of the hearbeat for the next scan",
+      "comment": "Heartbeat watchdog 2/4: remember the heartbeat value for the next scan. Must stay below rung 9",
       "defaultBounds": [
         300,
         100
@@ -10565,11 +10588,12 @@ PROGRAM main
           "targetHandle": "right-rail"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_84e38d66-b197-4d49-9b5c-9748c11e7abd",
-      "comment": "",
+      "comment": "Heartbeat watchdog 3/4: Hb_Timer runs while the heartbeat does not change, after 3s without a change, latch the alarm Alm_CommLost (simulator / network died)",
       "defaultBounds": [
         300,
         100
@@ -11545,11 +11569,12 @@ PROGRAM main
           "targetHandle": "input"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_0171e129-2d27-4d23-8d28-e8b61a274ede",
-      "comment": "",
+      "comment": "Heartbeat watchdog 4/4: Reset clears Alm_CommLost, but only when the cause is gone (heartbeat running again, Hb_Timer.Q = FALSE)",
       "defaultBounds": [
         300,
         100
@@ -12203,6 +12228,2621 @@ PROGRAM main
           "target": "right-rail-rung_main_0171e129-2d27-4d23-8d28-e8b61a274ede",
           "sourceHandle": "output",
           "targetHandle": "right-rail"
+        }
+      ],
+      "selectedNodes": [],
+      "handleBranches": []
+    },
+    {
+      "id": "rung_main_dda6dfe6-f4dc-41b2-8ae3-59527645327c",
+      "comment": "TEST ONLY: FB_Motor",
+      "defaultBounds": [
+        300,
+        100
+      ],
+      "reactFlowViewport": [
+        580,
+        214
+      ],
+      "nodes": [
+        {
+          "id": "left-rail-rung_main_dda6dfe6-f4dc-41b2-8ae3-59527645327c",
+          "type": "powerRail",
+          "position": {
+            "x": 0,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 3,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "left-rail",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "right": -3
+              }
+            },
+            "numericId": "6839815",
+            "variant": "left",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+          "type": "block",
+          "position": {
+            "x": 143,
+            "y": 14
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 36
+                },
+                "id": "EN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 76
+                },
+                "id": "Run",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 116
+                },
+                "id": "Enable",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 116,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 317,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 174,
+                  "y": 36
+                },
+                "id": "ENO",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 317,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 174,
+                  "y": 76
+                },
+                "id": "Out",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 317,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 174,
+                  "y": 116
+                },
+                "id": "Starts",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 116,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 317,
+                  "y": 170
+                },
+                "relPosition": {
+                  "x": 174,
+                  "y": 156
+                },
+                "id": "RunTime",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 156,
+                  "right": 0
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 36
+                },
+                "id": "EN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 76
+                },
+                "id": "Run",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 116
+                },
+                "id": "Enable",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 116,
+                  "left": 0
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 317,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 174,
+                  "y": 36
+                },
+                "id": "ENO",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 317,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 174,
+                  "y": 76
+                },
+                "id": "Out",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 317,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 174,
+                  "y": 116
+                },
+                "id": "Starts",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 116,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 317,
+                  "y": 170
+                },
+                "relPosition": {
+                  "x": 174,
+                  "y": 156
+                },
+                "id": "RunTime",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 156,
+                  "right": 0
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 36
+              },
+              "id": "EN",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 36,
+                "left": 0
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 317,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 174,
+                "y": 36
+              },
+              "id": "ENO",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 36,
+                "right": 0
+              }
+            },
+            "numericId": "3087599",
+            "variant": {
+              "name": "FB_Motor",
+              "type": "function-block",
+              "variables": [
+                {
+                  "name": "EN",
+                  "class": "input",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "ENO",
+                  "class": "output",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "Run",
+                  "class": "input",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "Enable",
+                  "class": "input",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "Out",
+                  "class": "output",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "Starts",
+                  "class": "output",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "DINT"
+                  }
+                },
+                {
+                  "name": "RunTime",
+                  "class": "output",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "DINT"
+                  }
+                },
+                {
+                  "name": "Sec_Timer",
+                  "class": "local",
+                  "type": {
+                    "definition": "user-data-type",
+                    "value": "TON"
+                  }
+                }
+              ],
+              "documentation": "",
+              "extensible": false
+            },
+            "variable": {
+              "name": "motortest",
+              "class": "local",
+              "type": {
+                "definition": "derived",
+                "value": "FB_MOTOR"
+              },
+              "location": "",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "executionControl": true,
+            "lockExecutionControl": false,
+            "connectedVariables": [
+              {
+                "handleId": "Run",
+                "type": "input",
+                "variable": {
+                  "name": "testrun",
+                  "class": "local",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  },
+                  "location": "%MX7.0",
+                  "initialValue": null,
+                  "documentation": "",
+                  "debug": false
+                }
+              },
+              {
+                "handleId": "Out",
+                "type": "output",
+                "variable": {
+                  "name": "testout",
+                  "class": "local",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  },
+                  "location": "%MX7.2",
+                  "initialValue": null,
+                  "documentation": "",
+                  "debug": false
+                }
+              },
+              {
+                "handleId": "Enable",
+                "type": "input",
+                "variable": {
+                  "name": "testenable",
+                  "class": "local",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  },
+                  "location": "%MX7.1",
+                  "initialValue": null,
+                  "documentation": "",
+                  "debug": false
+                }
+              },
+              {
+                "handleId": "Starts",
+                "type": "output",
+                "variable": {
+                  "name": "teststart",
+                  "class": "local",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "DINT"
+                  },
+                  "location": "%MD0",
+                  "initialValue": null,
+                  "documentation": "",
+                  "debug": false
+                }
+              },
+              {
+                "handleId": "RunTime",
+                "type": "output",
+                "variable": {
+                  "name": "testruntime",
+                  "class": "local",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "DINT"
+                  },
+                  "location": "%MD1",
+                  "initialValue": null,
+                  "documentation": "",
+                  "debug": false
+                }
+              }
+            ],
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 174,
+          "height": 180,
+          "measured": {
+            "width": 174,
+            "height": 180
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "right-rail-rung_main_dda6dfe6-f4dc-41b2-8ae3-59527645327c",
+          "type": "powerRail",
+          "position": {
+            "x": 577,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 297,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                },
+                "x": 577
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 297,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 297,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "right-rail",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "left": -3
+              }
+            },
+            "numericId": "3763452",
+            "variant": "right",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_74c88c32-d604-415a-bfa3-b6f0368a817f",
+          "type": "variable",
+          "position": {
+            "x": 33,
+            "y": 74
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 193,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 193,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 193,
+                "y": 90
+              },
+              "relPosition": {
+                "x": 80,
+                "y": 16
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source"
+            },
+            "numericId": "4330804",
+            "variable": {
+              "name": "testrun",
+              "class": "local",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "location": "%MX7.0",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "input",
+            "block": {
+              "id": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+              "handleId": "Run",
+              "variableType": {
+                "name": "Run",
+                "class": "input",
+                "type": {
+                  "definition": "base-type",
+                  "value": "BOOL"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_f6c6ae31-8cd7-4fc1-b45f-18bdcb25c142",
+          "type": "variable",
+          "position": {
+            "x": 33,
+            "y": 114
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 193,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 193,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 193,
+                "y": 130
+              },
+              "relPosition": {
+                "x": 80,
+                "y": 16
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source"
+            },
+            "numericId": "3588264",
+            "variable": {
+              "name": "testenable",
+              "class": "local",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "location": "%MX7.1",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "input",
+            "block": {
+              "id": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+              "handleId": "Enable",
+              "variableType": {
+                "name": "Enable",
+                "class": "input",
+                "type": {
+                  "definition": "base-type",
+                  "value": "BOOL"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_1b05c535-a882-48c7-bff2-5be43c568ad9",
+          "type": "variable",
+          "position": {
+            "x": 347,
+            "y": 74
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 347,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 347,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 347,
+                "y": 90
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 16
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target"
+            },
+            "numericId": "5883493",
+            "variable": {
+              "name": "testout",
+              "class": "local",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "location": "%MX7.2",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "output",
+            "block": {
+              "id": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+              "handleId": "Out",
+              "variableType": {
+                "name": "Out",
+                "class": "output",
+                "type": {
+                  "definition": "base-type",
+                  "value": "BOOL"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_660add28-0742-49ab-8ade-e969a67734b9",
+          "type": "variable",
+          "position": {
+            "x": 347,
+            "y": 114
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 347,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 347,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 347,
+                "y": 130
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 16
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target"
+            },
+            "numericId": "367348",
+            "variable": {
+              "name": "teststart",
+              "class": "local",
+              "type": {
+                "definition": "base-type",
+                "value": "DINT"
+              },
+              "location": "%MD0",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "output",
+            "block": {
+              "id": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+              "handleId": "Starts",
+              "variableType": {
+                "name": "Starts",
+                "class": "output",
+                "type": {
+                  "definition": "base-type",
+                  "value": "DINT"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_5c7e0374-69d5-4987-b51e-133d95ce36ab",
+          "type": "variable",
+          "position": {
+            "x": 347,
+            "y": 154
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 347,
+                  "y": 170
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 347,
+                  "y": 170
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 347,
+                "y": 170
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 16
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target"
+            },
+            "numericId": "2215329",
+            "variable": {
+              "name": "testruntime",
+              "class": "local",
+              "type": {
+                "definition": "base-type",
+                "value": "DINT"
+              },
+              "location": "%MD1",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "output",
+            "block": {
+              "id": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+              "handleId": "RunTime",
+              "variableType": {
+                "name": "RunTime",
+                "class": "output",
+                "type": {
+                  "definition": "base-type",
+                  "value": "DINT"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_left-rail-rung_main_dda6dfe6-f4dc-41b2-8ae3-59527645327c_BLOCK_05b64927-94c7-47f3-95d2-c249a401f441__left-rail_Run",
+          "source": "left-rail-rung_main_dda6dfe6-f4dc-41b2-8ae3-59527645327c",
+          "target": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+          "sourceHandle": "left-rail",
+          "targetHandle": "EN"
+        },
+        {
+          "id": "e_BLOCK_05b64927-94c7-47f3-95d2-c249a401f441_right-rail-rung_main_dda6dfe6-f4dc-41b2-8ae3-59527645327c__Out_right-rail",
+          "source": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+          "target": "right-rail-rung_main_dda6dfe6-f4dc-41b2-8ae3-59527645327c",
+          "sourceHandle": "ENO",
+          "targetHandle": "right-rail"
+        },
+        {
+          "id": "e_VARIABLE_74c88c32-d604-415a-bfa3-b6f0368a817f_BLOCK_05b64927-94c7-47f3-95d2-c249a401f441__output_Run",
+          "source": "VARIABLE_74c88c32-d604-415a-bfa3-b6f0368a817f",
+          "target": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+          "sourceHandle": "output",
+          "targetHandle": "Run"
+        },
+        {
+          "id": "e_VARIABLE_f6c6ae31-8cd7-4fc1-b45f-18bdcb25c142_BLOCK_05b64927-94c7-47f3-95d2-c249a401f441__output_Enable",
+          "source": "VARIABLE_f6c6ae31-8cd7-4fc1-b45f-18bdcb25c142",
+          "target": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+          "sourceHandle": "output",
+          "targetHandle": "Enable"
+        },
+        {
+          "id": "e_BLOCK_05b64927-94c7-47f3-95d2-c249a401f441_VARIABLE_1b05c535-a882-48c7-bff2-5be43c568ad9__Out_input",
+          "source": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+          "target": "VARIABLE_1b05c535-a882-48c7-bff2-5be43c568ad9",
+          "sourceHandle": "Out",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_BLOCK_05b64927-94c7-47f3-95d2-c249a401f441_VARIABLE_660add28-0742-49ab-8ade-e969a67734b9__Starts_input",
+          "source": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+          "target": "VARIABLE_660add28-0742-49ab-8ade-e969a67734b9",
+          "sourceHandle": "Starts",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_BLOCK_05b64927-94c7-47f3-95d2-c249a401f441_VARIABLE_5c7e0374-69d5-4987-b51e-133d95ce36ab__RunTime_input",
+          "source": "BLOCK_05b64927-94c7-47f3-95d2-c249a401f441",
+          "target": "VARIABLE_5c7e0374-69d5-4987-b51e-133d95ce36ab",
+          "sourceHandle": "RunTime",
+          "targetHandle": "input"
+        }
+      ],
+      "selectedNodes": [],
+      "handleBranches": []
+    },
+    {
+      "id": "rung_main_983b5462-3fbe-4915-8417-3e35d635d6bd",
+      "comment": "TEST ONLY:FB_Valve",
+      "defaultBounds": [
+        300,
+        100
+      ],
+      "reactFlowViewport": [
+        592,
+        254
+      ],
+      "nodes": [
+        {
+          "id": "left-rail-rung_main_983b5462-3fbe-4915-8417-3e35d635d6bd",
+          "type": "powerRail",
+          "position": {
+            "x": 0,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 3,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "left-rail",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "right": -3
+              }
+            },
+            "numericId": "3597028",
+            "variant": "left",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+          "type": "block",
+          "position": {
+            "x": 143,
+            "y": 14
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 36
+                },
+                "id": "EN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 76
+                },
+                "id": "Open",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 116
+                },
+                "id": "Enable",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 116,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 329,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 186,
+                  "y": 36
+                },
+                "id": "ENO",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 329,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 186,
+                  "y": 76
+                },
+                "id": "Out",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 329,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 186,
+                  "y": 116
+                },
+                "id": "Cycles",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 116,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 329,
+                  "y": 170
+                },
+                "relPosition": {
+                  "x": 186,
+                  "y": 156
+                },
+                "id": "OpenTime",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 156,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 329,
+                  "y": 210
+                },
+                "relPosition": {
+                  "x": 186,
+                  "y": 196
+                },
+                "id": "LastOpen",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 196,
+                  "right": 0
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 36
+                },
+                "id": "EN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 76
+                },
+                "id": "Open",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 116
+                },
+                "id": "Enable",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 116,
+                  "left": 0
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 329,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 186,
+                  "y": 36
+                },
+                "id": "ENO",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 329,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 186,
+                  "y": 76
+                },
+                "id": "Out",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 329,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 186,
+                  "y": 116
+                },
+                "id": "Cycles",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 116,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 329,
+                  "y": 170
+                },
+                "relPosition": {
+                  "x": 186,
+                  "y": 156
+                },
+                "id": "OpenTime",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 156,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 329,
+                  "y": 210
+                },
+                "relPosition": {
+                  "x": 186,
+                  "y": 196
+                },
+                "id": "LastOpen",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 196,
+                  "right": 0
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 36
+              },
+              "id": "EN",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 36,
+                "left": 0
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 329,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 186,
+                "y": 36
+              },
+              "id": "ENO",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 36,
+                "right": 0
+              }
+            },
+            "numericId": "10067361",
+            "variant": {
+              "name": "FB_Valve",
+              "type": "function-block",
+              "variables": [
+                {
+                  "name": "EN",
+                  "class": "input",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "ENO",
+                  "class": "output",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "Open_Timer",
+                  "class": "local",
+                  "type": {
+                    "definition": "derived",
+                    "value": "TON"
+                  }
+                },
+                {
+                  "name": "TON0",
+                  "class": "local",
+                  "type": {
+                    "definition": "derived",
+                    "value": "TON"
+                  }
+                },
+                {
+                  "name": "Open",
+                  "class": "input",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "Enable",
+                  "class": "input",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "Out",
+                  "class": "output",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "Cycles",
+                  "class": "output",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "DINT"
+                  }
+                },
+                {
+                  "name": "OpenTime",
+                  "class": "output",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "LINT"
+                  }
+                },
+                {
+                  "name": "LastOpen",
+                  "class": "output",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "LINT"
+                  }
+                }
+              ],
+              "documentation": "",
+              "extensible": false
+            },
+            "variable": {
+              "name": "valvetest",
+              "class": "local",
+              "type": {
+                "definition": "derived",
+                "value": "FB_VALVE"
+              },
+              "location": "",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "executionControl": true,
+            "lockExecutionControl": false,
+            "connectedVariables": [
+              {
+                "handleId": "Open",
+                "type": "input",
+                "variable": {
+                  "name": "testopen",
+                  "class": "local",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  },
+                  "location": "%MX7.3",
+                  "initialValue": null,
+                  "documentation": "",
+                  "debug": false
+                }
+              },
+              {
+                "handleId": "Enable",
+                "type": "input",
+                "variable": {
+                  "name": "testvalveenable",
+                  "class": "local",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  },
+                  "location": "%MX7.4",
+                  "initialValue": null,
+                  "documentation": "",
+                  "debug": false
+                }
+              },
+              {
+                "handleId": "Out",
+                "type": "output",
+                "variable": {
+                  "name": "testvalveout",
+                  "class": "local",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  },
+                  "location": "%MX7.5",
+                  "initialValue": null,
+                  "documentation": "",
+                  "debug": false
+                }
+              },
+              {
+                "handleId": "Cycles",
+                "type": "output",
+                "variable": {
+                  "name": "testcycles",
+                  "class": "local",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "DINT"
+                  },
+                  "location": "%MD2",
+                  "initialValue": null,
+                  "documentation": "",
+                  "debug": false
+                }
+              },
+              {
+                "handleId": "OpenTime",
+                "type": "output",
+                "variable": {
+                  "name": "testopentime",
+                  "class": "local",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "LINT"
+                  },
+                  "location": "%ML0",
+                  "initialValue": null,
+                  "documentation": "",
+                  "debug": false
+                }
+              },
+              {
+                "handleId": "LastOpen",
+                "type": "output",
+                "variable": {
+                  "name": "testlastopen",
+                  "class": "local",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "LINT"
+                  },
+                  "location": "%ML1",
+                  "initialValue": null,
+                  "documentation": "",
+                  "debug": false
+                }
+              }
+            ],
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 186,
+          "height": 220,
+          "measured": {
+            "width": 186,
+            "height": 220
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "right-rail-rung_main_983b5462-3fbe-4915-8417-3e35d635d6bd",
+          "type": "powerRail",
+          "position": {
+            "x": 589,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 297,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                },
+                "x": 589
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 297,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 297,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "right-rail",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "left": -3
+              }
+            },
+            "numericId": "973980",
+            "variant": "right",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_d6965c64-ec2b-453e-a2db-9893869d62b8",
+          "type": "variable",
+          "position": {
+            "x": 33,
+            "y": 74
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 193,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 193,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 193,
+                "y": 90
+              },
+              "relPosition": {
+                "x": 80,
+                "y": 16
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source"
+            },
+            "numericId": "3721791",
+            "variable": {
+              "name": "testopen",
+              "class": "local",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "location": "%MX7.3",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "input",
+            "block": {
+              "id": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+              "handleId": "Open",
+              "variableType": {
+                "name": "Open",
+                "class": "input",
+                "type": {
+                  "definition": "base-type",
+                  "value": "BOOL"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_19857484-c2eb-476d-9c27-6a5432f287d8",
+          "type": "variable",
+          "position": {
+            "x": 33,
+            "y": 114
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 193,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 193,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 193,
+                "y": 130
+              },
+              "relPosition": {
+                "x": 80,
+                "y": 16
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source"
+            },
+            "numericId": "2004282",
+            "variable": {
+              "name": "testvalveenable",
+              "class": "local",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "location": "%MX7.4",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "input",
+            "block": {
+              "id": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+              "handleId": "Enable",
+              "variableType": {
+                "name": "Enable",
+                "class": "input",
+                "type": {
+                  "definition": "base-type",
+                  "value": "BOOL"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_dae724c7-d3a6-4d11-9f2a-db1d799df61f",
+          "type": "variable",
+          "position": {
+            "x": 359,
+            "y": 74
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 359,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 359,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 359,
+                "y": 90
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 16
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target"
+            },
+            "numericId": "2953942",
+            "variable": {
+              "name": "testvalveout",
+              "class": "local",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "location": "%MX7.5",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "output",
+            "block": {
+              "id": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+              "handleId": "Out",
+              "variableType": {
+                "name": "Out",
+                "class": "output",
+                "type": {
+                  "definition": "base-type",
+                  "value": "BOOL"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_20ef4c46-eddd-4d11-94ca-136d5016508a",
+          "type": "variable",
+          "position": {
+            "x": 359,
+            "y": 114
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 359,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 359,
+                  "y": 130
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 359,
+                "y": 130
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 16
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target"
+            },
+            "numericId": "8435468",
+            "variable": {
+              "name": "testcycles",
+              "class": "local",
+              "type": {
+                "definition": "base-type",
+                "value": "DINT"
+              },
+              "location": "%MD2",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "output",
+            "block": {
+              "id": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+              "handleId": "Cycles",
+              "variableType": {
+                "name": "Cycles",
+                "class": "output",
+                "type": {
+                  "definition": "base-type",
+                  "value": "DINT"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_7095d668-db37-4823-acc0-e61b642a19d0",
+          "type": "variable",
+          "position": {
+            "x": 359,
+            "y": 154
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 359,
+                  "y": 170
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 359,
+                  "y": 170
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 359,
+                "y": 170
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 16
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target"
+            },
+            "numericId": "455578",
+            "variable": {
+              "name": "testopentime",
+              "class": "local",
+              "type": {
+                "definition": "base-type",
+                "value": "LINT"
+              },
+              "location": "%ML0",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "output",
+            "block": {
+              "id": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+              "handleId": "OpenTime",
+              "variableType": {
+                "name": "OpenTime",
+                "class": "output",
+                "type": {
+                  "definition": "base-type",
+                  "value": "LINT"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_150ec41b-5290-4ccb-80fa-2282febe691d",
+          "type": "variable",
+          "position": {
+            "x": 359,
+            "y": 194
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 359,
+                  "y": 210
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 359,
+                  "y": 210
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 359,
+                "y": 210
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 16
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target"
+            },
+            "numericId": "1303370",
+            "variable": {
+              "name": "testlastopen",
+              "class": "local",
+              "type": {
+                "definition": "base-type",
+                "value": "LINT"
+              },
+              "location": "%ML1",
+              "initialValue": null,
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "output",
+            "block": {
+              "id": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+              "handleId": "LastOpen",
+              "variableType": {
+                "name": "LastOpen",
+                "class": "output",
+                "type": {
+                  "definition": "base-type",
+                  "value": "LINT"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_left-rail-rung_main_983b5462-3fbe-4915-8417-3e35d635d6bd_BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee__left-rail_Open",
+          "source": "left-rail-rung_main_983b5462-3fbe-4915-8417-3e35d635d6bd",
+          "target": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+          "sourceHandle": "left-rail",
+          "targetHandle": "EN"
+        },
+        {
+          "id": "e_BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee_right-rail-rung_main_983b5462-3fbe-4915-8417-3e35d635d6bd__Out_right-rail",
+          "source": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+          "target": "right-rail-rung_main_983b5462-3fbe-4915-8417-3e35d635d6bd",
+          "sourceHandle": "ENO",
+          "targetHandle": "right-rail"
+        },
+        {
+          "id": "e_VARIABLE_d6965c64-ec2b-453e-a2db-9893869d62b8_BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee__output_Open",
+          "source": "VARIABLE_d6965c64-ec2b-453e-a2db-9893869d62b8",
+          "target": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+          "sourceHandle": "output",
+          "targetHandle": "Open"
+        },
+        {
+          "id": "e_VARIABLE_19857484-c2eb-476d-9c27-6a5432f287d8_BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee__output_Enable",
+          "source": "VARIABLE_19857484-c2eb-476d-9c27-6a5432f287d8",
+          "target": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+          "sourceHandle": "output",
+          "targetHandle": "Enable"
+        },
+        {
+          "id": "e_BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee_VARIABLE_dae724c7-d3a6-4d11-9f2a-db1d799df61f__Out_input",
+          "source": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+          "target": "VARIABLE_dae724c7-d3a6-4d11-9f2a-db1d799df61f",
+          "sourceHandle": "Out",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee_VARIABLE_20ef4c46-eddd-4d11-94ca-136d5016508a__Cycles_input",
+          "source": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+          "target": "VARIABLE_20ef4c46-eddd-4d11-94ca-136d5016508a",
+          "sourceHandle": "Cycles",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee_VARIABLE_7095d668-db37-4823-acc0-e61b642a19d0__OpenTime_input",
+          "source": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+          "target": "VARIABLE_7095d668-db37-4823-acc0-e61b642a19d0",
+          "sourceHandle": "OpenTime",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee_VARIABLE_150ec41b-5290-4ccb-80fa-2282febe691d__LastOpen_input",
+          "source": "BLOCK_e7cf6cd5-594f-4542-b1b1-7a0d0cf9a5ee",
+          "target": "VARIABLE_150ec41b-5290-4ccb-80fa-2282febe691d",
+          "sourceHandle": "LastOpen",
+          "targetHandle": "input"
         }
       ],
       "selectedNodes": []
