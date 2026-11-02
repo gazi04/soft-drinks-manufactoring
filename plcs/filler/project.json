@@ -31,15 +31,7 @@
     "debugVariables": {
       "pous": {
         "main": [
-          "Cmd",
-          "valvetest",
-          "testopen",
-          "testvalveenable",
-          "testvalveout",
-          "testcycles",
-          "testopentime",
-          "testlastopen",
-          "FB_VALVE0"
+          "Cmd"
         ]
       }
     }

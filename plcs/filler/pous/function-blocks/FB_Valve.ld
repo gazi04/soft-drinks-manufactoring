@@ -3831,95 +3831,6 @@ FUNCTION_BLOCK FB_Valve
           "draggable": false,
           "selected": false,
           "dragging": false
-        },
-        {
-          "id": "VARIABLE_ec6de08f-1dd5-49a2-a1ab-e8b352484f5b",
-          "type": "variable",
-          "position": {
-            "x": 353,
-            "y": 74
-          },
-          "width": 80,
-          "height": 32,
-          "measured": {
-            "width": 80,
-            "height": 32
-          },
-          "data": {
-            "handles": [
-              {
-                "glbPosition": {
-                  "x": 353,
-                  "y": 90
-                },
-                "relPosition": {
-                  "x": 0,
-                  "y": 16
-                },
-                "id": "input",
-                "position": "left",
-                "isConnectable": false,
-                "type": "target"
-              }
-            ],
-            "inputHandles": [
-              {
-                "glbPosition": {
-                  "x": 353,
-                  "y": 90
-                },
-                "relPosition": {
-                  "x": 0,
-                  "y": 16
-                },
-                "id": "input",
-                "position": "left",
-                "isConnectable": false,
-                "type": "target"
-              }
-            ],
-            "outputHandles": [],
-            "inputConnector": {
-              "glbPosition": {
-                "x": 353,
-                "y": 90
-              },
-              "relPosition": {
-                "x": 0,
-                "y": 16
-              },
-              "id": "input",
-              "position": "left",
-              "isConnectable": false,
-              "type": "target"
-            },
-            "numericId": "8667572",
-            "variable": {
-              "name": ""
-            },
-            "executionOrder": 0,
-            "variant": "output",
-            "block": {
-              "id": "BLOCK_3cdd91e6-71b1-43d9-b0d0-ac410664c3ab",
-              "handleId": "ET",
-              "variableType": {
-                "name": "ET",
-                "class": "output",
-                "type": {
-                  "definition": "base-type",
-                  "value": "TIME"
-                }
-              }
-            },
-            "draggable": false,
-            "selectable": true,
-            "deletable": false
-          },
-          "deletable": false,
-          "selectable": true,
-          "draggable": false,
-          "selected": false,
-          "dragging": false
         }
       ],
       "edges": [
@@ -3950,13 +3861,6 @@ FUNCTION_BLOCK FB_Valve
           "target": "BLOCK_3cdd91e6-71b1-43d9-b0d0-ac410664c3ab",
           "sourceHandle": "output",
           "targetHandle": "PT"
-        },
-        {
-          "id": "e_BLOCK_3cdd91e6-71b1-43d9-b0d0-ac410664c3ab_VARIABLE_ec6de08f-1dd5-49a2-a1ab-e8b352484f5b__ET_input",
-          "source": "BLOCK_3cdd91e6-71b1-43d9-b0d0-ac410664c3ab",
-          "target": "VARIABLE_ec6de08f-1dd5-49a2-a1ab-e8b352484f5b",
-          "sourceHandle": "ET",
-          "targetHandle": "input"
         }
       ],
       "selectedNodes": []

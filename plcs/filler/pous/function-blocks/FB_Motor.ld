@@ -2488,95 +2488,6 @@ FUNCTION_BLOCK FB_Motor
           "draggable": false,
           "selected": false,
           "dragging": false
-        },
-        {
-          "id": "VARIABLE_8ff97ee3-fc34-4107-9f27-18eeb887e89a",
-          "type": "variable",
-          "position": {
-            "x": 467,
-            "y": 74
-          },
-          "width": 80,
-          "height": 32,
-          "measured": {
-            "width": 80,
-            "height": 32
-          },
-          "data": {
-            "handles": [
-              {
-                "glbPosition": {
-                  "x": 467,
-                  "y": 90
-                },
-                "relPosition": {
-                  "x": 0,
-                  "y": 16
-                },
-                "id": "input",
-                "position": "left",
-                "isConnectable": false,
-                "type": "target"
-              }
-            ],
-            "inputHandles": [
-              {
-                "glbPosition": {
-                  "x": 467,
-                  "y": 90
-                },
-                "relPosition": {
-                  "x": 0,
-                  "y": 16
-                },
-                "id": "input",
-                "position": "left",
-                "isConnectable": false,
-                "type": "target"
-              }
-            ],
-            "outputHandles": [],
-            "inputConnector": {
-              "glbPosition": {
-                "x": 467,
-                "y": 90
-              },
-              "relPosition": {
-                "x": 0,
-                "y": 16
-              },
-              "id": "input",
-              "position": "left",
-              "isConnectable": false,
-              "type": "target"
-            },
-            "numericId": "3794668",
-            "variable": {
-              "name": ""
-            },
-            "executionOrder": 0,
-            "variant": "output",
-            "block": {
-              "id": "BLOCK_45002a73-0fe9-4689-979d-562871966cd4",
-              "handleId": "ET",
-              "variableType": {
-                "name": "ET",
-                "class": "output",
-                "type": {
-                  "definition": "base-type",
-                  "value": "TIME"
-                }
-              }
-            },
-            "draggable": false,
-            "selectable": true,
-            "deletable": false
-          },
-          "deletable": false,
-          "selectable": true,
-          "draggable": false,
-          "selected": false,
-          "dragging": false
         }
       ],
       "edges": [
@@ -2614,13 +2525,6 @@ FUNCTION_BLOCK FB_Motor
           "target": "BLOCK_45002a73-0fe9-4689-979d-562871966cd4",
           "sourceHandle": "output",
           "targetHandle": "PT"
-        },
-        {
-          "id": "e_BLOCK_45002a73-0fe9-4689-979d-562871966cd4_VARIABLE_8ff97ee3-fc34-4107-9f27-18eeb887e89a__ET_input",
-          "source": "BLOCK_45002a73-0fe9-4689-979d-562871966cd4",
-          "target": "VARIABLE_8ff97ee3-fc34-4107-9f27-18eeb887e89a",
-          "sourceHandle": "ET",
-          "targetHandle": "input"
         }
       ],
       "selectedNodes": []
