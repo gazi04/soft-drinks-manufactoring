@@ -1,17 +1,16 @@
 FUNCTION_BLOCK FB_Valve
   VAR
-    Open_Timer : TON;
-    TON0 : TON;
+    Open_Timer : TON; (* Measures how long the valve is open (only ET is used) *)
   END_VAR
   VAR_INPUT
-    Open : BOOL;
-    Enable : BOOL;
+    Open : BOOL; (* Request: the valve should open (from the sequencer or HMI) *)
+    Enable : BOOL; (* Permission: Master_Enable (E-stop chain OK, communication alive) *)
   END_VAR
   VAR_OUTPUT
-    Out : BOOL;
-    Cycles : DINT;
-    OpenTime : LINT;
-    LastOpen : LINT;
+    Out : BOOL; (* Valve output: Open AND Enable *)
+    Cycles : DINT; (* Number of openings (maintenance: seal wear) *)
+    OpenTime : LINT; (* Total open time in ms *)
+    LastOpen : LINT; (* Duration of the last opening in ms *)
   END_VAR
 
 {
@@ -19,7 +18,7 @@ FUNCTION_BLOCK FB_Valve
   "rungs": [
     {
       "id": "rung_FB_Valve_6e27fcd6-bab5-4727-9499-0c5e87168750",
-      "comment": "Vavle output: the valve opens only when nrequested (Open) and allowed (Master_Enable)",
+      "comment": "Valve output: the valve opens only when requested (Open) and allowed (Enable = Master_Enable)",
       "defaultBounds": [
         300,
         100
@@ -1647,7 +1646,7 @@ FUNCTION_BLOCK FB_Valve
     },
     {
       "id": "rung_FB_Valve_654a1f30-fcf5-4776-ade8-11157773843d",
-      "comment": "Open time: at the falling edge of Out (valve closes) Open_Timer.ET is converted to ms -> LastOpen and added to OpenTime. Must stay ABOVE rung 3 or the TON resets ET to 0 first",
+      "comment": "Open time: at the falling edge of Out (valve closes) Open_Timer.ET is converted to ms -> LastOpen and added to OpenTime. Must stay ABOVE the Open timer rung, or the TON resets ET to 0 first",
       "defaultBounds": [
         300,
         100

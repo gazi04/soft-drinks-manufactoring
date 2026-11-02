@@ -1,15 +1,15 @@
 FUNCTION_BLOCK FB_Motor
   VAR
-    Sec_Timer : TON; (* Internal 1-second timer *)
+    Sec_Timer : TON; (* Internal 1 s pulse for the run-time counter *)
   END_VAR
   VAR_INPUT
-    Run : BOOL; (* "I want the motor on" *)
-    Enable : BOOL; (* "it's allowed" (Master_Enable *)
+    Run : BOOL; (* Request: the motor should run (from the sequencer or HMI) *)
+    Enable : BOOL; (* Permission: Master_Enable (E-stop chain OK, communication alive) *)
   END_VAR
   VAR_OUTPUT
-    Out : BOOL;
-    Starts : DINT;
-    RunTime : DINT; (* Running time in secods *)
+    Out : BOOL; (* Motor output: Run AND Enable *)
+    Starts : DINT; (* Number of motor starts (maintenance: contactor wear) *)
+    RunTime : DINT; (* Running time in seconds (maintenance: bearing / belt wear) *)
   END_VAR
 
 {
@@ -1665,7 +1665,7 @@ FUNCTION_BLOCK FB_Motor
     },
     {
       "id": "rung_FB_Motor_85e58c6c-0898-4c53-843c-e3d82e6f2736",
-      "comment": "1-second pulse generator: while the motor runs, Sec_timer counts to 1s, its own Q contact then cuts the input, so the timer resets and start again (Q = TRUE for one scan every second)",
+      "comment": "1-second pulse generator: while the motor runs, Sec_Timer counts to 1 s, its own Q contact then cuts the input, so the timer resets and starts again (Q = TRUE for one scan every second)",
       "defaultBounds": [
         300,
         100
