@@ -9,6 +9,7 @@ authors = [
 requires-python = ">=3.13"
 dependencies = [
     "pymodbus>=3.16.1",
+    "textual>=8.2.8",
 ]
 
 [project.scripts]
@@ -17,3 +18,13 @@ simulator = "simulator:main"
 [build-system]
 requires = ["uv_build>=0.13.5,<0.14.0"]
 build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+]
+
+[tool.pytest.ini_options]
+# Only the pure-Python unit tests. The scripts in tests/ talk to a live PLC
+# and must be run one by one with `uv run python tests/<script>.py`.
+testpaths = ["tests/unit"]
