@@ -23,12 +23,12 @@ from pymodbus.client import ModbusTcpClient
 
 from simulator import address_map as am
 from simulator import config
+from simulator.plcs import ALARM_NAMES as ALARMS
+from simulator.plcs import STATE_NAMES as STATES
+from simulator.plcs import STEP_NAMES as STEPS
 
 COMMANDS = {"start": (am.CMD, 1), "stop": (am.CMD, 2), "reset": (am.CMD, 3)}
 MODES = {"stopmode": (am.MODE_REQ, 0), "auto": (am.MODE_REQ, 1), "manual": (am.MODE_REQ, 2)}
-STEPS = {0: "IDLE", 10: "WORK", 15: "WAIT_OUTFEED", 20: "INDEX", 900: "FAULT"}
-STATES = {0: "Stopped", 1: "Running", 2: "Starved", 3: "Blocked", 9: "Fault"}
-ALARMS = ("Alm_IndexJam", "Alm_FillTimeout", "Alm_OutfeedBlocked", "Alm_CommLost")
 
 
 def status(client: ModbusTcpClient) -> None:
