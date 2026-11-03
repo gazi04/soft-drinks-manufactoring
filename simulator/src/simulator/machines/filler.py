@@ -270,6 +270,21 @@ class Filler:
             fill_level=round(at_fill.level_ml) if at_fill is not None else 0,
         )
 
+    # --- HMI animation ---------------------------------------------------------------
+    def pocket_codes(self) -> tuple[int, ...]:
+        """One state code per pocket (ENTRY..CAP) for the HMI: 0 empty, 1 bottle, 2 rinsed,
+        3 filled (>= FillSetpoint), 4 capped; the highest one reached wins."""
+        return tuple(self._code(b) for b in self.pockets)
+
+    def _code(self, bottle: Bottle | None) -> int:
+        if bottle is None:
+            return 0
+        if bottle.capped:
+            return 4
+        if round(bottle.level_ml) >= self.fill_setpoint_ml:
+            return 3
+        return 2 if bottle.rinsed else 1
+
     # --- Helper --------------------------------------------------------------------
     def _log(self, bottle: Bottle, text: str, warning: bool = False) -> None:
         self._events.append(Event.bottle(self._now, bottle.id, text, warning))

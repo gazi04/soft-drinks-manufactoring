@@ -38,6 +38,7 @@ class SimWrites:
     e_stop_ok: bool
     heartbeat: bool
     fill_level: int
+    anim: tuple[int, ...] = (0,) * 6  # HMI animation %MW70..75: C1 slots, C2 slots, 4 pocket codes
 
 
 class Plant:
@@ -146,4 +147,5 @@ class Plant:
             e_stop_ok=self.e_stop_ok,
             heartbeat=self.heartbeat.value,
             fill_level=s.fill_level,
+            anim=(self.c1.slot_bits(), self.c2.slot_bits(), *self.filler.pocket_codes()),
         )

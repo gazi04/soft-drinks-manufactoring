@@ -7,6 +7,7 @@ simulator itself never writes commands). Checks:
     C2 every bottle left the filler with >= FillSetpoint, rinsed and capped (0 audit warnings)
     C3 no simulator warnings (no slow tick, no foreign writer, no link loss)
     C4 no bottle lost
+    C5 the HMI animation words %MW70..75 in the PLC equal the plant (C1/C2 slots, pocket codes)
 
     uv run python tests/test_closed_loop.py          # about 3 minutes
     uv run python tests/test_closed_loop.py 5        # fewer bottles
@@ -80,6 +81,8 @@ async def main() -> None:
     stats = await loop.run(plc, plant, log, seconds=TIMEOUT_S, until=all_out, on_tick=on_tick)
     stats_tail = await loop.run(plc, plant, log, seconds=1.0)  # let the PLC count the last S6 pulse
     await task
+    # C5: the loop has stopped, so its last write is the plant's final state (no tick in between)
+    anim = (await hmi.read_holding_registers(am.ANIM_START, count=am.ANIM_COUNT)).registers
     await hmi_press(hmi, am.CMD, 2, "Stop")
     plc.close()
     hmi.close()
@@ -96,6 +99,8 @@ async def main() -> None:
               f"{len(out)} bottles out, levels {levels} ml, {len(bottle_warn)} audit warnings {bottle_warn[:3]}"),
         check("C3 simulator", not sim_warn, f"{len(sim_warn)} warnings {sim_warn[:3]}"),
         check("C4 nothing lost", not plant.filler.lost, f"lost {[b.id for b in plant.filler.lost]}"),
+        check("C5 animation words", anim == list(plant.writes().anim),
+              f"PLC %MW70..75 {anim}, plant {list(plant.writes().anim)}"),
     ]
     # the summary covers both runs: main run + the 1 s tail that counts the last S6 pulse
     stats.good_count_end = stats_tail.good_count_end

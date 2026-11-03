@@ -32,7 +32,7 @@ from simulator.events import Event, EventLog
 from simulator.machines.filler import FillerOutputs
 from simulator.plant import Plant
 from simulator.scenarios import ScenarioRunner, ScenarioSlot
-from simulator.plcs import STATE_NAMES, STEP_NAMES, FillerPlc, PlcCommError, PlcReplyError, PlcStatus
+from simulator.plcs import MODE_NAMES, STATE_NAMES, STEP_NAMES, FillerPlc, PlcCommError, PlcReplyError, PlcStatus
 
 VERIFY_EVERY = 10  # read the sensors back every 10 ticks (1 s): debugger force / second writer
 
@@ -53,7 +53,8 @@ class PlcWatcher:
         self.last = status
         if last is None:
             text = (
-                f"status: step {STEP_NAMES.get(status.step, status.step)}, "
+                f"status: mode {MODE_NAMES.get(status.mode, status.mode)}, "
+                f"step {STEP_NAMES.get(status.step, status.step)}, "
                 f"state {STATE_NAMES.get(status.state, status.state)}, GoodCount {status.good_count}"
             )
             events.append(Event.plc(now, text))
@@ -61,6 +62,9 @@ class PlcWatcher:
                 if on:
                     events.append(Event.plc(now, f"{name} active", warning=True))
             return events
+        if status.mode != last.mode:  # e.g. Stop after a PLC restart: Start would be ignored
+            events.append(Event.plc(now, f"mode {MODE_NAMES.get(last.mode, last.mode)} -> "
+                                         f"{MODE_NAMES.get(status.mode, status.mode)}"))
         if status.step != last.step:
             events.append(Event.plc(now, f"step {STEP_NAMES.get(last.step, last.step)} -> "
                                          f"{STEP_NAMES.get(status.step, status.step)}"))

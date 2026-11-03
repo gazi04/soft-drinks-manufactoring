@@ -238,3 +238,17 @@ def test_apply_setpoints():
     events = plant.apply_setpoints(330, 1000, 1500)
     assert [e.text.split(" is")[0] for e in events] == ["RinseTime 1000 ms"]
     assert plant.apply_setpoints(330, 1000, 1500) == []  # same value again: no repeat
+
+
+def test_writes_carry_hmi_animation_words():
+    plant = Plant()
+    assert plant.writes().anim == (0, 0, 0, 0, 0, 0)
+    plant.c1.slots[0] = Bottle(10)  # entry -> bit 0
+    plant.c1.slots[-1] = Bottle(11)  # at the door -> bit 7
+    plant.c2.slots[1] = Bottle(12)
+    f = plant.filler
+    f.pockets = [Bottle(1), Bottle(2, rinsed=True), Bottle(3, 500, rinsed=True), Bottle(4, 500, True, True)]
+    assert plant.writes().anim == (0b1000_0001, 0b10, 1, 2, 3, 4)
+    f.pockets[2].level_ml = 300  # underfilled: still "rinsed", not "filled"
+    f.fill_setpoint_ml = 500
+    assert plant.writes().anim[4] == 2

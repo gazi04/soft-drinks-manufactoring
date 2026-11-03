@@ -10,8 +10,8 @@ from simulator.scenarios import SCENARIOS, ScenarioSlot
 from simulator.ui import view
 
 
-def status(step=10, state=1, jam=False, comm=False) -> PlcStatus:
-    return PlcStatus(state, step, 193, jam, False, False, comm, 500, 2000, 1500)
+def status(step=10, state=1, jam=False, comm=False, mode=1) -> PlcStatus:
+    return PlcStatus(state, step, 193, jam, False, False, comm, 500, 2000, 1500, mode)
 
 
 def test_conveyor_slots_from_entry_to_exit():
@@ -81,3 +81,10 @@ def test_event_style_and_filters():
     assert [view.matches(e, "warnings") for e in (warning, plc, sim, bottle)] == [True, False, False, False]
     assert all(view.matches(e, "all") for e in (warning, plc, sim, bottle))
 
+
+def test_header_shows_the_mode_and_warns_when_start_would_be_ignored():
+    stats = LoopStats(ticks=5, dt_min=0.1, dt_max=0.1, status=status(step=0, state=0, mode=0))
+    text = view.header_text(stats, FillerPlc()).plain
+    assert "mode Stop" in text and "Start is ignored" in text and "hmi.py auto reset start" in text
+    stats.status = status(mode=1)
+    assert "mode Auto" in view.header_text(stats, FillerPlc()).plain

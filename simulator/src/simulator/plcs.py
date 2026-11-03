@@ -40,6 +40,9 @@ from pymodbus.exceptions import ModbusException
 
 from simulator import config
 from simulator.address_map import (
+    ANIM_COUNT,
+    ANIM_START,
+    MODE_REQ,
     ALARMS_COUNT,
     ALARMS_START,
     E_STOP_OK,
@@ -142,6 +145,14 @@ def encode_fill_level(ml: float) -> int:
     return max(0, min(INT_MAX, round(ml)))
 
 
+def encode_animation(w: SimWrites) -> list[int]:
+    """The 6 animation words %MW70..75 (C1 slots, C2 slots, 4 pocket codes)."""
+    words = [int(v) for v in w.anim]
+    assert len(words) == ANIM_COUNT and all(0 <= v <= INT_MAX for v in words)
+    return words
+
+
+MODE_NAMES = {0: "Stop", 1: "Auto", 2: "Manual"}
 STEP_NAMES = {0: "IDLE", 10: "WORK", 15: "WAIT_OUTFEED", 20: "INDEX", 900: "FAULT"}
 STATE_NAMES = {0: "Stopped", 1: "Running", 2: "Starved", 3: "Blocked", 9: "Fault"}
 ALARM_NAMES = ("Alm_IndexJam", "Alm_FillTimeout", "Alm_OutfeedBlocked", "Alm_CommLost")
@@ -161,6 +172,7 @@ class PlcStatus:
     fill_setpoint: int  # ml
     rinse_time_ms: int
     cap_time_ms: int
+    mode: int = 1  # ModeReq as the HMI set it: 0 Stop, 1 Auto, 2 Manual (default only for tests)
 
     @property
     def alarms(self) -> dict[str, bool]:
@@ -168,13 +180,13 @@ class PlcStatus:
         return dict(zip(ALARM_NAMES, flags))
 
 
-def decode_status(regs: list[int], alarm_bits: list[bool], setpoints: list[int]) -> PlcStatus:
+def decode_status(regs: list[int], alarm_bits: list[bool], setpoints: list[int], mode: int) -> PlcStatus:
     """regs = %MW50..%MW53 (State, Step, unused, GoodCount), alarm_bits = %MX5.0..5.3,
-    setpoints = %MW30..%MW32 (FillSetpoint, RinseTime, CapTime)."""
+    setpoints = %MW30..%MW32 (FillSetpoint, RinseTime, CapTime), mode = %MW1 (ModeReq)."""
     state, step, _unused, good_count = regs[:STATUS_COUNT]
     jam, fill_timeout, blocked, comm_lost = alarm_bits[:ALARMS_COUNT]
     fill, rinse, cap = setpoints[:SETPOINTS_COUNT]
-    return PlcStatus(state, step, good_count, jam, fill_timeout, blocked, comm_lost, fill, rinse, cap)
+    return PlcStatus(state, step, good_count, jam, fill_timeout, blocked, comm_lost, fill, rinse, cap, mode)
 
 
 # --- Async client ------------------------------------------------------------------
@@ -272,9 +284,10 @@ class FillerPlc:
         return decode_outputs(result.bits)
 
     async def write(self, w: SimWrites) -> None:
-        """One bulk write of the sensor block + one write of FillLevel."""
+        """One bulk write of the sensor block, FillLevel, and the 6 animation words."""
         await self._write_coils(SENSOR_BLOCK_START, encode_sensor_block(w))
         await self._write_register(FILL_LEVEL, encode_fill_level(w.fill_level))
+        await self._write_registers(ANIM_START, encode_animation(w))
 
     async def write_heartbeat(self, value: bool) -> None:
         """Only the heartbeat coil (first contact, stage 5)."""
@@ -289,7 +302,9 @@ class FillerPlc:
         setpoints = await self._finish(
             "read setpoints", client.read_holding_registers(FILL_SETPOINT, count=SETPOINTS_COUNT)
         )
-        return decode_status(regs.registers, alarms.bits, setpoints.registers)
+        client = self._live_client("read mode")
+        mode = await self._finish("read mode", client.read_holding_registers(MODE_REQ, count=1))  # read only
+        return decode_status(regs.registers, alarms.bits, setpoints.registers, mode.registers[0])
 
     async def verify_writes(self, w: SimWrites) -> list[str]:
         """Read the sensor block and FillLevel back; names of the signals that differ.
@@ -315,6 +330,14 @@ class FillerPlc:
         what = f"write coils {start}"
         client = self._live_client(what)
         await self._finish(what, client.write_coils(start, values))
+
+    async def _write_registers(self, start: int, values: list[int]) -> None:
+        addresses = set(range(start, start + len(values)))
+        if not addresses <= SIM_WRITE_REGISTERS:
+            raise ValueError(f"simulator may not write registers {sorted(addresses - SIM_WRITE_REGISTERS)}")
+        what = f"write registers {start}"
+        client = self._live_client(what)
+        await self._finish(what, client.write_registers(start, values))
 
     async def _write_register(self, address: int, value: int) -> None:
         if address not in SIM_WRITE_REGISTERS:

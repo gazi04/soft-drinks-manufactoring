@@ -19,11 +19,12 @@ from simulator.events import Event, Source
 from simulator.loop import LoopStats
 from simulator.machines.filler import CAP, ENTRY, FILL, RINSE
 from simulator.plant import Plant
-from simulator.plcs import STATE_NAMES, STEP_NAMES, FillerPlc
+from simulator.plcs import MODE_NAMES, STATE_NAMES, STEP_NAMES, FillerPlc
 from simulator.scenarios import ScenarioSlot
 
 ON, OFF = "●", "○"
 IDLE = 0
+MODE_AUTO = 1
 
 
 def lamp(name: str, on: bool) -> Text:
@@ -98,6 +99,8 @@ def header_text(stats: LoopStats | None, plc: FillerPlc) -> Text:
     status = stats.status if stats else None
     if status is None:
         return t
+    mode = MODE_NAMES.get(status.mode, status.mode)
+    t.append(f"  │  mode {mode}", style="" if status.mode == MODE_AUTO else "bold yellow")
     t.append(f"  │  step {STEP_NAMES.get(status.step, status.step)}"
              f"  │  state {STATE_NAMES.get(status.state, status.state)}"
              f"  │  GoodCount {status.good_count}  │  ")
@@ -105,7 +108,10 @@ def header_text(stats: LoopStats | None, plc: FillerPlc) -> Text:
     t.append(f"alarms: {', '.join(active)}" if active else "alarms: none", style="bold red" if active else "")
     if stats.ticks > 1:
         t.append(f"  │  dt {stats.dt_min * 1000:.0f}-{stats.dt_max * 1000:.0f} ms")
-    if status.step == IDLE:
+    if status.mode != MODE_AUTO:
+        t.append(f"\nmode {mode}: Start is ignored. Auto + start:  uv run python tests/hmi.py auto reset start",
+                 style="yellow")
+    elif status.step == IDLE:
         t.append("\nPLC in IDLE: start it with  uv run python tests/hmi.py auto reset start", style="yellow")
     return t
 

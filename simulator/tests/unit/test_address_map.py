@@ -25,6 +25,12 @@ def test_numbers_match_io_list():
     assert (am.MAN_C1, am.MAN_INDEX) == (8208, 8213)
 
 
+def test_animation_words():
+    assert (am.ANIM_C1, am.ANIM_C2, am.ANIM_POCKETS) == (1094, 1095, 1096)  # %MW70, 71, 72
+    anim = set(range(am.ANIM_START, am.ANIM_START + am.ANIM_COUNT))
+    assert anim == set(range(1094, 1100)) and anim <= am.SIM_WRITE_REGISTERS
+
+
 def test_sensor_block_is_one_contiguous_write():
     block = am.SENSOR_BLOCK
     assert block[0] == am.SENSOR_BLOCK_START == 8192

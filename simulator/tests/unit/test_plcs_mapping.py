@@ -10,6 +10,7 @@ from simulator.plcs import (
     FillerPlc,
     decode_outputs,
     decode_status,
+    encode_animation,
     encode_fill_level,
     encode_sensor_block,
     foreign_writes,
@@ -47,7 +48,7 @@ def test_each_field_lands_on_its_coil(field, address):
 
 
 def test_unused_coil_always_false():
-    all_on = writes(**{f: True for f in SimWrites.__dataclass_fields__ if f != "fill_level"})
+    all_on = writes(**{f: True for f in SimWrites.__dataclass_fields__ if f not in ("fill_level", "anim")})
     block = encode_sensor_block(all_on)
     assert block[am.UNUSED_MX0_7 - am.SENSOR_BLOCK_START] is False
     assert sum(block) == 10
@@ -61,11 +62,17 @@ def test_fill_level_clamped_to_int():
 
 
 def test_decode_status():
-    s = decode_status([1, 20, 0, 42], [False, True, False, True, False, False, False, False], [500, 2000, 1500])
-    assert (s.state, s.step, s.good_count) == (1, 20, 42)
+    s = decode_status([1, 20, 0, 42], [False, True, False, True, False, False, False, False], [500, 2000, 1500], 2)
+    assert (s.state, s.step, s.good_count, s.mode) == (1, 20, 42, 2)
     assert (s.fill_setpoint, s.rinse_time_ms, s.cap_time_ms) == (500, 2000, 1500)
     assert s.alm_fill_timeout and s.alm_comm_lost
     assert not (s.alm_index_jam or s.alm_outfeed_blocked)
+
+
+def test_encode_animation():
+    assert encode_animation(writes(anim=(0b1000_0001, 0b1, 0, 2, 3, 4))) == [129, 1, 0, 2, 3, 4]
+    with pytest.raises(AssertionError):
+        encode_animation(writes(anim=(1, 2, 3)))  # always 6 words
 
 
 def test_client_refuses_hmi_addresses():
@@ -75,6 +82,8 @@ def test_client_refuses_hmi_addresses():
         asyncio.run(plc._write_register(am.CMD, 1))
     with pytest.raises(ValueError):
         asyncio.run(plc._write_coils(am.MAN_C1, [True]))
+    with pytest.raises(ValueError):  # animation block one word too long would reach %MW76 (not ours)
+        asyncio.run(plc._write_registers(am.ANIM_START, [0] * 7))
     with pytest.raises(ValueError):  # bulk write one coil too long would reach %MX1.3
         asyncio.run(plc._write_coils(am.SENSOR_BLOCK_START, [False] * 12))
 

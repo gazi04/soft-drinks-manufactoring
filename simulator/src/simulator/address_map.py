@@ -51,6 +51,17 @@ UNUSED_MX0_7 = mx(0, 7)  # not used by the PLC; written 0 to keep the bulk write
 
 FILL_LEVEL = mw(12)  # ml in the bottle at the fill station
 
+# --- Written by the simulator, read by the HMI, ignored by the PLC: animation ------
+# Report section 6.2 / 8.3. The physical truth (where each bottle is) exists only in the
+# simulator; FUXA can only read PLC memory, so the simulator puts it into spare words.
+ANIM_C1 = mw(70)  # C1 slots, bit i = bottle in slot i (bit 0 = entry, bit 7 = at the door)
+ANIM_C2 = mw(71)  # C2 slots, bit 0 = entry (after the filler), bit 7 = exit (labeler)
+ANIM_POCKETS = mw(72)  # %MW72..75: filler pockets ENTRY, RINSE, FILL, CAP, one state code each
+ANIM_START = ANIM_C1  # one bulk write of %MW70..75 per tick
+ANIM_COUNT = 6
+# Pocket state codes (the highest one reached)
+POCKET_EMPTY, POCKET_BOTTLE, POCKET_RINSED, POCKET_FILLED, POCKET_CAPPED = 0, 1, 2, 3, 4
+
 # --- Written by the simulator: signals from other machines ("wiring") ------------
 PRODUCT_AVAILABLE = mx(1, 0)  # from the syrup room; held TRUE until it exists
 E_STOP_OK = mx(1, 1)  # E-stop chain healthy
@@ -90,4 +101,4 @@ MAN_INDEX = mx(2, 5)
 
 # --- Ownership: the only addresses the simulator is allowed to write -------------
 SIM_WRITE_COILS = frozenset(SENSOR_BLOCK)
-SIM_WRITE_REGISTERS = frozenset({FILL_LEVEL})
+SIM_WRITE_REGISTERS = frozenset({FILL_LEVEL, *range(ANIM_START, ANIM_START + ANIM_COUNT)})

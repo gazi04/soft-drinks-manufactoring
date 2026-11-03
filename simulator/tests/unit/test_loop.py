@@ -25,14 +25,14 @@ from test_plcs_link import free_port
 logging.getLogger("pymodbus").setLevel(logging.CRITICAL)
 
 
-def status(step=0, state=0, good=0, jam=False, comm=False) -> PlcStatus:
-    return PlcStatus(state, step, good, jam, False, False, comm, 500, 2000, 1500)
+def status(step=0, state=0, good=0, jam=False, comm=False, mode=1) -> PlcStatus:
+    return PlcStatus(state, step, good, jam, False, False, comm, 500, 2000, 1500, mode)
 
 
 def test_watcher_reports_changes_only():
     w = loop.PlcWatcher()
     first = w.update(status(comm=True), 0.0)
-    assert [e.text for e in first] == ["status: step IDLE, state Stopped, GoodCount 0", "Alm_CommLost active"]
+    assert [e.text for e in first] == ["status: mode Auto, step IDLE, state Stopped, GoodCount 0", "Alm_CommLost active"]
     assert w.update(status(comm=True), 0.1) == []  # nothing changed
     texts = [e.text for e in w.update(status(step=10, state=1), 0.2)]
     assert texts == ["step IDLE -> WORK", "state Stopped -> Running", "Alm_CommLost cleared"]
@@ -118,6 +118,30 @@ def test_queued_command_is_applied_at_the_next_tick_and_reaches_the_plc():
         await reader.connect()
         e_stop_ok = (await reader.read_coils(am.E_STOP_OK, count=1)).bits[0]
         assert e_stop_ok is False  # the wire value was written to the PLC
+        reader.close()
+        plc.close()
+        await server.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_watcher_reports_mode_changes():
+    w = loop.PlcWatcher()
+    w.update(status(mode=0), 0.0)
+    assert [e.text for e in w.update(status(mode=1), 0.1)] == ["mode Stop -> Auto"]
+
+
+def test_animation_words_reach_the_plc():
+    async def scenario() -> None:
+        port = free_port()
+        server = await start_fake_plc(port)
+        plc, plant, log = FillerPlc(port=port), Plant(), EventLog()
+        plant.supply.add(1)  # one bottle on C1's entry (C1 motor OFF: it stays there)
+        await loop.run(plc, plant, log, seconds=0.3)
+        reader = AsyncModbusTcpClient("127.0.0.1", port=port)
+        await reader.connect()
+        words = (await reader.read_holding_registers(am.ANIM_START, count=am.ANIM_COUNT)).registers
+        assert words == list(plant.writes().anim) == [1, 0, 0, 0, 0, 0]
         reader.close()
         plc.close()
         await server.shutdown()
