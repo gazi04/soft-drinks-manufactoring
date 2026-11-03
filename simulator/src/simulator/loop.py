@@ -31,7 +31,7 @@ from simulator.commands import CommandQueue
 from simulator.events import Event, EventLog
 from simulator.machines.filler import FillerOutputs
 from simulator.plant import Plant
-from simulator.scenarios import ScenarioRunner
+from simulator.scenarios import ScenarioRunner, ScenarioSlot
 from simulator.plcs import STATE_NAMES, STEP_NAMES, FillerPlc, PlcCommError, PlcReplyError, PlcStatus
 
 VERIFY_EVERY = 10  # read the sensors back every 10 ticks (1 s): debugger force / second writer
@@ -105,7 +105,7 @@ async def run(
     tick_s: float = config.TICK_S,
     on_tick=None,
     commands: CommandQueue | None = None,
-    scenario: ScenarioRunner | None = None,
+    scenario: ScenarioRunner | ScenarioSlot | None = None,
 ) -> LoopStats:
     """Run the loop until `seconds` have passed, `until()` is true or `stop` is set.
 

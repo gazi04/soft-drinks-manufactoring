@@ -79,3 +79,14 @@ def test_builtin_scenarios_wait_for_the_plc_first(name):
     # only "set up" commands may come before it (gaps: supply rate 0 before bottles queue up)
     before = steps[: steps.index(first_condition)]
     assert all(s.command is not None and s.command.name == "supply_rate" for s in before)
+
+
+def test_scenario_slot_is_empty_until_started_then_delegates():
+    from simulator.scenarios import ScenarioSlot
+
+    plant, slot = Plant(), ScenarioSlot()
+    assert slot.due(plant, status(step=10)) == ([], [])
+    slot.start(Scenario("s", "", (Step(0, Command("index_jam", True)),)))
+    commands, events = slot.due(plant, status(step=10))
+    assert commands == [Command("index_jam", True)] and len(events) == 1
+    assert slot.runner.done

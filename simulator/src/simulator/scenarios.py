@@ -126,6 +126,25 @@ class ScenarioRunner:
         return commands, events
 
 
+class ScenarioSlot:
+    """A place for one scenario that can be started while the loop runs (control panel).
+
+    The loop only calls due(), like on a ScenarioRunner; an empty slot gives nothing.
+    Starting a new scenario replaces the old one, which stops where it was.
+    """
+
+    def __init__(self) -> None:
+        self.runner: ScenarioRunner | None = None
+
+    def start(self, scenario: Scenario) -> None:
+        self.runner = ScenarioRunner(scenario)
+
+    def due(self, plant: Plant, status: PlcStatus | None) -> tuple[list[Command], list[Event]]:
+        if self.runner is None:
+            return [], []
+        return self.runner.due(plant, status)
+
+
 # --- Built-in scenarios ------------------------------------------------------------
 def _c(name: str, value) -> Command:
     return Command(name, value)
