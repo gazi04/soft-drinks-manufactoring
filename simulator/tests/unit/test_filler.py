@@ -104,6 +104,19 @@ def test_long_dt_gives_several_shifts():
     assert rig.filler.shifts == 2
 
 
+def test_jammed_belt_does_not_move_and_gives_no_s8_edge():
+    rig = Rig()
+    rig.filler.pockets[ENTRY] = Bottle(1)
+    rig.filler.index_jammed = True
+    s8 = [s.s8 for s in rig.run(6.0, BELT)]  # motor ON longer than the PLC's 5 s jam timer
+    assert rig.filler.shifts == 0
+    assert rising_edges(s8, before=True) == 0
+    assert rig.filler.pockets[ENTRY].id == 1
+    rig.filler.index_jammed = False  # jam cleared: the same motor moves the belt again
+    rig.run(1.5, BELT)
+    assert rig.filler.shifts == 1
+
+
 # --- 3b: door ----------------------------------------------------------------------
 def test_door_pulse_admits_exactly_one_bottle():
     rig = Rig(n_bottles=8)

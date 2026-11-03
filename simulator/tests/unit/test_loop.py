@@ -15,6 +15,7 @@ from pymodbus.server import ModbusTcpServer
 
 from simulator import address_map as am
 from simulator import loop
+from simulator.commands import CommandQueue
 from simulator.events import EventLog, Source
 from simulator.plant import Plant
 from simulator.plcs import FillerPlc, PlcStatus
@@ -93,5 +94,32 @@ def test_loop_without_plc_keeps_running_with_outputs_off():
         texts = sim_texts(log)
         assert len([t for t in texts if "not reachable" in t]) == 1  # logged once, not every tick
         assert plant.c1.count == 1  # C1 motor OFF: the first bottle stays at the entry
+
+    asyncio.run(scenario())
+
+
+def test_queued_command_is_applied_at_the_next_tick_and_reaches_the_plc():
+    async def scenario() -> None:
+        port = free_port()
+        server = await start_fake_plc(port)
+        plc, plant, log = FillerPlc(port=port), Plant(), EventLog()
+        commands = CommandQueue()
+
+        def on_tick(stats: loop.LoopStats) -> None:
+            if stats.ticks == 3:
+                commands.put("e_stop", True)  # like a panel button pressed between two ticks
+
+        stats = await loop.run(plc, plant, log, seconds=0.6, on_tick=on_tick, commands=commands)
+        assert plant.e_stop_ok is False
+        assert "command: e_stop = True" in sim_texts(log)
+        assert stats.status is not None and stats.status.step == 0  # last status kept for callers
+
+        reader = AsyncModbusTcpClient("127.0.0.1", port=port)
+        await reader.connect()
+        e_stop_ok = (await reader.read_coils(am.E_STOP_OK, count=1)).bits[0]
+        assert e_stop_ok is False  # the wire value was written to the PLC
+        reader.close()
+        plc.close()
+        await server.shutdown()
 
     asyncio.run(scenario())

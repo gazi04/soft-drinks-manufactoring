@@ -100,6 +100,9 @@ class Filler:
         self.s6_pulse_s = s6_pulse_s
         # Underfill audit limit; the plant later copies the PLC's FillSetpoint here
         self.fill_setpoint_ml = config.DEFAULT_FILL_SETPOINT_ML
+        # Fault injection (stage 7): the belt is blocked mechanically. The motor may be ON,
+        # but the belt does not move, so S8 never comes and the PLC's jam timer fires.
+        self.index_jammed = False
 
         self.pockets: list[Bottle | None] = [None, None, None, None]  # ENTRY .. CAP
         self.shifts = 0  # pitch boundaries crossed since the start
@@ -125,8 +128,8 @@ class Filler:
         # 1. The S6 pulse runs down (before a new shift may restart it)
         self._s6_timer = max(0.0, self._s6_timer - dt)
 
-        # 2. Index belt
-        if out.index_motor:
+        # 2. Index belt (does not move while jammed, even with the motor ON)
+        if out.index_motor and not self.index_jammed:
             self._phase += dt
             # 'while': after a long dt several pitches are due
             while self._phase >= self.pitch_s - _EPSILON:

@@ -31,6 +31,15 @@ uv run python tests/hmi.py status             # step, state, GoodCount, alarms
 uv run python tests/hmi.py stop
 ```
 
+## Fault scenarios
+
+```bash
+uv run simulator --list-scenarios                          # names + one-line description
+uv run simulator --headless --rate 0 --add 6 --scenario index_jam
+```
+
+A scenario is a fixed list of commands (`src/simulator/scenarios.py`): jam the index belt, press the E-stop, stop the syrup, stop the labeler, freeze the heartbeat, slow the fill flow, or add bottles in groups. It waits until the PLC runs, so press Start before or after. It never presses Reset or Start itself: when a fault scenario has removed the cause it prints what to press (`tests/hmi.py reset start`). Commands are logged as `SIM  command: index_jam = True`, the PLC's reaction as PLC lines next to it.
+
 ## Reading the log
 
 ```
@@ -50,6 +59,8 @@ uv run pytest                                # unit tests, no PLC needed (some u
 uv run python tests/test_link.py             # Modbus first contact with the real PLC (heartbeat only)
 uv run python tests/test_link.py --restart   # + reconnect after `docker compose restart openplc`
 uv run python tests/test_closed_loop.py      # 20 bottles through the real PLC, ~2.5 min
+uv run python tests/test_scenarios.py --quick  # 9 fault scenarios against the real PLC, ~12 min (without --quick ~15 min)
+uv run python tests/test_scenarios.py e_stop   # one or a few by name
 ```
 
 Never run a `tests/*.py` script while the simulator runs: both write the sensors (the simulator would report a "foreign writer").

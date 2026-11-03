@@ -1,7 +1,7 @@
 """The tick loop: PLC outputs -> physics -> sensors -> PLC, about every 0.1 s.
 
 One tick (report section 7.3):
-    1. (stage 7) apply the commands queued by the control panel
+    1. apply the queued commands (panel, scenario, test)   commands.CommandQueue.apply()
     2. read the PLC outputs                       plcs.FillerPlc.read_outputs()
     3. move the world by the measured dt          plant.Plant.step()
     4. write sensors + wiring values to the PLC   plcs.FillerPlc.write()
@@ -27,9 +27,11 @@ import time
 from dataclasses import dataclass, field
 
 from simulator import config
+from simulator.commands import CommandQueue
 from simulator.events import Event, EventLog
 from simulator.machines.filler import FillerOutputs
 from simulator.plant import Plant
+from simulator.scenarios import ScenarioRunner
 from simulator.plcs import STATE_NAMES, STEP_NAMES, FillerPlc, PlcCommError, PlcReplyError, PlcStatus
 
 VERIFY_EVERY = 10  # read the sensors back every 10 ticks (1 s): debugger force / second writer
@@ -79,6 +81,7 @@ class LoopStats:
     seconds: float = 0.0
     good_count_start: int | None = None
     good_count_end: int | None = None
+    status: PlcStatus | None = None  # last PLC status read (None until the first answer)
     problems: set[str] = field(default_factory=set)  # distinct problems already logged
 
     def summary(self) -> str:
@@ -101,12 +104,22 @@ async def run(
     stop: asyncio.Event | None = None,
     tick_s: float = config.TICK_S,
     on_tick=None,
+    commands: CommandQueue | None = None,
+    scenario: ScenarioRunner | None = None,
 ) -> LoopStats:
-    """Run the loop until `seconds` have passed, `until()` is true or `stop` is set."""
+    """Run the loop until `seconds` have passed, `until()` is true or `stop` is set.
+
+    `commands`: queue filled by the caller (panel, test); applied at the start of every
+    tick, the only place where the world changes from outside the physics.
+    `scenario`: puts its due commands on that queue first (one is made if none is given);
+    its conditions see the PLC status of the previous tick.
+    """
     stats = LoopStats()
     watcher = PlcWatcher()
     link_was_ok = False
     last_writes = None  # what the PLC should hold from our last write
+    if scenario is not None and commands is None:
+        commands = CommandQueue()
     start = last = time.monotonic()
     deadline = start
 
@@ -121,6 +134,15 @@ async def run(
         dt, last = now - last, now
         if stats.ticks > 0:
             stats.dt_min, stats.dt_max = min(stats.dt_min, dt), max(stats.dt_max, dt)
+
+        # 1. Commands, before anything is read or moved
+        if scenario is not None:
+            due, events = scenario.due(plant, stats.status)
+            log.extend(events)
+            for command in due:
+                commands.put_command(command)
+        if commands is not None:
+            log.extend(commands.apply(plant))
 
         # 2. Read the PLC outputs (link down: outputs OFF, like a stopped PLC)
         out = FillerOutputs()
@@ -150,6 +172,7 @@ async def run(
                 await plc.write(writes)
                 last_writes = writes
                 status = await plc.read_status()
+                stats.status = status
                 log.extend(watcher.update(status, plant.now))
                 log.extend(plant.apply_setpoints(status.fill_setpoint, status.rinse_time_ms, status.cap_time_ms))
                 if stats.good_count_start is None:
