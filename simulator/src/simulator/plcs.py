@@ -142,6 +142,11 @@ def encode_fill_level(ml: float) -> int:
     return max(0, min(INT_MAX, round(ml)))
 
 
+STEP_NAMES = {0: "IDLE", 10: "WORK", 15: "WAIT_OUTFEED", 20: "INDEX", 900: "FAULT"}
+STATE_NAMES = {0: "Stopped", 1: "Running", 2: "Starved", 3: "Blocked", 9: "Fault"}
+ALARM_NAMES = ("Alm_IndexJam", "Alm_FillTimeout", "Alm_OutfeedBlocked", "Alm_CommLost")
+
+
 @dataclass(frozen=True)
 class PlcStatus:
     """What the PLC reports about itself (read for the event log and the audit)."""
@@ -156,6 +161,11 @@ class PlcStatus:
     fill_setpoint: int  # ml
     rinse_time_ms: int
     cap_time_ms: int
+
+    @property
+    def alarms(self) -> dict[str, bool]:
+        flags = (self.alm_index_jam, self.alm_fill_timeout, self.alm_outfeed_blocked, self.alm_comm_lost)
+        return dict(zip(ALARM_NAMES, flags))
 
 
 def decode_status(regs: list[int], alarm_bits: list[bool], setpoints: list[int]) -> PlcStatus:
@@ -284,8 +294,9 @@ class FillerPlc:
     async def verify_writes(self, w: SimWrites) -> list[str]:
         """Read the sensor block and FillLevel back; names of the signals that differ.
 
-        Call it right after write(w) (same connection, so our write is already there).
-        Empty list = nobody else writes our addresses.
+        Pass the values written LAST tick and call it before the next write: the
+        check then covers the whole gap between two ticks, where a second writer
+        acts. Empty list = nobody else writes our addresses (the PLC never does).
         """
         client = self._live_client("read back sensors")
         coils = await self._finish(

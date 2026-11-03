@@ -18,6 +18,7 @@ Severity:
 """
 
 from collections import deque
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import StrEnum
 from pathlib import Path
@@ -80,10 +81,16 @@ class EventLog:
     can still be checked when older events have been dropped.
     """
 
-    def __init__(self, max_events: int = 1000, file_path: Path | None = None) -> None:
+    def __init__(
+        self,
+        max_events: int = 1000,
+        file_path: Path | None = None,
+        echo: Callable[[Event], None] | None = None,
+    ) -> None:
         self._events: deque[Event] = deque(maxlen=max_events)
         self.warning_count = 0
         self._file = open(file_path, "a", encoding="utf-8") if file_path else None
+        self._echo = echo  # e.g. print each event to the console (headless mode)
 
     def add(self, event: Event) -> None:
         self._events.append(event)  # the oldest event drops out when full
@@ -92,6 +99,8 @@ class EventLog:
         if self._file:
             self._file.write(event.format() + "\n")
             self._file.flush()  # the line is on disk even if the simulator crashes
+        if self._echo:
+            self._echo(event)
 
     def extend(self, events: list[Event]) -> None:
         for event in events:
