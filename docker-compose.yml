@@ -1,12 +1,15 @@
 services:
   openplc:
-    image: ghcr.io/autonomy-logic/openplc-runtime:latest
+    # pinned (v4.3.1): a moving :latest would re-create the container and the build volume
+    # would then hold old binaries; update on purpose = new digest + `docker volume rm` the build volume
+    image: ghcr.io/autonomy-logic/openplc-runtime@sha256:2ca9fc611f25c3ad0471b996a4bf27507ac112612292426ca6d5ca4bf06e97e6
     ports:
       - "8443:8443" # editor connection
       - "502:502" # Modbus TCP
     cap_add: [SYS_NICE, SYS_RESOURCE]
     volumes:
       - openplc-data:/var/run/runtime
+      - openplc-build:/workdir/build # compiled PLC program (libplc_*.so): survives down/up and re-creation
     restart: unless-stopped
 
   fuxa:
@@ -21,5 +24,6 @@ services:
 
 volumes:
   openplc-data:
+  openplc-build:
   fuxa-plugins:
   fuxa-daq:
