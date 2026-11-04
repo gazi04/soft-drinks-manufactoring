@@ -26,6 +26,8 @@ import time
 
 from pymodbus.client import ModbusTcpClient
 
+from hmi_guard import claim_plant
+
 HOST = "127.0.0.1"
 PORT = 502
 
@@ -247,6 +249,7 @@ def run_checks(client):
 
 
 def main():
+    claim_plant("test_station_jobs.py")  # writes the sensors: never with the simulator (plant_lock.py)
     heartbeat = Heartbeat()
     heartbeat.start()
     client = ModbusTcpClient(HOST, port=PORT)

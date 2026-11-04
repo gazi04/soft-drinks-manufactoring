@@ -110,6 +110,12 @@ def main() -> None:
         return
     if args.scenario and args.scenario not in SCENARIOS:
         raise SystemExit(f"unknown scenario {args.scenario!r} (known: {', '.join(SCENARIOS)})")
+    from simulator import plant_lock
+
+    try:  # before Textual starts, so a second simulator gets a plain message
+        plant_lock.acquire(args.host, args.port, "simulator" + (" --headless" if args.headless else " (panel)"))
+    except plant_lock.PlantLockError as error:
+        raise SystemExit(f"simulator: {error}") from None
     if args.headless:
         asyncio.run(run_headless(args))
     else:

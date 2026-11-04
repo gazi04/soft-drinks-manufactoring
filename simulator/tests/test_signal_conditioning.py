@@ -18,6 +18,8 @@ import time
 
 from pymodbus.client import ModbusTcpClient
 
+from hmi_guard import claim_plant
+
 HOST = "127.0.0.1"
 PORT = 502
 
@@ -60,6 +62,7 @@ def hold_s7(client, value, seconds):
 
 
 def main():
+    claim_plant("test_signal_conditioning.py")  # writes the sensors: never with the simulator (plant_lock.py)
     client = ModbusTcpClient(HOST, port=PORT)
     if not client.connect():
         raise SystemExit(f"Cannot connect to OpenPLC Modbus on {HOST}:{PORT}")

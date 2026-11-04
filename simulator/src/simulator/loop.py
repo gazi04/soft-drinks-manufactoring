@@ -26,7 +26,7 @@ import asyncio
 import time
 from dataclasses import dataclass, field
 
-from simulator import config
+from simulator import config, plant_lock
 from simulator.commands import CommandQueue
 from simulator.events import Event, EventLog
 from simulator.machines.filler import FillerOutputs
@@ -118,6 +118,8 @@ async def run(
     `scenario`: puts its due commands on that queue first (one is made if none is given);
     its conditions see the PLC status of the previous tick.
     """
+    # one plant writer per PLC: a second simulator / test script stops here (plant_lock.py)
+    plant_lock.acquire(plc.host, plc.port, "simulator loop")
     stats = LoopStats()
     watcher = PlcWatcher()
     link_was_ok = False

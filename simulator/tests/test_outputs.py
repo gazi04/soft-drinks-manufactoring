@@ -23,6 +23,8 @@ import time
 
 from pymodbus.client import ModbusTcpClient
 
+from hmi_guard import claim_plant, warn_if_fuxa
+
 HOST = "127.0.0.1"
 PORT = 502
 
@@ -68,6 +70,7 @@ class Heartbeat(threading.Thread):
 
     def __init__(self):
         super().__init__(daemon=True)
+        claim_plant("PLC test script", HOST, PORT)  # before the first write (heartbeat)
         self.stop_event = threading.Event()
 
     def run(self):
@@ -157,6 +160,8 @@ def write_defaults(client):
 
 def prepare(client):
     """Healthy signals, default setpoints, inputs off, alarms reset, Auto mode, Step 0."""
+    warn_if_fuxa("PLC test script")  # it writes the HMI's addresses too (issue I4)
+    claim_plant("PLC test script", HOST, PORT)  # writes the sensors: never with the simulator
     clear_inputs(client)
     client.write_coil(E_STOP_OK, True)
     client.write_coil(PRODUCT_AVAILABLE, True)

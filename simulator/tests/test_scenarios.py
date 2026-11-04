@@ -29,6 +29,8 @@ from pathlib import Path
 
 from pymodbus.client import AsyncModbusTcpClient
 
+from hmi_guard import warn_if_fuxa
+
 from simulator import address_map as am
 from simulator import config, loop
 from simulator.commands import Command
@@ -456,6 +458,7 @@ ALL = {f.__name__: f for f in (gaps, no_product, index_jam, slow_fill, e_stop, h
 
 
 async def main() -> None:
+    warn_if_fuxa("test_scenarios.py")  # acts as the HMI (issue I4)
     logging.getLogger("pymodbus").setLevel(logging.CRITICAL)
     quick = "--quick" in sys.argv
     names = [a for a in sys.argv[1:] if not a.startswith("--")] or list(ALL)

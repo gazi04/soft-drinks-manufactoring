@@ -21,6 +21,8 @@ import time
 
 from pymodbus.client import ModbusTcpClient
 
+from hmi_guard import claim_plant
+
 HOST = "127.0.0.1"
 PORT = 502
 
@@ -218,6 +220,7 @@ def part_with_done(client):
 
 
 def main():
+    claim_plant("test_sequencer.py")  # writes the sensors: never with the simulator (plant_lock.py)
     with_done = "--done" in sys.argv
     heartbeat = Heartbeat()
     heartbeat.start()

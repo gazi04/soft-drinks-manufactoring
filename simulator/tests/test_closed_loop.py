@@ -24,6 +24,8 @@ from pathlib import Path
 
 from pymodbus.client import AsyncModbusTcpClient
 
+from hmi_guard import warn_if_fuxa
+
 from simulator import address_map as am
 from simulator import config, loop
 from simulator.events import EventLog, Source
@@ -46,6 +48,7 @@ async def hmi_press(hmi: AsyncModbusTcpClient, address: int, value: int, label: 
 
 
 async def main() -> None:
+    warn_if_fuxa("test_closed_loop.py")  # acts as the HMI (issue I4)
     logging.getLogger("pymodbus").setLevel(logging.CRITICAL)
     log_path = Path("logs") / time.strftime("closed-loop-%Y%m%d-%H%M%S.log")
     log_path.parent.mkdir(exist_ok=True)

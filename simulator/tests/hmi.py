@@ -1,4 +1,7 @@
-"""Minimal HMI from the command line, until the FUXA screens exist.
+"""Minimal HMI from the command line (FUXA's header buttons do the same since FUXA stage 2).
+
+Do not use it while an operator works in FUXA: both write Cmd / ModeReq (one writer per
+address, roadmap issue I4). The test scripts still use it.
 
 The simulator must never write commands, modes or setpoints (one-writer rule):
 those belong to the HMI. For the closed-loop tests (stage 6 on) somebody still has
@@ -20,6 +23,8 @@ import sys
 import time
 
 from pymodbus.client import ModbusTcpClient
+
+from hmi_guard import warn_if_fuxa
 
 from simulator import address_map as am
 from simulator import config
@@ -53,6 +58,7 @@ def main() -> None:
             if word == "status":
                 status(client)
                 continue
+            warn_if_fuxa("hmi.py")  # this script is a second HMI next to FUXA (issue I4)
             address, value = (COMMANDS | MODES)[word]
             client.write_register(address, value)
             time.sleep(0.2)  # a few PLC scans

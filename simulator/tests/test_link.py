@@ -24,6 +24,8 @@ import time
 
 from pymodbus.client import ModbusTcpClient
 
+from hmi_guard import claim_plant
+
 from simulator import config
 from simulator.address_map import CMD, HEARTBEAT
 from simulator.plcs import FillerPlc, PlcCommError
@@ -142,6 +144,7 @@ async def restart_check(plc: FillerPlc) -> bool:
 
 
 async def main() -> None:
+    claim_plant("test_link.py")  # writes the sensors: never with the simulator (plant_lock.py)
     logging.getLogger("pymodbus").setLevel(logging.CRITICAL)  # our own lines only
     plc = FillerPlc()
     hmi = ModbusTcpClient(config.PLC_HOST, port=config.PLC_PORT)  # acts as the HMI (Reset only)
