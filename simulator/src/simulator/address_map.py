@@ -85,6 +85,9 @@ ALM_COMM_LOST = mx(5, 3)
 ALARMS_START = ALM_INDEX_JAM  # one bulk read of the 4 alarm coils
 ALARMS_COUNT = 4
 
+# --- Written by the PLC, read only by the HMI: conditioned signals (stage 3) -----
+JOG_BLOCK = mx(3, 2)  # a manual button held > 10 s (or a closed HMI page): manual outputs ignored until all released
+
 # --- Written by the HMI: the simulator NEVER writes these ------------------------
 CMD = mw(0)  # 1 Start, 2 Stop, 3 Reset
 MODE_REQ = mw(1)  # 0 Stop, 1 Auto, 2 Manual

@@ -92,6 +92,8 @@ PROGRAM main
     Fill_Timer : TON; (* Fill timeout: 10 s with the fill valve open in WORK *)
     Blocked_Timer : TON; (* Blocked too long: 2 min in WAIT_OUTFEED *)
     Entry_Load : BOOL AT %MX3.1 := FALSE; (* Entry pocket loaded by the door, belt not moved yet: set by Req_Door, reset by S8_Edge. Blocks a second door pulse after a stop in INDEX *)
+    Jog_Block : BOOL AT %MX3.2 := FALSE; (* Jog watchdog (HMI issue I3): a manual button held > 10 s, e.g. HMI page closed while pressing it. Manual outputs ignored until all Man_* are released *)
+    Jog_TON : TON; (* Jog watchdog timer: any Man_* ON continuously for 10 s *)
   END_VAR
 
 {
@@ -46303,8 +46305,5496 @@ PROGRAM main
       "handleBranches": []
     },
     {
+      "id": "rung_main_12cfb034-92e3-405f-885c-7eabf21efb51",
+      "comment": "SECTION 6 OUTPUTS. Jog watchdog 1/2 (HMI issue I3): any manual button ON for 10 s (lost mouse-up, closed HMI page) -> set Jog_Block. The six Man_* contacts in parallel = OR; Jog_TON only reaches Q if at least one button stays pressed without a break for 10 s",
+      "defaultBounds": [
+        300,
+        100
+      ],
+      "reactFlowViewport": [
+        678,
+        542
+      ],
+      "nodes": [
+        {
+          "id": "left-rail-rung_main_12cfb034-92e3-405f-885c-7eabf21efb51",
+          "type": "powerRail",
+          "position": {
+            "x": 0,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 3,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "left-rail",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "right": -3
+              }
+            },
+            "numericId": "9971022",
+            "variant": "left",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "PARALLEL_OPEN_332bfa81-3f6a-4c86-ada2-09c77b8ad2c9",
+          "type": "parallel",
+          "position": {
+            "x": 23,
+            "y": 49
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 23,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 49
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "input-top",
+                "position": "top",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 27,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 51
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "output-down",
+                "position": "bottom",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 23,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 49
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "input-top",
+                "position": "top",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 27,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 51
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "output-down",
+                "position": "bottom",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 23,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 1
+              },
+              "id": "input",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "left": 3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 27,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 4,
+                "y": 1
+              },
+              "id": "output-right",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "right": 3
+              }
+            },
+            "numericId": "8939123",
+            "parallelInputConnector": {
+              "glbPosition": {
+                "x": 25,
+                "y": 49
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 0
+              },
+              "id": "input-top",
+              "position": "top",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 1
+              }
+            },
+            "parallelOutputConnector": {
+              "glbPosition": {
+                "x": 25,
+                "y": 51
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 2
+              },
+              "id": "output-down",
+              "position": "bottom",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "bottom": 1
+              }
+            },
+            "parallelCloseReference": "PARALLEL_CLOSE_f9ce963b-b236-4f7c-abb6-98db8cf62c88",
+            "type": "open",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 4,
+          "height": 2,
+          "measured": {
+            "width": 4,
+            "height": 2
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_7028a4bb-7f41-43db-bc02-eaf54bb23c69",
+          "type": "contact",
+          "position": {
+            "x": 72,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "default",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 72,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 96,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "4307499",
+            "variable": {
+              "id": "",
+              "name": "Man_C1",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "PARALLEL_OPEN_3c17af47-4e8b-456b-8c42-9736a3b27e5b",
+          "type": "parallel",
+          "position": {
+            "x": 23,
+            "y": 141
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 23,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 141
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "input-top",
+                "position": "top",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 27,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 143
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "output-down",
+                "position": "bottom",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 23,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 141
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "input-top",
+                "position": "top",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 27,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 143
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "output-down",
+                "position": "bottom",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 23,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 1
+              },
+              "id": "input",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "left": 3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 27,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 4,
+                "y": 1
+              },
+              "id": "output-right",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "right": 3
+              }
+            },
+            "numericId": "7738909",
+            "parallelInputConnector": {
+              "glbPosition": {
+                "x": 25,
+                "y": 141
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 0
+              },
+              "id": "input-top",
+              "position": "top",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 1
+              }
+            },
+            "parallelOutputConnector": {
+              "glbPosition": {
+                "x": 25,
+                "y": 143
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 2
+              },
+              "id": "output-down",
+              "position": "bottom",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "bottom": 1
+              }
+            },
+            "parallelCloseReference": "PARALLEL_CLOSE_da73de13-a906-447b-bb6e-a654cd994ce2",
+            "type": "open",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 4,
+          "height": 2,
+          "measured": {
+            "width": 4,
+            "height": 2
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_4d547928-cc8d-4a16-b5a7-99d5242809a9",
+          "type": "contact",
+          "position": {
+            "x": 72,
+            "y": 130
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "default",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 72,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 96,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "7094754",
+            "variable": {
+              "id": "",
+              "name": "Man_Door",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "PARALLEL_OPEN_73b05204-9ab8-4ef5-97d8-d00402cd9ec9",
+          "type": "parallel",
+          "position": {
+            "x": 23,
+            "y": 233
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 23,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 233
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "input-top",
+                "position": "top",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 27,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 235
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "output-down",
+                "position": "bottom",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 23,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 233
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "input-top",
+                "position": "top",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 27,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 235
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "output-down",
+                "position": "bottom",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 23,
+                "y": 234
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 1
+              },
+              "id": "input",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "left": 3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 27,
+                "y": 234
+              },
+              "relPosition": {
+                "x": 4,
+                "y": 1
+              },
+              "id": "output-right",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "right": 3
+              }
+            },
+            "numericId": "4803123",
+            "parallelInputConnector": {
+              "glbPosition": {
+                "x": 25,
+                "y": 233
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 0
+              },
+              "id": "input-top",
+              "position": "top",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 1
+              }
+            },
+            "parallelOutputConnector": {
+              "glbPosition": {
+                "x": 25,
+                "y": 235
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 2
+              },
+              "id": "output-down",
+              "position": "bottom",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "bottom": 1
+              }
+            },
+            "parallelCloseReference": "PARALLEL_CLOSE_e1059841-920d-46d5-8970-1e859baf4a97",
+            "type": "open",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 4,
+          "height": 2,
+          "measured": {
+            "width": 4,
+            "height": 2
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_b2e998ee-7f30-46cf-bec6-26a7b811022e",
+          "type": "contact",
+          "position": {
+            "x": 72,
+            "y": 222
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "default",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 72,
+                "y": 234
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 96,
+                "y": 234
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "4540160",
+            "variable": {
+              "id": "",
+              "name": "Man_Rinse",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "PARALLEL_OPEN_573ec565-bc6f-4f1f-9dcd-74189e9262a3",
+          "type": "parallel",
+          "position": {
+            "x": 23,
+            "y": 325
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 23,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 325
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "input-top",
+                "position": "top",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 27,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 327
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "output-down",
+                "position": "bottom",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 23,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 325
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "input-top",
+                "position": "top",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 27,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 327
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "output-down",
+                "position": "bottom",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 23,
+                "y": 326
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 1
+              },
+              "id": "input",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "left": 3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 27,
+                "y": 326
+              },
+              "relPosition": {
+                "x": 4,
+                "y": 1
+              },
+              "id": "output-right",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "right": 3
+              }
+            },
+            "numericId": "4407609",
+            "parallelInputConnector": {
+              "glbPosition": {
+                "x": 25,
+                "y": 325
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 0
+              },
+              "id": "input-top",
+              "position": "top",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 1
+              }
+            },
+            "parallelOutputConnector": {
+              "glbPosition": {
+                "x": 25,
+                "y": 327
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 2
+              },
+              "id": "output-down",
+              "position": "bottom",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "bottom": 1
+              }
+            },
+            "parallelCloseReference": "PARALLEL_CLOSE_cdee5c34-b607-4827-9a9f-74d1169111f5",
+            "type": "open",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 4,
+          "height": 2,
+          "measured": {
+            "width": 4,
+            "height": 2
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_632598bf-a2eb-4d0f-81a1-c1b9140d040c",
+          "type": "contact",
+          "position": {
+            "x": 72,
+            "y": 314
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "default",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 72,
+                "y": 326
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 96,
+                "y": 326
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "4049403",
+            "variable": {
+              "id": "",
+              "name": "Man_Fill",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "PARALLEL_OPEN_0dac4078-c11c-4293-a150-53e4fcc50827",
+          "type": "parallel",
+          "position": {
+            "x": 23,
+            "y": 417
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 23,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 417
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "input-top",
+                "position": "top",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 27,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 419
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "output-down",
+                "position": "bottom",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 23,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 417
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "input-top",
+                "position": "top",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 27,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 25,
+                  "y": 419
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "output-down",
+                "position": "bottom",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 23,
+                "y": 418
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 1
+              },
+              "id": "input",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "left": 3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 27,
+                "y": 418
+              },
+              "relPosition": {
+                "x": 4,
+                "y": 1
+              },
+              "id": "output-right",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "right": 3
+              }
+            },
+            "numericId": "8386428",
+            "parallelInputConnector": {
+              "glbPosition": {
+                "x": 25,
+                "y": 417
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 0
+              },
+              "id": "input-top",
+              "position": "top",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 1
+              }
+            },
+            "parallelOutputConnector": {
+              "glbPosition": {
+                "x": 25,
+                "y": 419
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 2
+              },
+              "id": "output-down",
+              "position": "bottom",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "bottom": 1
+              }
+            },
+            "parallelCloseReference": "PARALLEL_CLOSE_dcbd5e0f-84bb-476d-b360-7fb506f7f34f",
+            "type": "open",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 4,
+          "height": 2,
+          "measured": {
+            "width": 4,
+            "height": 2
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_f6c71437-e553-439e-ae5f-53190d9aa938",
+          "type": "contact",
+          "position": {
+            "x": 72,
+            "y": 406
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "default",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 72,
+                "y": 418
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 96,
+                "y": 418
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "4389239",
+            "variable": {
+              "id": "",
+              "name": "Man_Cap",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_cc78c605-391f-485e-8511-6932d5b81fe6",
+          "type": "contact",
+          "position": {
+            "x": 72,
+            "y": 498
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 510
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 510
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "default",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 72,
+                  "y": 510
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 96,
+                  "y": 510
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 72,
+                "y": 510
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 96,
+                "y": 510
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "4751199",
+            "variable": {
+              "id": "",
+              "name": "Man_Index",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "PARALLEL_CLOSE_dcbd5e0f-84bb-476d-b360-7fb506f7f34f",
+          "type": "parallel",
+          "position": {
+            "x": 141,
+            "y": 417
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 141,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 419
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "input-down",
+                "position": "bottom",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 145,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 417
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "output-top",
+                "position": "top",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 141,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 419
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "input-down",
+                "position": "bottom",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 145,
+                  "y": 418
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 417
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "output-top",
+                "position": "top",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 141,
+                "y": 418
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 1
+              },
+              "id": "input",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "left": 3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 145,
+                "y": 418
+              },
+              "relPosition": {
+                "x": 4,
+                "y": 1
+              },
+              "id": "output-right",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "right": 3
+              }
+            },
+            "numericId": "3618247",
+            "parallelInputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 419
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 2
+              },
+              "id": "input-down",
+              "position": "bottom",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "bottom": 1
+              }
+            },
+            "parallelOutputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 417
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 0
+              },
+              "id": "output-top",
+              "position": "top",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 1
+              }
+            },
+            "parallelOpenReference": "PARALLEL_OPEN_0dac4078-c11c-4293-a150-53e4fcc50827",
+            "type": "close",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 4,
+          "height": 2,
+          "measured": {
+            "width": 4,
+            "height": 2
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "PARALLEL_CLOSE_cdee5c34-b607-4827-9a9f-74d1169111f5",
+          "type": "parallel",
+          "position": {
+            "x": 141,
+            "y": 325
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 141,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 327
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "input-down",
+                "position": "bottom",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 145,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 325
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "output-top",
+                "position": "top",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 141,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 327
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "input-down",
+                "position": "bottom",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 145,
+                  "y": 326
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 325
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "output-top",
+                "position": "top",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 141,
+                "y": 326
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 1
+              },
+              "id": "input",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "left": 3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 145,
+                "y": 326
+              },
+              "relPosition": {
+                "x": 4,
+                "y": 1
+              },
+              "id": "output-right",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "right": 3
+              }
+            },
+            "numericId": "5673418",
+            "parallelInputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 327
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 2
+              },
+              "id": "input-down",
+              "position": "bottom",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "bottom": 1
+              }
+            },
+            "parallelOutputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 325
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 0
+              },
+              "id": "output-top",
+              "position": "top",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 1
+              }
+            },
+            "parallelOpenReference": "PARALLEL_OPEN_573ec565-bc6f-4f1f-9dcd-74189e9262a3",
+            "type": "close",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 4,
+          "height": 2,
+          "measured": {
+            "width": 4,
+            "height": 2
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "PARALLEL_CLOSE_e1059841-920d-46d5-8970-1e859baf4a97",
+          "type": "parallel",
+          "position": {
+            "x": 141,
+            "y": 233
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 141,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 235
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "input-down",
+                "position": "bottom",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 145,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 233
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "output-top",
+                "position": "top",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 141,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 235
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "input-down",
+                "position": "bottom",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 145,
+                  "y": 234
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 233
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "output-top",
+                "position": "top",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 141,
+                "y": 234
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 1
+              },
+              "id": "input",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "left": 3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 145,
+                "y": 234
+              },
+              "relPosition": {
+                "x": 4,
+                "y": 1
+              },
+              "id": "output-right",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "right": 3
+              }
+            },
+            "numericId": "4251279",
+            "parallelInputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 235
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 2
+              },
+              "id": "input-down",
+              "position": "bottom",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "bottom": 1
+              }
+            },
+            "parallelOutputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 233
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 0
+              },
+              "id": "output-top",
+              "position": "top",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 1
+              }
+            },
+            "parallelOpenReference": "PARALLEL_OPEN_73b05204-9ab8-4ef5-97d8-d00402cd9ec9",
+            "type": "close",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 4,
+          "height": 2,
+          "measured": {
+            "width": 4,
+            "height": 2
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "PARALLEL_CLOSE_da73de13-a906-447b-bb6e-a654cd994ce2",
+          "type": "parallel",
+          "position": {
+            "x": 141,
+            "y": 141
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 141,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 143
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "input-down",
+                "position": "bottom",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 145,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 141
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "output-top",
+                "position": "top",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 141,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 143
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "input-down",
+                "position": "bottom",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 145,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 141
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "output-top",
+                "position": "top",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 141,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 1
+              },
+              "id": "input",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "left": 3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 145,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 4,
+                "y": 1
+              },
+              "id": "output-right",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "right": 3
+              }
+            },
+            "numericId": "8906677",
+            "parallelInputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 143
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 2
+              },
+              "id": "input-down",
+              "position": "bottom",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "bottom": 1
+              }
+            },
+            "parallelOutputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 141
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 0
+              },
+              "id": "output-top",
+              "position": "top",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 1
+              }
+            },
+            "parallelOpenReference": "PARALLEL_OPEN_3c17af47-4e8b-456b-8c42-9736a3b27e5b",
+            "type": "close",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 4,
+          "height": 2,
+          "measured": {
+            "width": 4,
+            "height": 2
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "PARALLEL_CLOSE_f9ce963b-b236-4f7c-abb6-98db8cf62c88",
+          "type": "parallel",
+          "position": {
+            "x": 141,
+            "y": 49
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 141,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 51
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "input-down",
+                "position": "bottom",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 145,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 49
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "output-top",
+                "position": "top",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 141,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 1
+                },
+                "id": "input",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "left": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 51
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 2
+                },
+                "id": "input-down",
+                "position": "bottom",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "bottom": 1
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 145,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 4,
+                  "y": 1
+                },
+                "id": "output-right",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "visibility": "hidden",
+                  "right": 3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 49
+                },
+                "relPosition": {
+                  "x": 2,
+                  "y": 0
+                },
+                "id": "output-top",
+                "position": "top",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 1
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 141,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 1
+              },
+              "id": "input",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "left": 3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 145,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 4,
+                "y": 1
+              },
+              "id": "output-right",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "visibility": "hidden",
+                "right": 3
+              }
+            },
+            "numericId": "7010251",
+            "parallelInputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 51
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 2
+              },
+              "id": "input-down",
+              "position": "bottom",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "bottom": 1
+              }
+            },
+            "parallelOutputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 49
+              },
+              "relPosition": {
+                "x": 2,
+                "y": 0
+              },
+              "id": "output-top",
+              "position": "top",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 1
+              }
+            },
+            "parallelOpenReference": "PARALLEL_OPEN_332bfa81-3f6a-4c86-ada2-09c77b8ad2c9",
+            "type": "close",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 4,
+          "height": 2,
+          "measured": {
+            "width": 4,
+            "height": 2
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "BLOCK_af964f11-c42b-4a23-8746-8fa5b6f74424",
+          "type": "block",
+          "position": {
+            "x": 306,
+            "y": 14
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 306,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 36
+                },
+                "id": "IN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 306,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 76
+                },
+                "id": "PT",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 372,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 66,
+                  "y": 36
+                },
+                "id": "Q",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 372,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 66,
+                  "y": 76
+                },
+                "id": "ET",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "right": 0
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 306,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 36
+                },
+                "id": "IN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 306,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 76
+                },
+                "id": "PT",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "left": 0
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 372,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 66,
+                  "y": 36
+                },
+                "id": "Q",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 372,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 66,
+                  "y": 76
+                },
+                "id": "ET",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "right": 0
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 306,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 36
+              },
+              "id": "IN",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 36,
+                "left": 0
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 372,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 66,
+                "y": 36
+              },
+              "id": "Q",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 36,
+                "right": 0
+              }
+            },
+            "numericId": "8435612",
+            "variant": {
+              "name": "TON",
+              "type": "function-block",
+              "variables": [
+                {
+                  "name": "IN",
+                  "class": "input",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "PT",
+                  "class": "input",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "TIME"
+                  }
+                },
+                {
+                  "name": "Q",
+                  "class": "output",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "ET",
+                  "class": "output",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "TIME"
+                  }
+                }
+              ],
+              "documentation": "The on-delay timer can be used to delay setting an output true, for fixed period after an input becomes true.",
+              "extensible": false
+            },
+            "variable": {
+              "name": "Jog_TON",
+              "class": "local",
+              "type": {
+                "definition": "derived",
+                "value": "TON"
+              },
+              "location": "",
+              "initialValue": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "executionControl": false,
+            "lockExecutionControl": false,
+            "connectedVariables": [
+              {
+                "handleId": "PT",
+                "type": "input",
+                "variable": {
+                  "name": "T#10s"
+                }
+              }
+            ],
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 66,
+          "height": 100,
+          "measured": {
+            "width": 66,
+            "height": 100
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "COIL_9d373a97-9410-45e1-8f08-861f1407d202",
+          "type": "coil",
+          "position": {
+            "x": 537,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 537,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 565,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 28,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "set",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 537,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 565,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 28,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 537,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 565,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 28,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "2904345",
+            "variable": {
+              "id": "",
+              "name": "Jog_Block",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 28,
+          "height": 24,
+          "measured": {
+            "width": 28,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "right-rail-rung_main_12cfb034-92e3-405f-885c-7eabf21efb51",
+          "type": "powerRail",
+          "position": {
+            "x": 675,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 678,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                },
+                "x": 328
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 678,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 678,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "right-rail",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "left": -3
+              }
+            },
+            "numericId": "2354752",
+            "variant": "right",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_34034654-a20d-4691-82e6-95cf02b78118",
+          "type": "variable",
+          "position": {
+            "x": 196,
+            "y": 74
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 276,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 276,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 276,
+                "y": 90
+              },
+              "relPosition": {
+                "x": 80,
+                "y": 16
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source"
+            },
+            "numericId": "2246731",
+            "variable": {
+              "name": "T#10s"
+            },
+            "executionOrder": 0,
+            "variant": "input",
+            "block": {
+              "id": "BLOCK_af964f11-c42b-4a23-8746-8fa5b6f74424",
+              "handleId": "PT",
+              "variableType": {
+                "name": "PT",
+                "class": "input",
+                "type": {
+                  "definition": "base-type",
+                  "value": "TIME"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_left-rail-rung_main_12cfb034-92e3-405f-885c-7eabf21efb51_PARALLEL_OPEN_332bfa81-3f6a-4c86-ada2-09c77b8ad2c9__left-rail_input",
+          "source": "left-rail-rung_main_12cfb034-92e3-405f-885c-7eabf21efb51",
+          "target": "PARALLEL_OPEN_332bfa81-3f6a-4c86-ada2-09c77b8ad2c9",
+          "sourceHandle": "left-rail",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_PARALLEL_OPEN_332bfa81-3f6a-4c86-ada2-09c77b8ad2c9_CONTACT_7028a4bb-7f41-43db-bc02-eaf54bb23c69__output-right_input",
+          "source": "PARALLEL_OPEN_332bfa81-3f6a-4c86-ada2-09c77b8ad2c9",
+          "target": "CONTACT_7028a4bb-7f41-43db-bc02-eaf54bb23c69",
+          "sourceHandle": "output-right",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_7028a4bb-7f41-43db-bc02-eaf54bb23c69_PARALLEL_CLOSE_f9ce963b-b236-4f7c-abb6-98db8cf62c88__output_input",
+          "source": "CONTACT_7028a4bb-7f41-43db-bc02-eaf54bb23c69",
+          "target": "PARALLEL_CLOSE_f9ce963b-b236-4f7c-abb6-98db8cf62c88",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_PARALLEL_OPEN_332bfa81-3f6a-4c86-ada2-09c77b8ad2c9_PARALLEL_OPEN_3c17af47-4e8b-456b-8c42-9736a3b27e5b__output-down_input-top",
+          "source": "PARALLEL_OPEN_332bfa81-3f6a-4c86-ada2-09c77b8ad2c9",
+          "target": "PARALLEL_OPEN_3c17af47-4e8b-456b-8c42-9736a3b27e5b",
+          "sourceHandle": "output-down",
+          "targetHandle": "input-top"
+        },
+        {
+          "id": "e_PARALLEL_CLOSE_da73de13-a906-447b-bb6e-a654cd994ce2_PARALLEL_CLOSE_f9ce963b-b236-4f7c-abb6-98db8cf62c88__output-top_input-down",
+          "source": "PARALLEL_CLOSE_da73de13-a906-447b-bb6e-a654cd994ce2",
+          "target": "PARALLEL_CLOSE_f9ce963b-b236-4f7c-abb6-98db8cf62c88",
+          "sourceHandle": "output-top",
+          "targetHandle": "input-down"
+        },
+        {
+          "id": "e_PARALLEL_OPEN_3c17af47-4e8b-456b-8c42-9736a3b27e5b_CONTACT_4d547928-cc8d-4a16-b5a7-99d5242809a9__output-right_input",
+          "source": "PARALLEL_OPEN_3c17af47-4e8b-456b-8c42-9736a3b27e5b",
+          "target": "CONTACT_4d547928-cc8d-4a16-b5a7-99d5242809a9",
+          "sourceHandle": "output-right",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_4d547928-cc8d-4a16-b5a7-99d5242809a9_PARALLEL_CLOSE_da73de13-a906-447b-bb6e-a654cd994ce2__output_input",
+          "source": "CONTACT_4d547928-cc8d-4a16-b5a7-99d5242809a9",
+          "target": "PARALLEL_CLOSE_da73de13-a906-447b-bb6e-a654cd994ce2",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_PARALLEL_OPEN_3c17af47-4e8b-456b-8c42-9736a3b27e5b_PARALLEL_OPEN_73b05204-9ab8-4ef5-97d8-d00402cd9ec9__output-down_input-top",
+          "source": "PARALLEL_OPEN_3c17af47-4e8b-456b-8c42-9736a3b27e5b",
+          "target": "PARALLEL_OPEN_73b05204-9ab8-4ef5-97d8-d00402cd9ec9",
+          "sourceHandle": "output-down",
+          "targetHandle": "input-top"
+        },
+        {
+          "id": "e_PARALLEL_CLOSE_e1059841-920d-46d5-8970-1e859baf4a97_PARALLEL_CLOSE_da73de13-a906-447b-bb6e-a654cd994ce2__output-top_input-down",
+          "source": "PARALLEL_CLOSE_e1059841-920d-46d5-8970-1e859baf4a97",
+          "target": "PARALLEL_CLOSE_da73de13-a906-447b-bb6e-a654cd994ce2",
+          "sourceHandle": "output-top",
+          "targetHandle": "input-down"
+        },
+        {
+          "id": "e_PARALLEL_OPEN_73b05204-9ab8-4ef5-97d8-d00402cd9ec9_CONTACT_b2e998ee-7f30-46cf-bec6-26a7b811022e__output-right_input",
+          "source": "PARALLEL_OPEN_73b05204-9ab8-4ef5-97d8-d00402cd9ec9",
+          "target": "CONTACT_b2e998ee-7f30-46cf-bec6-26a7b811022e",
+          "sourceHandle": "output-right",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_b2e998ee-7f30-46cf-bec6-26a7b811022e_PARALLEL_CLOSE_e1059841-920d-46d5-8970-1e859baf4a97__output_input",
+          "source": "CONTACT_b2e998ee-7f30-46cf-bec6-26a7b811022e",
+          "target": "PARALLEL_CLOSE_e1059841-920d-46d5-8970-1e859baf4a97",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_PARALLEL_OPEN_73b05204-9ab8-4ef5-97d8-d00402cd9ec9_PARALLEL_OPEN_573ec565-bc6f-4f1f-9dcd-74189e9262a3__output-down_input-top",
+          "source": "PARALLEL_OPEN_73b05204-9ab8-4ef5-97d8-d00402cd9ec9",
+          "target": "PARALLEL_OPEN_573ec565-bc6f-4f1f-9dcd-74189e9262a3",
+          "sourceHandle": "output-down",
+          "targetHandle": "input-top"
+        },
+        {
+          "id": "e_PARALLEL_CLOSE_cdee5c34-b607-4827-9a9f-74d1169111f5_PARALLEL_CLOSE_e1059841-920d-46d5-8970-1e859baf4a97__output-top_input-down",
+          "source": "PARALLEL_CLOSE_cdee5c34-b607-4827-9a9f-74d1169111f5",
+          "target": "PARALLEL_CLOSE_e1059841-920d-46d5-8970-1e859baf4a97",
+          "sourceHandle": "output-top",
+          "targetHandle": "input-down"
+        },
+        {
+          "id": "e_PARALLEL_OPEN_573ec565-bc6f-4f1f-9dcd-74189e9262a3_CONTACT_632598bf-a2eb-4d0f-81a1-c1b9140d040c__output-right_input",
+          "source": "PARALLEL_OPEN_573ec565-bc6f-4f1f-9dcd-74189e9262a3",
+          "target": "CONTACT_632598bf-a2eb-4d0f-81a1-c1b9140d040c",
+          "sourceHandle": "output-right",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_632598bf-a2eb-4d0f-81a1-c1b9140d040c_PARALLEL_CLOSE_cdee5c34-b607-4827-9a9f-74d1169111f5__output_input",
+          "source": "CONTACT_632598bf-a2eb-4d0f-81a1-c1b9140d040c",
+          "target": "PARALLEL_CLOSE_cdee5c34-b607-4827-9a9f-74d1169111f5",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_PARALLEL_OPEN_573ec565-bc6f-4f1f-9dcd-74189e9262a3_PARALLEL_OPEN_0dac4078-c11c-4293-a150-53e4fcc50827__output-down_input-top",
+          "source": "PARALLEL_OPEN_573ec565-bc6f-4f1f-9dcd-74189e9262a3",
+          "target": "PARALLEL_OPEN_0dac4078-c11c-4293-a150-53e4fcc50827",
+          "sourceHandle": "output-down",
+          "targetHandle": "input-top"
+        },
+        {
+          "id": "e_PARALLEL_CLOSE_dcbd5e0f-84bb-476d-b360-7fb506f7f34f_PARALLEL_CLOSE_cdee5c34-b607-4827-9a9f-74d1169111f5__output-top_input-down",
+          "source": "PARALLEL_CLOSE_dcbd5e0f-84bb-476d-b360-7fb506f7f34f",
+          "target": "PARALLEL_CLOSE_cdee5c34-b607-4827-9a9f-74d1169111f5",
+          "sourceHandle": "output-top",
+          "targetHandle": "input-down"
+        },
+        {
+          "id": "e_PARALLEL_OPEN_0dac4078-c11c-4293-a150-53e4fcc50827_CONTACT_f6c71437-e553-439e-ae5f-53190d9aa938__output-right_input",
+          "source": "PARALLEL_OPEN_0dac4078-c11c-4293-a150-53e4fcc50827",
+          "target": "CONTACT_f6c71437-e553-439e-ae5f-53190d9aa938",
+          "sourceHandle": "output-right",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_f6c71437-e553-439e-ae5f-53190d9aa938_PARALLEL_CLOSE_dcbd5e0f-84bb-476d-b360-7fb506f7f34f__output_input",
+          "source": "CONTACT_f6c71437-e553-439e-ae5f-53190d9aa938",
+          "target": "PARALLEL_CLOSE_dcbd5e0f-84bb-476d-b360-7fb506f7f34f",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_PARALLEL_OPEN_0dac4078-c11c-4293-a150-53e4fcc50827_CONTACT_cc78c605-391f-485e-8511-6932d5b81fe6__output-down_input",
+          "source": "PARALLEL_OPEN_0dac4078-c11c-4293-a150-53e4fcc50827",
+          "target": "CONTACT_cc78c605-391f-485e-8511-6932d5b81fe6",
+          "sourceHandle": "output-down",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_cc78c605-391f-485e-8511-6932d5b81fe6_PARALLEL_CLOSE_dcbd5e0f-84bb-476d-b360-7fb506f7f34f__output_input-down",
+          "source": "CONTACT_cc78c605-391f-485e-8511-6932d5b81fe6",
+          "target": "PARALLEL_CLOSE_dcbd5e0f-84bb-476d-b360-7fb506f7f34f",
+          "sourceHandle": "output",
+          "targetHandle": "input-down"
+        },
+        {
+          "id": "e_PARALLEL_CLOSE_f9ce963b-b236-4f7c-abb6-98db8cf62c88_BLOCK_af964f11-c42b-4a23-8746-8fa5b6f74424__output-right_IN",
+          "source": "PARALLEL_CLOSE_f9ce963b-b236-4f7c-abb6-98db8cf62c88",
+          "target": "BLOCK_af964f11-c42b-4a23-8746-8fa5b6f74424",
+          "sourceHandle": "output-right",
+          "targetHandle": "IN"
+        },
+        {
+          "id": "e_VARIABLE_34034654-a20d-4691-82e6-95cf02b78118_BLOCK_af964f11-c42b-4a23-8746-8fa5b6f74424__output_PT",
+          "source": "VARIABLE_34034654-a20d-4691-82e6-95cf02b78118",
+          "target": "BLOCK_af964f11-c42b-4a23-8746-8fa5b6f74424",
+          "sourceHandle": "output",
+          "targetHandle": "PT"
+        },
+        {
+          "id": "e_BLOCK_af964f11-c42b-4a23-8746-8fa5b6f74424_COIL_9d373a97-9410-45e1-8f08-861f1407d202__Q_input",
+          "source": "BLOCK_af964f11-c42b-4a23-8746-8fa5b6f74424",
+          "target": "COIL_9d373a97-9410-45e1-8f08-861f1407d202",
+          "sourceHandle": "Q",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_COIL_9d373a97-9410-45e1-8f08-861f1407d202_right-rail-rung_main_12cfb034-92e3-405f-885c-7eabf21efb51__output_right-rail",
+          "source": "COIL_9d373a97-9410-45e1-8f08-861f1407d202",
+          "target": "right-rail-rung_main_12cfb034-92e3-405f-885c-7eabf21efb51",
+          "sourceHandle": "output",
+          "targetHandle": "right-rail"
+        }
+      ],
+      "selectedNodes": [],
+      "handleBranches": []
+    },
+    {
+      "id": "rung_main_eb196e28-3e02-49d1-98cb-80bf49a3bed5",
+      "comment": "Jog watchdog 2/2: all manual buttons released (six NC contacts in series = AND of NOT) -> reset Jog_Block, manual operation possible again. Never fights rung 1/2: while a button is held this rung is FALSE, when all are released Jog_TON.IN is FALSE so Q is FALSE",
+      "defaultBounds": [
+        300,
+        100
+      ],
+      "reactFlowViewport": [
+        893,
+        120
+      ],
+      "nodes": [
+        {
+          "id": "left-rail-rung_main_eb196e28-3e02-49d1-98cb-80bf49a3bed5",
+          "type": "powerRail",
+          "position": {
+            "x": 0,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 3,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "left-rail",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "right": -3
+              }
+            },
+            "numericId": "4575549",
+            "variant": "left",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_18427315-1478-4e42-b75d-31458a792aa1",
+          "type": "contact",
+          "position": {
+            "x": 68,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 68,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 92,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "negated",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 68,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 92,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 68,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 92,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "3170845",
+            "variable": {
+              "id": "",
+              "name": "Man_C1",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_da1df6d9-2b5c-4bda-8adf-22d571f1aff1",
+          "type": "contact",
+          "position": {
+            "x": 182,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 182,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 206,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "negated",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 182,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 206,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 182,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 206,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "5359596",
+            "variable": {
+              "id": "",
+              "name": "Man_Door",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_69c80fe7-aa08-4c65-b918-06d3c3729372",
+          "type": "contact",
+          "position": {
+            "x": 296,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 296,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 320,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "negated",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 296,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 320,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 296,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 320,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "7519377",
+            "variable": {
+              "id": "",
+              "name": "Man_Rinse",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_d98f2e9a-38db-4e40-9d44-6dc2a6223210",
+          "type": "contact",
+          "position": {
+            "x": 410,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 410,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 434,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "negated",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 410,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 434,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 410,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 434,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "9121751",
+            "variable": {
+              "id": "",
+              "name": "Man_Fill",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_c6b58b25-7e47-4cc3-acb1-500e0cf8b3f5",
+          "type": "contact",
+          "position": {
+            "x": 524,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 524,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 548,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "negated",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 524,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 548,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 524,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 548,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "3028842",
+            "variable": {
+              "id": "",
+              "name": "Man_Cap",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_2edb3f39-9c97-4230-8bb9-a9db1d5482ca",
+          "type": "contact",
+          "position": {
+            "x": 638,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 638,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 662,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "negated",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 638,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 662,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 638,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 662,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "6553270",
+            "variable": {
+              "id": "",
+              "name": "Man_Index",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "COIL_7645f6a2-ec3d-43d3-98c6-01f99f8b5578",
+          "type": "coil",
+          "position": {
+            "x": 752,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 752,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 780,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 28,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "reset",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 752,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 780,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 28,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 752,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 780,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 28,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "5322772",
+            "variable": {
+              "id": "",
+              "name": "Jog_Block",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 28,
+          "height": 24,
+          "measured": {
+            "width": 28,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "right-rail-rung_main_eb196e28-3e02-49d1-98cb-80bf49a3bed5",
+          "type": "powerRail",
+          "position": {
+            "x": 890,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 893,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                },
+                "x": 434
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 893,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 893,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "right-rail",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "left": -3
+              }
+            },
+            "numericId": "2438534",
+            "variant": "right",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_left-rail-rung_main_eb196e28-3e02-49d1-98cb-80bf49a3bed5_CONTACT_18427315-1478-4e42-b75d-31458a792aa1__left-rail_input",
+          "source": "left-rail-rung_main_eb196e28-3e02-49d1-98cb-80bf49a3bed5",
+          "target": "CONTACT_18427315-1478-4e42-b75d-31458a792aa1",
+          "sourceHandle": "left-rail",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_18427315-1478-4e42-b75d-31458a792aa1_CONTACT_da1df6d9-2b5c-4bda-8adf-22d571f1aff1__output_input",
+          "source": "CONTACT_18427315-1478-4e42-b75d-31458a792aa1",
+          "target": "CONTACT_da1df6d9-2b5c-4bda-8adf-22d571f1aff1",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_da1df6d9-2b5c-4bda-8adf-22d571f1aff1_CONTACT_69c80fe7-aa08-4c65-b918-06d3c3729372__output_input",
+          "source": "CONTACT_da1df6d9-2b5c-4bda-8adf-22d571f1aff1",
+          "target": "CONTACT_69c80fe7-aa08-4c65-b918-06d3c3729372",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_69c80fe7-aa08-4c65-b918-06d3c3729372_CONTACT_d98f2e9a-38db-4e40-9d44-6dc2a6223210__output_input",
+          "source": "CONTACT_69c80fe7-aa08-4c65-b918-06d3c3729372",
+          "target": "CONTACT_d98f2e9a-38db-4e40-9d44-6dc2a6223210",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_d98f2e9a-38db-4e40-9d44-6dc2a6223210_CONTACT_c6b58b25-7e47-4cc3-acb1-500e0cf8b3f5__output_input",
+          "source": "CONTACT_d98f2e9a-38db-4e40-9d44-6dc2a6223210",
+          "target": "CONTACT_c6b58b25-7e47-4cc3-acb1-500e0cf8b3f5",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_c6b58b25-7e47-4cc3-acb1-500e0cf8b3f5_CONTACT_2edb3f39-9c97-4230-8bb9-a9db1d5482ca__output_input",
+          "source": "CONTACT_c6b58b25-7e47-4cc3-acb1-500e0cf8b3f5",
+          "target": "CONTACT_2edb3f39-9c97-4230-8bb9-a9db1d5482ca",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_2edb3f39-9c97-4230-8bb9-a9db1d5482ca_COIL_7645f6a2-ec3d-43d3-98c6-01f99f8b5578__output_input",
+          "source": "CONTACT_2edb3f39-9c97-4230-8bb9-a9db1d5482ca",
+          "target": "COIL_7645f6a2-ec3d-43d3-98c6-01f99f8b5578",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_COIL_7645f6a2-ec3d-43d3-98c6-01f99f8b5578_right-rail-rung_main_eb196e28-3e02-49d1-98cb-80bf49a3bed5__output_right-rail",
+          "source": "COIL_7645f6a2-ec3d-43d3-98c6-01f99f8b5578",
+          "target": "right-rail-rung_main_eb196e28-3e02-49d1-98cb-80bf49a3bed5",
+          "sourceHandle": "output",
+          "targetHandle": "right-rail"
+        }
+      ],
+      "selectedNodes": [],
+      "handleBranches": []
+    },
+    {
       "id": "rung_main_8840d037-101e-4c8d-aacb-06941683b863",
-      "comment": "SECTION 6 OUTPUTS. Rinse request = Auto branch (WORK, bottle at S3, rinse not done) OR Manual branch (Man_Rinse held, hold-to-run). No interlock: checking the water needs no bottle.",
+      "comment": "Rinse request = Auto branch (WORK, bottle at S3, rinse not done) OR Manual branch (Man_Rinse held, hold-to-run). No interlock: checking the water needs no bottle. Manual branch also needs NOT Jog_Block (jog watchdog).",
       "defaultBounds": [
         300,
         100
@@ -47480,6 +52970,152 @@ PROGRAM main
           "dragging": false
         },
         {
+          "id": "CONTACT_2f24f215-9642-474b-b817-40557377b8f2",
+          "type": "contact",
+          "position": {
+            "x": 300,
+            "y": 130
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 300,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 324,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "negated",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 300,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 324,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 300,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 324,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "8969906",
+            "variable": {
+              "id": "",
+              "name": "Jog_Block",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
           "id": "PARALLEL_CLOSE_56a2ecfe-1475-4322-98b8-f264de6175f5",
           "type": "parallel",
           "position": {
@@ -47998,13 +53634,6 @@ PROGRAM main
           "targetHandle": "input"
         },
         {
-          "id": "e_CONTACT_5ef21ce4-2c4f-482d-8606-0c3e3d27ea32_PARALLEL_CLOSE_56a2ecfe-1475-4322-98b8-f264de6175f5__output_input-down",
-          "source": "CONTACT_5ef21ce4-2c4f-482d-8606-0c3e3d27ea32",
-          "target": "PARALLEL_CLOSE_56a2ecfe-1475-4322-98b8-f264de6175f5",
-          "sourceHandle": "output",
-          "targetHandle": "input-down"
-        },
-        {
           "id": "e_CONTACT_11e5785f-858b-43d3-934e-2c238ceb282f_CONTACT_7dc9806a-7105-4714-8551-018804a28a97__output_input",
           "source": "CONTACT_11e5785f-858b-43d3-934e-2c238ceb282f",
           "target": "CONTACT_7dc9806a-7105-4714-8551-018804a28a97",
@@ -48038,6 +53667,20 @@ PROGRAM main
           "target": "COIL_5a9ade51-fb76-45f6-a390-06d2494dde4c",
           "sourceHandle": "output-right",
           "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_5ef21ce4-2c4f-482d-8606-0c3e3d27ea32_CONTACT_2f24f215-9642-474b-b817-40557377b8f2__output_input",
+          "source": "CONTACT_5ef21ce4-2c4f-482d-8606-0c3e3d27ea32",
+          "target": "CONTACT_2f24f215-9642-474b-b817-40557377b8f2",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_2f24f215-9642-474b-b817-40557377b8f2_PARALLEL_CLOSE_56a2ecfe-1475-4322-98b8-f264de6175f5__output_input-down",
+          "source": "CONTACT_2f24f215-9642-474b-b817-40557377b8f2",
+          "target": "PARALLEL_CLOSE_56a2ecfe-1475-4322-98b8-f264de6175f5",
+          "sourceHandle": "output",
+          "targetHandle": "input-down"
         }
       ],
       "selectedNodes": [],
@@ -48045,7 +53688,7 @@ PROGRAM main
     },
     {
       "id": "rung_main_5eda6997-2455-40a8-922b-13516ba69c80",
-      "comment": "Fill request = Auto branch (WORK, bottle at S4, not full, product available) OR Manual branch (Man_Fill held). INTERLOCK: manual fill only with a bottle at S4, otherwise product goes on the floor. No product in Auto = valve closed, machine waits (Starved).",
+      "comment": "Fill request = Auto branch (WORK, bottle at S4, not full, product available) OR Manual branch (Man_Fill held). INTERLOCK: manual fill only with a bottle at S4, otherwise product goes on the floor. No product in Auto = valve closed, machine waits (Starved). Manual branch also needs NOT Jog_Block (jog watchdog).",
       "defaultBounds": [
         300,
         100
@@ -49368,7 +55011,7 @@ PROGRAM main
           "dragging": false
         },
         {
-          "id": "CONTACT_d832471c-955b-4d2e-a37d-b5dd0193fac1",
+          "id": "CONTACT_f0e747c7-5991-46b0-b144-eb13d038b5d8",
           "type": "contact",
           "position": {
             "x": 300,
@@ -49411,7 +55054,7 @@ PROGRAM main
                 }
               }
             ],
-            "variant": "default",
+            "variant": "negated",
             "inputHandles": [
               {
                 "glbPosition": {
@@ -49470,6 +55113,152 @@ PROGRAM main
             "outputConnector": {
               "glbPosition": {
                 "x": 324,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "4689302",
+            "variable": {
+              "id": "",
+              "name": "Jog_Block",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_d832471c-955b-4d2e-a37d-b5dd0193fac1",
+          "type": "contact",
+          "position": {
+            "x": 414,
+            "y": 130
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 414,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 438,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "default",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 414,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 438,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 414,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 438,
                 "y": 142
               },
               "relPosition": {
@@ -50043,13 +55832,6 @@ PROGRAM main
           "targetHandle": "input"
         },
         {
-          "id": "e_CONTACT_4382d97e-3a05-4062-92c2-37147cce3cf1_CONTACT_d832471c-955b-4d2e-a37d-b5dd0193fac1__output_input",
-          "source": "CONTACT_4382d97e-3a05-4062-92c2-37147cce3cf1",
-          "target": "CONTACT_d832471c-955b-4d2e-a37d-b5dd0193fac1",
-          "sourceHandle": "output",
-          "targetHandle": "input"
-        },
-        {
           "id": "e_CONTACT_d832471c-955b-4d2e-a37d-b5dd0193fac1_PARALLEL_1aada28e-e495-4224-9553-43ce02f7ef41__output_input-down",
           "source": "CONTACT_d832471c-955b-4d2e-a37d-b5dd0193fac1",
           "target": "PARALLEL_1aada28e-e495-4224-9553-43ce02f7ef41",
@@ -50069,13 +55851,27 @@ PROGRAM main
           "target": "PARALLEL_1aada28e-e495-4224-9553-43ce02f7ef41",
           "sourceHandle": "output",
           "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_4382d97e-3a05-4062-92c2-37147cce3cf1_CONTACT_f0e747c7-5991-46b0-b144-eb13d038b5d8__output_input",
+          "source": "CONTACT_4382d97e-3a05-4062-92c2-37147cce3cf1",
+          "target": "CONTACT_f0e747c7-5991-46b0-b144-eb13d038b5d8",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_f0e747c7-5991-46b0-b144-eb13d038b5d8_CONTACT_d832471c-955b-4d2e-a37d-b5dd0193fac1__output_input",
+          "source": "CONTACT_f0e747c7-5991-46b0-b144-eb13d038b5d8",
+          "target": "CONTACT_d832471c-955b-4d2e-a37d-b5dd0193fac1",
+          "sourceHandle": "output",
+          "targetHandle": "input"
         }
       ],
       "handleBranches": []
     },
     {
       "id": "rung_main_a31dcc2c-3334-48eb-9df2-e14daf95fe98",
-      "comment": "Cap request = Auto branch (WORK, bottle at S5, cap time not elapsed) OR Manual branch (Man_Cap held, hold-to-run).",
+      "comment": "Cap request = Auto branch (WORK, bottle at S5, cap time not elapsed) OR Manual branch (Man_Cap held, hold-to-run). Manual branch also needs NOT Jog_Block (jog watchdog).",
       "defaultBounds": [
         300,
         100
@@ -51260,6 +57056,152 @@ PROGRAM main
           "dragging": false
         },
         {
+          "id": "CONTACT_2d24648f-d303-41dc-bd7e-8ff2016fc4e7",
+          "type": "contact",
+          "position": {
+            "x": 300,
+            "y": 130
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 300,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 324,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "negated",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 300,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 324,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 300,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 324,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "7748211",
+            "variable": {
+              "id": "",
+              "name": "Jog_Block",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
           "id": "PARALLEL_CLOSE_dd2e60b5-4b95-4018-9787-3f7d4cf98c2a",
           "type": "parallel",
           "position": {
@@ -51771,13 +57713,6 @@ PROGRAM main
           "targetHandle": "input"
         },
         {
-          "id": "e_CONTACT_716e2db5-40aa-46ad-aeaa-940c8eb6847d_PARALLEL_CLOSE_dd2e60b5-4b95-4018-9787-3f7d4cf98c2a__output_input-down",
-          "source": "CONTACT_716e2db5-40aa-46ad-aeaa-940c8eb6847d",
-          "target": "PARALLEL_CLOSE_dd2e60b5-4b95-4018-9787-3f7d4cf98c2a",
-          "sourceHandle": "output",
-          "targetHandle": "input-down"
-        },
-        {
           "id": "e_CONTACT_0b0744ce-a1be-4f0b-92d7-a88f22289724_CONTACT_c8901274-e9a9-4019-ab60-36675c70c1a9__output_input",
           "source": "CONTACT_0b0744ce-a1be-4f0b-92d7-a88f22289724",
           "target": "CONTACT_c8901274-e9a9-4019-ab60-36675c70c1a9",
@@ -51818,6 +57753,20 @@ PROGRAM main
           "target": "right-rail-rung_main_a31dcc2c-3334-48eb-9df2-e14daf95fe98",
           "sourceHandle": "output",
           "targetHandle": "right-rail"
+        },
+        {
+          "id": "e_CONTACT_716e2db5-40aa-46ad-aeaa-940c8eb6847d_CONTACT_2d24648f-d303-41dc-bd7e-8ff2016fc4e7__output_input",
+          "source": "CONTACT_716e2db5-40aa-46ad-aeaa-940c8eb6847d",
+          "target": "CONTACT_2d24648f-d303-41dc-bd7e-8ff2016fc4e7",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_2d24648f-d303-41dc-bd7e-8ff2016fc4e7_PARALLEL_CLOSE_dd2e60b5-4b95-4018-9787-3f7d4cf98c2a__output_input-down",
+          "source": "CONTACT_2d24648f-d303-41dc-bd7e-8ff2016fc4e7",
+          "target": "PARALLEL_CLOSE_dd2e60b5-4b95-4018-9787-3f7d4cf98c2a",
+          "sourceHandle": "output",
+          "targetHandle": "input-down"
         }
       ],
       "selectedNodes": [],
@@ -52612,13 +58561,13 @@ PROGRAM main
     },
     {
       "id": "rung_main_edb10c6c-fd84-40d7-935a-6b92d274e040",
-      "comment": "Belt request = Auto branch (INDEX) OR Manual branch (Man_Index held), both behind INTERLOCK Ilk_Index. Stops by itself: in the S8 edge scan the transition above has already changed Step.",
+      "comment": "Belt request = Auto branch (INDEX) OR Manual branch (Man_Index held), both behind INTERLOCK Ilk_Index. Stops by itself: in the S8 edge scan the transition above has already changed Step. Manual branch also needs NOT Jog_Block (jog watchdog).",
       "defaultBounds": [
         300,
         100
       ],
       "reactFlowViewport": [
-        559,
+        673,
         174
       ],
       "nodes": [
@@ -53231,6 +59180,152 @@ PROGRAM main
           "dragging": false
         },
         {
+          "id": "CONTACT_b175501c-0eb3-47e0-a9c7-5e0307822c87",
+          "type": "contact",
+          "position": {
+            "x": 300,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 300,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 324,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "negated",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 300,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 324,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 300,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 324,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "5157101",
+            "variable": {
+              "id": "",
+              "name": "Jog_Block",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
           "id": "CONTACT_e7e61c70-b744-425e-b0bc-fc8a8bef317c",
           "type": "contact",
           "position": {
@@ -53517,14 +59612,14 @@ PROGRAM main
           "id": "PARALLEL_CLOSE_899945fd-d0bd-4597-9ffe-8d586c9c0a62",
           "type": "parallel",
           "position": {
-            "x": 255,
+            "x": 369,
             "y": 49
           },
           "data": {
             "handles": [
               {
                 "glbPosition": {
-                  "x": 255,
+                  "x": 369,
                   "y": 50
                 },
                 "relPosition": {
@@ -53542,8 +59637,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 51
                 },
                 "relPosition": {
                   "x": 2,
@@ -53559,7 +59654,7 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
+                  "x": 373,
                   "y": 50
                 },
                 "relPosition": {
@@ -53577,8 +59672,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 49
                 },
                 "relPosition": {
                   "x": 2,
@@ -53596,7 +59691,7 @@ PROGRAM main
             "inputHandles": [
               {
                 "glbPosition": {
-                  "x": 255,
+                  "x": 369,
                   "y": 50
                 },
                 "relPosition": {
@@ -53614,8 +59709,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 51
                 },
                 "relPosition": {
                   "x": 2,
@@ -53633,7 +59728,7 @@ PROGRAM main
             "outputHandles": [
               {
                 "glbPosition": {
-                  "x": 259,
+                  "x": 373,
                   "y": 50
                 },
                 "relPosition": {
@@ -53651,8 +59746,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 49
                 },
                 "relPosition": {
                   "x": 2,
@@ -53669,7 +59764,7 @@ PROGRAM main
             ],
             "inputConnector": {
               "glbPosition": {
-                "x": 255,
+                "x": 369,
                 "y": 50
               },
               "relPosition": {
@@ -53687,7 +59782,7 @@ PROGRAM main
             },
             "outputConnector": {
               "glbPosition": {
-                "x": 259,
+                "x": 373,
                 "y": 50
               },
               "relPosition": {
@@ -53706,8 +59801,8 @@ PROGRAM main
             "numericId": "7425956",
             "parallelInputConnector": {
               "glbPosition": {
-                "x": 259,
-                "y": 50
+                "x": 371,
+                "y": 51
               },
               "relPosition": {
                 "x": 2,
@@ -53723,8 +59818,8 @@ PROGRAM main
             },
             "parallelOutputConnector": {
               "glbPosition": {
-                "x": 259,
-                "y": 50
+                "x": 371,
+                "y": 49
               },
               "relPosition": {
                 "x": 2,
@@ -53763,14 +59858,14 @@ PROGRAM main
           "id": "CONTACT_b454e6c5-ece9-4b97-b76d-d9c8744b24a2",
           "type": "contact",
           "position": {
-            "x": 304,
+            "x": 418,
             "y": 38
           },
           "data": {
             "handles": [
               {
                 "glbPosition": {
-                  "x": 304,
+                  "x": 418,
                   "y": 50
                 },
                 "relPosition": {
@@ -53787,7 +59882,7 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 328,
+                  "x": 442,
                   "y": 50
                 },
                 "relPosition": {
@@ -53807,7 +59902,7 @@ PROGRAM main
             "inputHandles": [
               {
                 "glbPosition": {
-                  "x": 304,
+                  "x": 418,
                   "y": 50
                 },
                 "relPosition": {
@@ -53826,7 +59921,7 @@ PROGRAM main
             "outputHandles": [
               {
                 "glbPosition": {
-                  "x": 328,
+                  "x": 442,
                   "y": 50
                 },
                 "relPosition": {
@@ -53844,7 +59939,7 @@ PROGRAM main
             ],
             "inputConnector": {
               "glbPosition": {
-                "x": 304,
+                "x": 418,
                 "y": 50
               },
               "relPosition": {
@@ -53861,7 +59956,7 @@ PROGRAM main
             },
             "outputConnector": {
               "glbPosition": {
-                "x": 328,
+                "x": 442,
                 "y": 50
               },
               "relPosition": {
@@ -53909,14 +60004,14 @@ PROGRAM main
           "id": "COIL_abc952ac-4811-408f-8ebf-514036f7852f",
           "type": "coil",
           "position": {
-            "x": 418,
+            "x": 532,
             "y": 38
           },
           "data": {
             "handles": [
               {
                 "glbPosition": {
-                  "x": 418,
+                  "x": 532,
                   "y": 50
                 },
                 "relPosition": {
@@ -53933,7 +60028,7 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 446,
+                  "x": 560,
                   "y": 50
                 },
                 "relPosition": {
@@ -53953,7 +60048,7 @@ PROGRAM main
             "inputHandles": [
               {
                 "glbPosition": {
-                  "x": 418,
+                  "x": 532,
                   "y": 50
                 },
                 "relPosition": {
@@ -53972,7 +60067,7 @@ PROGRAM main
             "outputHandles": [
               {
                 "glbPosition": {
-                  "x": 446,
+                  "x": 560,
                   "y": 50
                 },
                 "relPosition": {
@@ -53990,7 +60085,7 @@ PROGRAM main
             ],
             "inputConnector": {
               "glbPosition": {
-                "x": 418,
+                "x": 532,
                 "y": 50
               },
               "relPosition": {
@@ -54007,7 +60102,7 @@ PROGRAM main
             },
             "outputConnector": {
               "glbPosition": {
-                "x": 446,
+                "x": 560,
                 "y": 50
               },
               "relPosition": {
@@ -54046,14 +60141,14 @@ PROGRAM main
           "id": "right-rail-rung_main_edb10c6c-fd84-40d7-935a-6b92d274e040",
           "type": "powerRail",
           "position": {
-            "x": 556,
+            "x": 670,
             "y": 30
           },
           "data": {
             "handles": [
               {
                 "glbPosition": {
-                  "x": 297,
+                  "x": 673,
                   "y": 50
                 },
                 "relPosition": {
@@ -54074,7 +60169,7 @@ PROGRAM main
             "inputHandles": [
               {
                 "glbPosition": {
-                  "x": 297,
+                  "x": 673,
                   "y": 50
                 },
                 "relPosition": {
@@ -54094,7 +60189,7 @@ PROGRAM main
             "outputHandles": [],
             "inputConnector": {
               "glbPosition": {
-                "x": 297,
+                "x": 673,
                 "y": 50
               },
               "relPosition": {
@@ -54190,17 +60285,24 @@ PROGRAM main
           "targetHandle": "input"
         },
         {
-          "id": "e_CONTACT_619738ab-12c9-460f-b6af-f9dcca3f02ae_PARALLEL_CLOSE_899945fd-d0bd-4597-9ffe-8d586c9c0a62__output_input",
-          "source": "CONTACT_619738ab-12c9-460f-b6af-f9dcca3f02ae",
-          "target": "PARALLEL_CLOSE_899945fd-d0bd-4597-9ffe-8d586c9c0a62",
-          "sourceHandle": "output",
-          "targetHandle": "input"
-        },
-        {
           "id": "e_PARALLEL_CLOSE_899945fd-d0bd-4597-9ffe-8d586c9c0a62_CONTACT_b454e6c5-ece9-4b97-b76d-d9c8744b24a2__output-right_input",
           "source": "PARALLEL_CLOSE_899945fd-d0bd-4597-9ffe-8d586c9c0a62",
           "target": "CONTACT_b454e6c5-ece9-4b97-b76d-d9c8744b24a2",
           "sourceHandle": "output-right",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_619738ab-12c9-460f-b6af-f9dcca3f02ae_CONTACT_b175501c-0eb3-47e0-a9c7-5e0307822c87__output_input",
+          "source": "CONTACT_619738ab-12c9-460f-b6af-f9dcca3f02ae",
+          "target": "CONTACT_b175501c-0eb3-47e0-a9c7-5e0307822c87",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_b175501c-0eb3-47e0-a9c7-5e0307822c87_PARALLEL_CLOSE_899945fd-d0bd-4597-9ffe-8d586c9c0a62__output_input",
+          "source": "CONTACT_b175501c-0eb3-47e0-a9c7-5e0307822c87",
+          "target": "PARALLEL_CLOSE_899945fd-d0bd-4597-9ffe-8d586c9c0a62",
+          "sourceHandle": "output",
           "targetHandle": "input"
         }
       ],
@@ -55469,13 +61571,13 @@ PROGRAM main
     },
     {
       "id": "rung_main_2897cec0-1504-43ae-8842-c3e5f168c058",
-      "comment": "Door 2/2: door request = Door_TP pulse (Auto) OR Man_Door held (Manual, hold-to-run).",
+      "comment": "Door 2/2: door request = Door_TP pulse (Auto) OR Man_Door held (Manual, hold-to-run). Manual branch also needs NOT Jog_Block (jog watchdog).",
       "defaultBounds": [
         300,
         100
       ],
       "reactFlowViewport": [
-        445,
+        559,
         174
       ],
       "nodes": [
@@ -56252,17 +62354,163 @@ PROGRAM main
           "dragging": false
         },
         {
+          "id": "CONTACT_228576f5-46f6-4725-bcc6-581c5ec040ba",
+          "type": "contact",
+          "position": {
+            "x": 300,
+            "y": 130
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 300,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 324,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "negated",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 300,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 324,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 300,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 324,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "6368603",
+            "variable": {
+              "id": "",
+              "name": "Jog_Block",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
           "id": "PARALLEL_CLOSE_2c6b12ec-0793-43a9-bae7-bd5418836902",
           "type": "parallel",
           "position": {
-            "x": 255,
+            "x": 369,
             "y": 49
           },
           "data": {
             "handles": [
               {
                 "glbPosition": {
-                  "x": 255,
+                  "x": 369,
                   "y": 50
                 },
                 "relPosition": {
@@ -56280,8 +62528,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 51
                 },
                 "relPosition": {
                   "x": 2,
@@ -56297,7 +62545,7 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
+                  "x": 373,
                   "y": 50
                 },
                 "relPosition": {
@@ -56315,8 +62563,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 49
                 },
                 "relPosition": {
                   "x": 2,
@@ -56334,7 +62582,7 @@ PROGRAM main
             "inputHandles": [
               {
                 "glbPosition": {
-                  "x": 255,
+                  "x": 369,
                   "y": 50
                 },
                 "relPosition": {
@@ -56352,8 +62600,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 51
                 },
                 "relPosition": {
                   "x": 2,
@@ -56371,7 +62619,7 @@ PROGRAM main
             "outputHandles": [
               {
                 "glbPosition": {
-                  "x": 259,
+                  "x": 373,
                   "y": 50
                 },
                 "relPosition": {
@@ -56389,8 +62637,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 49
                 },
                 "relPosition": {
                   "x": 2,
@@ -56407,7 +62655,7 @@ PROGRAM main
             ],
             "inputConnector": {
               "glbPosition": {
-                "x": 255,
+                "x": 369,
                 "y": 50
               },
               "relPosition": {
@@ -56425,7 +62673,7 @@ PROGRAM main
             },
             "outputConnector": {
               "glbPosition": {
-                "x": 259,
+                "x": 373,
                 "y": 50
               },
               "relPosition": {
@@ -56444,8 +62692,8 @@ PROGRAM main
             "numericId": "555340",
             "parallelInputConnector": {
               "glbPosition": {
-                "x": 259,
-                "y": 50
+                "x": 371,
+                "y": 51
               },
               "relPosition": {
                 "x": 2,
@@ -56461,8 +62709,8 @@ PROGRAM main
             },
             "parallelOutputConnector": {
               "glbPosition": {
-                "x": 259,
-                "y": 50
+                "x": 371,
+                "y": 49
               },
               "relPosition": {
                 "x": 2,
@@ -56501,14 +62749,14 @@ PROGRAM main
           "id": "COIL_b4c70539-f718-4618-96ec-e9ab42f6cde8",
           "type": "coil",
           "position": {
-            "x": 304,
+            "x": 418,
             "y": 38
           },
           "data": {
             "handles": [
               {
                 "glbPosition": {
-                  "x": 304,
+                  "x": 418,
                   "y": 50
                 },
                 "relPosition": {
@@ -56525,7 +62773,7 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 332,
+                  "x": 446,
                   "y": 50
                 },
                 "relPosition": {
@@ -56545,7 +62793,7 @@ PROGRAM main
             "inputHandles": [
               {
                 "glbPosition": {
-                  "x": 304,
+                  "x": 418,
                   "y": 50
                 },
                 "relPosition": {
@@ -56564,7 +62812,7 @@ PROGRAM main
             "outputHandles": [
               {
                 "glbPosition": {
-                  "x": 332,
+                  "x": 446,
                   "y": 50
                 },
                 "relPosition": {
@@ -56582,7 +62830,7 @@ PROGRAM main
             ],
             "inputConnector": {
               "glbPosition": {
-                "x": 304,
+                "x": 418,
                 "y": 50
               },
               "relPosition": {
@@ -56599,7 +62847,7 @@ PROGRAM main
             },
             "outputConnector": {
               "glbPosition": {
-                "x": 332,
+                "x": 446,
                 "y": 50
               },
               "relPosition": {
@@ -56638,14 +62886,14 @@ PROGRAM main
           "id": "right-rail-rung_main_2897cec0-1504-43ae-8842-c3e5f168c058",
           "type": "powerRail",
           "position": {
-            "x": 442,
+            "x": 556,
             "y": 30
           },
           "data": {
             "handles": [
               {
                 "glbPosition": {
-                  "x": 297,
+                  "x": 559,
                   "y": 50
                 },
                 "relPosition": {
@@ -56666,7 +62914,7 @@ PROGRAM main
             "inputHandles": [
               {
                 "glbPosition": {
-                  "x": 297,
+                  "x": 559,
                   "y": 50
                 },
                 "relPosition": {
@@ -56686,7 +62934,7 @@ PROGRAM main
             "outputHandles": [],
             "inputConnector": {
               "glbPosition": {
-                "x": 297,
+                "x": 559,
                 "y": 50
               },
               "relPosition": {
@@ -56761,13 +63009,6 @@ PROGRAM main
           "targetHandle": "input"
         },
         {
-          "id": "e_CONTACT_602f7e6c-6939-4cdf-abe0-3254ffe8d449_PARALLEL_CLOSE_2c6b12ec-0793-43a9-bae7-bd5418836902__output_input-down",
-          "source": "CONTACT_602f7e6c-6939-4cdf-abe0-3254ffe8d449",
-          "target": "PARALLEL_CLOSE_2c6b12ec-0793-43a9-bae7-bd5418836902",
-          "sourceHandle": "output",
-          "targetHandle": "input-down"
-        },
-        {
           "id": "e_PARALLEL_CLOSE_2c6b12ec-0793-43a9-bae7-bd5418836902_COIL_b4c70539-f718-4618-96ec-e9ab42f6cde8__output-right_input",
           "source": "PARALLEL_CLOSE_2c6b12ec-0793-43a9-bae7-bd5418836902",
           "target": "COIL_b4c70539-f718-4618-96ec-e9ab42f6cde8",
@@ -56780,6 +63021,20 @@ PROGRAM main
           "target": "right-rail-rung_main_2897cec0-1504-43ae-8842-c3e5f168c058",
           "sourceHandle": "output",
           "targetHandle": "right-rail"
+        },
+        {
+          "id": "e_CONTACT_602f7e6c-6939-4cdf-abe0-3254ffe8d449_CONTACT_228576f5-46f6-4725-bcc6-581c5ec040ba__output_input",
+          "source": "CONTACT_602f7e6c-6939-4cdf-abe0-3254ffe8d449",
+          "target": "CONTACT_228576f5-46f6-4725-bcc6-581c5ec040ba",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_228576f5-46f6-4725-bcc6-581c5ec040ba_PARALLEL_CLOSE_2c6b12ec-0793-43a9-bae7-bd5418836902__output_input-down",
+          "source": "CONTACT_228576f5-46f6-4725-bcc6-581c5ec040ba",
+          "target": "PARALLEL_CLOSE_2c6b12ec-0793-43a9-bae7-bd5418836902",
+          "sourceHandle": "output",
+          "targetHandle": "input-down"
         }
       ],
       "selectedNodes": [],
@@ -58776,13 +65031,13 @@ PROGRAM main
     },
     {
       "id": "rung_main_db69703d-48a7-4c7f-9932-8da79df24bb8",
-      "comment": "C1 request: C1 runs always in Auto and Stop mode (bottles queue at the closed door), stops in FAULT; in Manual only while Man_C1 is held. E-stop is handled by Master_Enable in the FB.",
+      "comment": "C1 request: C1 runs always in Auto and Stop mode (bottles queue at the closed door), stops in FAULT; in Manual only while Man_C1 is held. E-stop is handled by Master_Enable in the FB. Manual branch also needs NOT Jog_Block (jog watchdog).",
       "defaultBounds": [
         300,
         100
       ],
       "reactFlowViewport": [
-        445,
+        559,
         174
       ],
       "nodes": [
@@ -59687,17 +65942,163 @@ PROGRAM main
           "dragging": false
         },
         {
+          "id": "CONTACT_7e91f42b-0bec-4fc1-b5cf-e956689f2a5d",
+          "type": "contact",
+          "position": {
+            "x": 300,
+            "y": 130
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 300,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 324,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "negated",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 300,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 324,
+                  "y": 142
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 300,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 324,
+                "y": 142
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "7670634",
+            "variable": {
+              "id": "",
+              "name": "Jog_Block",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
           "id": "PARALLEL_CLOSE_110f4cd6-9ca9-4643-a532-4e1331e93987",
           "type": "parallel",
           "position": {
-            "x": 255,
+            "x": 369,
             "y": 49
           },
           "data": {
             "handles": [
               {
                 "glbPosition": {
-                  "x": 255,
+                  "x": 369,
                   "y": 50
                 },
                 "relPosition": {
@@ -59715,8 +66116,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 51
                 },
                 "relPosition": {
                   "x": 2,
@@ -59732,7 +66133,7 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
+                  "x": 373,
                   "y": 50
                 },
                 "relPosition": {
@@ -59750,8 +66151,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 49
                 },
                 "relPosition": {
                   "x": 2,
@@ -59769,7 +66170,7 @@ PROGRAM main
             "inputHandles": [
               {
                 "glbPosition": {
-                  "x": 255,
+                  "x": 369,
                   "y": 50
                 },
                 "relPosition": {
@@ -59787,8 +66188,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 51
                 },
                 "relPosition": {
                   "x": 2,
@@ -59806,7 +66207,7 @@ PROGRAM main
             "outputHandles": [
               {
                 "glbPosition": {
-                  "x": 259,
+                  "x": 373,
                   "y": 50
                 },
                 "relPosition": {
@@ -59824,8 +66225,8 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 259,
-                  "y": 50
+                  "x": 371,
+                  "y": 49
                 },
                 "relPosition": {
                   "x": 2,
@@ -59842,7 +66243,7 @@ PROGRAM main
             ],
             "inputConnector": {
               "glbPosition": {
-                "x": 255,
+                "x": 369,
                 "y": 50
               },
               "relPosition": {
@@ -59860,7 +66261,7 @@ PROGRAM main
             },
             "outputConnector": {
               "glbPosition": {
-                "x": 259,
+                "x": 373,
                 "y": 50
               },
               "relPosition": {
@@ -59879,8 +66280,8 @@ PROGRAM main
             "numericId": "5520689",
             "parallelInputConnector": {
               "glbPosition": {
-                "x": 259,
-                "y": 50
+                "x": 371,
+                "y": 51
               },
               "relPosition": {
                 "x": 2,
@@ -59896,8 +66297,8 @@ PROGRAM main
             },
             "parallelOutputConnector": {
               "glbPosition": {
-                "x": 259,
-                "y": 50
+                "x": 371,
+                "y": 49
               },
               "relPosition": {
                 "x": 2,
@@ -59936,14 +66337,14 @@ PROGRAM main
           "id": "COIL_3fd108e5-1cc2-4cd9-ac46-7560bb43e224",
           "type": "coil",
           "position": {
-            "x": 304,
+            "x": 418,
             "y": 38
           },
           "data": {
             "handles": [
               {
                 "glbPosition": {
-                  "x": 304,
+                  "x": 418,
                   "y": 50
                 },
                 "relPosition": {
@@ -59960,7 +66361,7 @@ PROGRAM main
               },
               {
                 "glbPosition": {
-                  "x": 332,
+                  "x": 446,
                   "y": 50
                 },
                 "relPosition": {
@@ -59980,7 +66381,7 @@ PROGRAM main
             "inputHandles": [
               {
                 "glbPosition": {
-                  "x": 304,
+                  "x": 418,
                   "y": 50
                 },
                 "relPosition": {
@@ -59999,7 +66400,7 @@ PROGRAM main
             "outputHandles": [
               {
                 "glbPosition": {
-                  "x": 332,
+                  "x": 446,
                   "y": 50
                 },
                 "relPosition": {
@@ -60017,7 +66418,7 @@ PROGRAM main
             ],
             "inputConnector": {
               "glbPosition": {
-                "x": 304,
+                "x": 418,
                 "y": 50
               },
               "relPosition": {
@@ -60034,7 +66435,7 @@ PROGRAM main
             },
             "outputConnector": {
               "glbPosition": {
-                "x": 332,
+                "x": 446,
                 "y": 50
               },
               "relPosition": {
@@ -60073,14 +66474,14 @@ PROGRAM main
           "id": "right-rail-rung_main_db69703d-48a7-4c7f-9932-8da79df24bb8",
           "type": "powerRail",
           "position": {
-            "x": 442,
+            "x": 556,
             "y": 30
           },
           "data": {
             "handles": [
               {
                 "glbPosition": {
-                  "x": 297,
+                  "x": 559,
                   "y": 50
                 },
                 "relPosition": {
@@ -60101,7 +66502,7 @@ PROGRAM main
             "inputHandles": [
               {
                 "glbPosition": {
-                  "x": 297,
+                  "x": 559,
                   "y": 50
                 },
                 "relPosition": {
@@ -60121,7 +66522,7 @@ PROGRAM main
             "outputHandles": [],
             "inputConnector": {
               "glbPosition": {
-                "x": 297,
+                "x": 559,
                 "y": 50
               },
               "relPosition": {
@@ -60189,13 +66590,6 @@ PROGRAM main
           "targetHandle": "input"
         },
         {
-          "id": "e_CONTACT_a64eed2f-ed05-42d5-b329-bc4ecc9ba7ca_PARALLEL_CLOSE_110f4cd6-9ca9-4643-a532-4e1331e93987__output_input-down",
-          "source": "CONTACT_a64eed2f-ed05-42d5-b329-bc4ecc9ba7ca",
-          "target": "PARALLEL_CLOSE_110f4cd6-9ca9-4643-a532-4e1331e93987",
-          "sourceHandle": "output",
-          "targetHandle": "input-down"
-        },
-        {
           "id": "e_CONTACT_d24bc9bf-dcf5-4752-8608-bda7b324df39_CONTACT_379707af-4612-453d-8980-d22267f44940__output_input",
           "source": "CONTACT_d24bc9bf-dcf5-4752-8608-bda7b324df39",
           "target": "CONTACT_379707af-4612-453d-8980-d22267f44940",
@@ -60222,6 +66616,20 @@ PROGRAM main
           "target": "right-rail-rung_main_db69703d-48a7-4c7f-9932-8da79df24bb8",
           "sourceHandle": "output",
           "targetHandle": "right-rail"
+        },
+        {
+          "id": "e_CONTACT_a64eed2f-ed05-42d5-b329-bc4ecc9ba7ca_CONTACT_7e91f42b-0bec-4fc1-b5cf-e956689f2a5d__output_input",
+          "source": "CONTACT_a64eed2f-ed05-42d5-b329-bc4ecc9ba7ca",
+          "target": "CONTACT_7e91f42b-0bec-4fc1-b5cf-e956689f2a5d",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_7e91f42b-0bec-4fc1-b5cf-e956689f2a5d_PARALLEL_CLOSE_110f4cd6-9ca9-4643-a532-4e1331e93987__output_input-down",
+          "source": "CONTACT_7e91f42b-0bec-4fc1-b5cf-e956689f2a5d",
+          "target": "PARALLEL_CLOSE_110f4cd6-9ca9-4643-a532-4e1331e93987",
+          "sourceHandle": "output",
+          "targetHandle": "input-down"
         }
       ],
       "selectedNodes": [],
