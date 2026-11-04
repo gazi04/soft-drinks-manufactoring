@@ -1,1 +1,4 @@
 plcs/*/build
+
+# FUXA live appdata (SQLite DBs written while FUXA runs, owned by root); the project is versioned as docs/hmi/fuxa-project.json
+/hmi/

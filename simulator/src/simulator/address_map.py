@@ -86,6 +86,8 @@ ALARMS_START = ALM_INDEX_JAM  # one bulk read of the 4 alarm coils
 ALARMS_COUNT = 4
 
 # --- Written by the PLC, read only by the HMI: conditioned signals (stage 3) -----
+OUTFEED_FULL = mx(3, 0)  # C2 really full (S7 filtered)
+ENTRY_LOAD = mx(3, 1)  # entry pocket loaded by the door, belt not moved yet
 JOG_BLOCK = mx(3, 2)  # a manual button held > 10 s (or a closed HMI page): manual outputs ignored until all released
 
 # --- Written by the HMI: the simulator NEVER writes these ------------------------

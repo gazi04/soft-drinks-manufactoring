@@ -23,7 +23,9 @@ def test_numbers_match_io_list():
     assert (am.ALM_INDEX_JAM, am.ALM_COMM_LOST) == (8232, 8235)
     assert (am.CMD, am.MODE_REQ, am.FILL_SETPOINT) == (1024, 1025, 1054)
     assert (am.MAN_C1, am.MAN_INDEX) == (8208, 8213)
+    assert (am.OUTFEED_FULL, am.ENTRY_LOAD) == (8216, 8217)  # %MX3.0, %MX3.1 (read by the HMI)
     assert am.JOG_BLOCK == 8218  # %MX3.2, jog watchdog (HMI issue I3)
+    assert not {am.OUTFEED_FULL, am.ENTRY_LOAD, am.JOG_BLOCK} & am.SIM_WRITE_COILS
 
 
 def test_animation_words():
