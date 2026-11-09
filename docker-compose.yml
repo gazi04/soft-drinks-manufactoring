@@ -4,12 +4,27 @@ services:
     # would then hold old binaries; update on purpose = new digest + `docker volume rm` the build volume
     image: ghcr.io/autonomy-logic/openplc-runtime@sha256:2ca9fc611f25c3ad0471b996a4bf27507ac112612292426ca6d5ca4bf06e97e6
     ports:
-      - "8443:8443" # editor connection
+      # editor connection: Editor v4 always uses port 8443, only the IP can change, so every PLC gets
+      # its own loopback IP (filler 127.0.0.1 = `localhost`, syrup 127.0.0.2), like real PLCs on one network
+      - "127.0.0.1:8443:8443"
+      - "[::1]:8443:8443" # `localhost` may resolve to IPv6 first
       - "502:502" # Modbus TCP
     cap_add: [SYS_NICE, SYS_RESOURCE]
     volumes:
       - openplc-data:/var/run/runtime
       - openplc-build:/workdir/build # compiled PLC program (libplc_*.so): survives down/up and re-creation
+    restart: unless-stopped
+
+  plc-syrup-carb:
+    # syrup room / carbonator (PLC 2, report 6.1): same runtime image as the filler, own volumes and host ports
+    image: ghcr.io/autonomy-logic/openplc-runtime@sha256:2ca9fc611f25c3ad0471b996a4bf27507ac112612292426ca6d5ca4bf06e97e6
+    ports:
+      - "127.0.0.2:8443:8443" # editor connection: Editor device IP 127.0.0.2 (see the filler's comment)
+      - "5022:502" # Modbus TCP (host 5022 -> container 502)
+    cap_add: [SYS_NICE, SYS_RESOURCE]
+    volumes:
+      - syrup-data:/var/run/runtime
+      - syrup-build:/workdir/build # compiled PLC program, same as openplc-build for the filler
     restart: unless-stopped
 
   fuxa:
@@ -25,5 +40,7 @@ services:
 volumes:
   openplc-data:
   openplc-build:
+  syrup-data:
+  syrup-build:
   fuxa-plugins:
   fuxa-daq:
