@@ -4,9 +4,9 @@
     "type": "plc-project"
   },
   "data": {
-    "pous": [],
     "dataTypes": [],
-    "libraries": [],
+    "globalVariableLists": [],
+    "pous": [],
     "configuration": {
       "resource": {
         "tasks": [
@@ -20,12 +20,13 @@
         "instances": [
           {
             "name": "instance0",
-            "program": "main",
-            "task": "task0"
+            "task": "task0",
+            "program": "main"
           }
         ],
         "globalVariables": []
       }
-    }
+    },
+    "libraries": []
   }
 }
