@@ -18,32 +18,44 @@ Never start the next stage with a failing test.
 
 ## Program structure
 
+Status 2026-11-03: stages 0–9 built (✅): the simulator is complete for the filler.
+
 ```
 simulator/src/simulator/
-├── main.py            ← entry point: panel, or --headless
-├── config.py          ← all parameters (times, rates, PLC address)
-├── address_map.py     ← Modbus addresses from io-list.md; which ones the simulator may write
-├── bottle.py          ← Bottle objects carrying their state
-├── events.py          ← Event, EventLog (bottle events, PLC changes, audit warnings)
-├── conveyor.py        ← Conveyor class: slots, accumulation, sensors
+├── __init__.py        ✅ entry point main(): CLI, panel (default) or --headless
+├── config.py          ✅ all parameters (times, rates, windows, PLC address)
+├── address_map.py     ✅ Modbus addresses from io-list.md; which ones the simulator may write
+├── bottle.py          ✅ Bottle objects carrying their state
+├── events.py          ✅ Event, EventLog (bottle events, PLC changes, audit warnings; file + console echo)
+├── conveyor.py        ✅ Conveyor class: slots, accumulation, queue restart, sensors
 ├── machines/
-│   └── filler.py      ← index belt, door, stations, discharge
-├── standins.py        ← bottle supply, labeler stand-in, wiring values, heartbeat
-├── plant.py           ← composes C1 + filler + C2 + stand-ins, one step() for the whole world
-├── commands.py        ← command queue: panel/scenario → plant
-├── plcs.py            ← Modbus client(s), the only file that knows Modbus
-├── loop.py            ← tick loop (report section 7.3)
+│   └── filler.py      ✅ index belt, door, stations, discharge, audit
+├── standins.py        ✅ bottle supply, labeler stand-in, heartbeat
+├── plant.py           ✅ composes C1 + filler + C2 + stand-ins; sub-steps, pulse keeping, setpoints
+├── plcs.py            ✅ Modbus client, the only file that knows Modbus (link handling, read-back)
+├── loop.py            ✅ tick loop (report section 7.3), PLC watcher
+├── commands.py        ✅ command queue: panel/scenario → plant (stage 7)
+├── scenarios.py       ✅ fixed command sequences, ScenarioSlot for the panel (stages 7–8)
 └── ui/
-    └── app.py         ← Textual control panel
+    ├── view.py        ✅ panel text built from plant + PLC status (pure, testable)
+    └── app.py         ✅ Textual control panel (stage 8)
+
+simulator/tests/
+├── unit/              ✅ pytest, no PLC (uv run pytest)
+├── test_*.py          ✅ ladder stage scripts (one by one, against the PLC)
+├── test_link.py       ✅ stage 5 first contact (+ --restart)
+├── test_closed_loop.py ✅ stage 6: N bottles through the real PLC
+├── test_scenarios.py  ✅ stage 7: 9 fault scenarios through the real PLC
+└── hmi.py             ✅ acts as the HMI until FUXA exists (start/stop/reset/mode/status)
 ```
 
 **Dependency direction.** The arrows point to what a module may import:
 
 ```
-ui/app.py ─┐
-           ├─► loop.py ─► plant.py ─► machines/, conveyor.py, standins.py, bottle.py, events.py
-main.py ───┘      │
-                  └─► plcs.py ─► address_map.py
+ui/app.py ──┐
+            ├─► loop.py ─► plant.py ─► machines/, conveyor.py, standins.py, bottle.py, events.py
+__init__.py ┘      │
+                   └─► plcs.py ─► address_map.py, plant.SimWrites, machines.filler.FillerOutputs
 ```
 
 **Rule:** the pure part (plant and everything below it) never imports pymodbus or Textual. It can therefore be unit-tested in milliseconds without Docker.
@@ -55,20 +67,26 @@ main.py ───┘      │
   - With the panel, the same loop runs as a Textual worker.
 - **Physics is synchronous and pure:** `step(outputs, dt) -> (sensors, events)`.
 - **Unit tests** live in `tests/unit/` and use pytest (a dev dependency). They stay apart from the PLC scripts in `tests/`, which pytest would otherwise collect.
-- **Starting parameters** live in `config.py` and are tuned later:
+- **Parameters** live in `config.py` (values as built; why each one: `docs/simulator/design-notes.md`):
 
 | Parameter | Value | Must fit with (PLC) |
 | --- | --- | --- |
-| Tick | 100 ms, measured `dt` | PLC scan 20 ms |
-| C1 / C2 | 8 slots, 0.5 s per slot step | – |
+| Tick | 100 ms, fixed-rate deadlines, measured `dt` (98–102 ms on the real link) | PLC scan 20 ms |
+| Sub-step | late ticks split into steps ≤ 0.1 s | same time as the PLC's wall-clock timers |
+| Slow tick warning | `dt` > 0.3 s (physics verified clean up to 0.4 s) | – |
+| C1 / C2 | 8 slots, 0.5 s per slot step; a queue restarts from rest | – |
+| S7 (C2 full) | C2 slot 1, not the entry slot | `Outfeed_Full` filter 2 s vs a 1.5 s WORK |
 | Index pitch time | 1.5 s | index jam alarm 5 s |
-| S8 cam window | first 15 % of a pitch | overrun after S8 ≈ 0.1–0.2 s |
+| S8 cam window | first 15 % of a pitch (0.225 s); S6/S8 kept ON for one write | overrun after S8 ≈ 0.1–0.2 s |
+| Station window (S3–S5) | first 40 % of a pitch (0.6 s) | late tick overrun |
 | Door pass time | 0.3 s | door TP 0.5 s → exactly one bottle |
 | Fill flow | 100 ml/s (500 ml in 5 s) | fill timeout 10 s, setpoint 500 ml |
+| Rinse / cap minimum | 1.5 s / 1.0 s | RinseTime 2 s / CapTime 1.5 s |
 | S6 pulse | 0.3 s | at least one full tick |
 | Heartbeat toggle | 1 s | watchdog 3 s |
 | Bottle supply | 30 bottles/min | – |
 | Labeler stand-in | takes 1 bottle every 2 s | – |
+| Modbus | timeout 1 s, no retries, reconnect every 2 s | – |
 | PLC address | `127.0.0.1:502` (later `plc-filler:502`) | – |
 
 ---
@@ -182,7 +200,7 @@ The first run with the real PLC writes only the heartbeat.
   - **Fixed rate:** sleep until the next 0.1 s deadline (not "work, then sleep 0.1 s", which drifts to 102–110 ms); log min / max `dt` at the end.
   - Late ticks are already handled by `Plant.step` (sub-steps ≤ 0.1 s, S6/S8 pulses kept for one write, "slow tick" SIM warning above 0.3 s; physics verified clean up to 0.4 s stalls).
   - Every status read: `plant.apply_setpoints(status.fill_setpoint, status.rinse_time_ms, status.cap_time_ms)`.
-  - Every ~10 ticks: `plc.verify_writes(writes)` right after the write; a non-empty list → SIM warning "foreign writer / debugger force on …".
+  - Every 10 ticks: `plc.verify_writes(last_writes)` **before** the next write (compares with what was written last tick, so the whole gap between ticks is checked; right after the write only ~2 ms would be); a non-empty list → SIM warning "written values changed by someone else …".
   - Link: `plc.ensure_connected()` every tick, log changes of `plc.link_ok` (not of the TCP state); `PlcReplyError` → log once, keep running.
 - PLC watcher: compares the status with the previous tick and logs changes (`PLC: step 10 → 20`, state changes, alarm on/off).
 - Output goes to the console and a log file. `uv run simulator --headless`.
@@ -219,6 +237,13 @@ An optional `--scenario` CLI runs a fixed sequence of commands, for repeatable h
 | Normal run, all stations busy | Good bottles only |
 | Manual mode (buttons forced in the debugger) | Jog moves the belt / opens valves; `Man_Fill` without a bottle at S4 → no spill; `Man_Index` blocked while a valve is open |
 
+**As built (2026-11-03):**
+- `commands.py`: `Command(name, value)`, `CommandQueue.put()` checks name and type at once (bool commands take only `bool`; number commands no `bool`, no negatives), `apply(plant)` runs at tick start and logs one SIM event per command. Nine commands: `supply_rate`, `add_bottles`, `supply_paused`, `fill_flow`, `product_available`, `e_stop`, `index_jam`, `labeler_running`, `heartbeat`. Each only sets an existing plant attribute; new physics: `Filler.index_jammed` (motor ON, belt stands, no S8 edge).
+- `scenarios.py`: a scenario is a list of `Step(wait, command, note)`; `wait` is seconds after the previous step **or a named condition** (`plc_running`, `in_step`, `in_state`, `alarm`, `fill_level_at_least`). Every scenario starts with "until the PLC runs". Seven built-in scenarios; `uv run simulator --headless --scenario NAME`, `--list-scenarios`.
+- `loop.run(..., commands=, scenario=)`; `LoopStats.status` keeps the last PLC status for scenario conditions and tests.
+- **Test:** `tests/test_scenarios.py` (9 scenarios: the 7 above + `stop_during_work` and `manual`, both HMI-only). The normal run stays in `test_closed_loop.py`. Manual buttons are written by the test acting as the HMI, not forced in the debugger.
+- **Found:** `index_jam` crashed a bottle on restart (second door pulse into the occupied, sensorless entry pocket). Fixed in the PLC with the `Entry_Load` tracking bit (%MX3.1); `index_jam` passes since.
+
 ## Stage 8 – Textual control panel
 
 `ui/app.py` (report section 7.5):
@@ -231,12 +256,26 @@ The panel never writes `Cmd`, mode or setpoints. Those stay with FUXA.
 
 **Test:** run the stage 7 scenarios from the panel; `--headless` still works unchanged.
 
+**As built (2026-11-03):**
+- `ui/view.py`: pure functions (`world_text`, `header_text`, `scenario_text`, `event_style`, `matches`) returning rich `Text`; `ui/app.py`: `SimulatorApp` with only layout and event handlers.
+- The tick loop runs as a Textual worker (same asyncio loop: controls call `queue.put()` directly). The screen is redrawn by a 0.25 s timer, not per tick.
+- Six switches (pause supply, product available, E-stop pressed, index jam, labeler running, heartbeat), three value rows (supply rate, add bottles, fill flow), scenario select + Run (`ScenarioSlot`). Switches follow the plant (e.g. a scenario) without sending commands back.
+- `uv run simulator` starts the panel; `q` / `ctrl+q` stop the loop cleanly and print the summary.
+- No Start/Stop/Reset/mode controls (one-writer rule); no tabs yet (one machine).
+- **Tests:** `tests/unit/test_view.py`, `tests/unit/test_panel.py` (Textual pilot at 140×45, dead PLC port). Against the PLC: `e_stop` scenario run from the panel. Tick `dt` 85–119 ms while the panel draws (headless 98–102 ms), no slow ticks.
+
 ## Stage 9 – HMI support and wrap-up
 
 - Animation slot words for FUXA from `Conveyor.slot_bits()`, report section 6.2 (%MW70–79). Check first that these addresses are free in the filler project, and add them to `io-list.md`.
 - Final parameter tuning.
 - `simulator/README.md`: how to run it.
 - Report section 7 updated with what was built.
+
+**As built (2026-11-03):**
+- Animation words %MW70–75 (layout in `docs/filler/io-list.md`): C1 and C2 slot bits from `Conveyor.slot_bits()`, one state code per filler pocket from `Filler.pocket_codes()` (0 empty, 1 bottle, 2 rinsed, 3 filled, 4 capped). Written with one extra `write_registers` per tick; the addresses are in `SIM_WRITE_REGISTERS`. Probe first: an unused %MW keeps a written value (no ladder change needed).
+- The PLC mode (`ModeReq`, read only) is now part of `PlcStatus`: the watcher logs `mode Stop -> Auto`, the panel header shows it and warns "Start is ignored" outside Auto (the PLC comes back in Mode 0 after a restart).
+- Tuning: checked, nothing changed (table in `design-notes.md`).
+- **Tests:** unit tests 131 (`test_address_map`, `test_plant`, `test_plcs_mapping`, `test_loop`, `test_view`); `tests/test_closed_loop.py` C5: after the loop stops, PLC %MW70–75 = plant (5/5, `dt` 98–102 ms); `test_scenarios.py --quick` re-run.
 
 ---
 
@@ -246,7 +285,7 @@ Each new machine follows the same pattern:
 
 1. A machine class in `machines/` + unit tests.
 2. An entry in `Plant`; a stand-in is replaced by the real machine.
-3. A wiring table entry (`wiring.py`, e.g. `Product_Available` from the syrup room's %MW60 to the filler).
+3. A wiring table entry (`wiring.py`, e.g. `Product_Available` from the syrup room's %MX6.0 to the filler's %MX1.0).
 4. One more client in `plcs.py`.
 5. One tab in the panel.
 

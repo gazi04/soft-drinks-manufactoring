@@ -107,7 +107,7 @@ Public University "Kadri Zeka" Gjilan.
 | **OpenPLC Editor v4**  | Write, compile, upload and debug the PLC program | Installed as AppImage on Arch. Supports LD, ST, FBD, IL. SFC support unclear – verify. Has debugger with forcing and trends.           |
 | **OpenPLC Runtime v4** | The soft PLC that executes the program           | Run via Docker (`ghcr.io/autonomy-logic/openplc-runtime:latest`). Port 8443 = editor connection, port 502 = Modbus TCP. No time limit. |
 | **Python simulator**   | Simulates the physical plant ("fake world")      | Uses `pymodbus` as Modbus TCP client. Runs headless (no window).                                                                       |
-| **FUXA**               | Web-based HMI / SCADA                            | Runs in Docker or Node.js, opened in browser. Shows animated plant and provides operator buttons.                                      |
+| **FUXA**               | Web-based HMI / SCADA                            | Runs in Docker or Node.js, opened in browser. Shows animated plant and provides operator buttons; alarm history and trends (its DAQ store logs selected tags). |
 
 **Important:** use OpenPLC **v4**, not v3. v3 is end-of-life (archived April 2026)
 and has an unpatched critical vulnerability. Many online tutorials still show v3.
@@ -217,8 +217,9 @@ plc-<industry>-project/
     -v openplc-runtime-data:/var/run/runtime \
     ghcr.io/autonomy-logic/openplc-runtime:latest
   ```
+  *(Historical first setup. Now: `docker-compose.yml` with the image pinned by digest and the volume `openplc-build` for the compiled program, see `CLAUDE.md`.)*
   - Confirm the Modbus TCP server is enabled in the runtime/editor settings.
-- FUXA and the Python simulator: not set up yet.
+- FUXA and the Python simulator: not set up yet *(at that time; both are built now, see `docs/filler/progress.md`)*.
 
 ## 9. Next steps
 

@@ -11,6 +11,7 @@ Read before proposing structure or code:
 - `docs/<machine>/progress.md` — per-machine checklist, decisions, open questions and log (currently only `docs/filler/`). Check the current step there before starting work on a machine, and update it as steps complete.
 - `docs/simulator/roadmap.md` — staged build plan for the Python simulator (stages 0–9, test per stage); progress is ticked in `docs/filler/progress.md` section 2.
 - `docs/simulator/design-notes.md` — short answers to the simulator's non-obvious decisions (timing, windows, Modbus link); keep it updated when such a decision changes.
+- `docs/hmi/roadmap.md` — staged build plan for the FUXA HMI (stages 0–7, test per stage, open issues I1–I11); progress is ticked there and in `docs/filler/progress.md` section 3.
 - `docs/project-context.md` — course requirements, syllabus topics the project must visibly demonstrate, tool-stack decisions and rejected alternatives.
 
 The student must be able to explain every part of the code (plagiarism rules), so prefer explaining and showing steps over silently doing large changes.
@@ -25,8 +26,9 @@ docker compose logs -f openplc
 # Simulator (uv project, Python 3.13, pymodbus)
 cd simulator
 uv sync
-uv run simulator                          # entry point simulator:main (currently a stub); --headless planned
-uv run pytest                             # pure-Python simulator unit tests in tests/unit (no PLC needed)
+uv run simulator                          # Textual control panel against the PLC (q quits); same options as headless
+uv run simulator --headless               # tick loop without panel (console + logs/run-*.log); --seconds, --rate, --add; Ctrl+C stops
+uv run pytest                             # simulator unit tests in tests/unit (no PLC needed; link/loop tests use a local pymodbus server)
 uv run python tests/test_signal_conditioning.py  # stage 3: Outfeed_Full filter + S6 edge (counted via GoodCount)
 uv run python tests/test_sequencer.py         # stage 4 (add --done with done bits forced in the debugger)
 uv run python tests/test_station_jobs.py      # stage 5a: done bits / job durations
@@ -35,8 +37,18 @@ uv run python tests/test_index_door.py        # stage 6: INDEX belt, door TP pul
 uv run python tests/test_stop_state.py        # stage 7: Stop at safe points, State word (29 checks)
 uv run python tests/test_alarms.py            # stage 8: alarms, timeouts, FAULT (25 checks, ~4 min; --quick skips the 2 min alarm)
 uv run python tests/test_estop_resume.py      # scenario: E-stop with a partly filled bottle, restart tops it up (16 checks)
+uv run python tests/test_jog_watchdog.py      # jog watchdog: manual button held > 10 s ignored until released (HMI issue I3, 9 checks)
 uv run python tests/test_link.py              # simulator stage 5: plcs.py first contact, heartbeat only (5 checks; --restart adds the reconnect check)
-uv run python tests/hmi.py auto reset start   # acts as the HMI until FUXA exists (Cmd / ModeReq only); `status` prints step, state, alarms
+uv run python tests/hmi.py auto reset start   # command-line HMI for the test scripts (Cmd / ModeReq only; FUXA's header does the same – never both at once); `status` prints step, state, alarms
+uv run python tests/test_closed_loop.py       # simulator stage 6: 20 bottles through the REAL PLC (5 checks incl. animation words, ~2.5 min; arg = number of bottles)
+uv run python tests/test_scenarios.py --quick # simulator stage 7: 9 fault scenarios through the REAL PLC (~12 min; names to pick some)
+uv run simulator --headless --scenario index_jam  # one fault scenario by hand (--list-scenarios)
+
+# FUXA project, run from the repo root (editor http://localhost:1881/editor): export after every change; import replaces the whole project
+curl -s http://localhost:1881/api/project | python3 -m json.tool --sort-keys > docs/hmi/fuxa-project.json
+curl -X POST -H 'Content-Type: application/json' --data @docs/hmi/fuxa-project.json http://localhost:1881/api/project
+(cd simulator && uv run python tests/fuxa_tags.py)      # regenerate device + 44 tags (address_map.py; one `Machine` per PLC) + views Line (start)/Filler/Alarms/Trends/Tags with header + 4 alarm definitions + 3 trend charts (DAQ on 4 tags) + side menu (fuxa_views.py, fuxa_shapes.py) into the export (export first, import after)
+(cd simulator && uv run python tests/test_hmi_tags.py)  # FUXA: tags = address_map (H1) + header/Filler/Line/Alarms/Trends (H5-H9) offline (--offline); FUXA value = PLC value, write path, connected, DAQ history (H2-H4, H10)
 ```
 
 The test scripts are plain Modbus scripts run one by one against the filler PLC in the runtime (not collected by pytest; `test_outputs.py` also holds the shared helpers the later scripts import). Release all debugger forces first. No linter or formatter is configured yet.
@@ -46,8 +58,8 @@ The test scripts are plain Modbus scripts run one by one against the filler PLC 
 Three separate programs form one closed loop over **Modbus TCP**:
 
 - **OpenPLC Runtime v4** (Docker, `ghcr.io/autonomy-logic/openplc-runtime`) — the only component that makes control decisions. Modbus server. PLC programs are written in the OpenPLC Editor v4 (AppImage) and uploaded via port 8443; projects live in `plcs/<machine>/` (filler: `plcs/filler/`). `plc/` on disk is the old throw-away `test-mapping` project (never committed).
-- **Python simulator** (`simulator/`) — the "factory": reads PLC outputs, simulates physics, writes sensor values back. Optional Textual control panel (engineer's test bench: supply, faults, per-bottle event log); `--headless` without it. Physics classes are pure Python (no Modbus/UI) and return sensors + events; panel → simulator via a command queue. Never run the `tests/` scripts while the simulator runs (both write the sensors).
-- **FUXA** (`hmi/`) — operator screens. `hmi/` is mounted as FUXA's `_appdata` (live SQLite DBs + settings); `docs/fuxa-project-v2.json` is a project export.
+- **Python simulator** (`simulator/`, how to run: `simulator/README.md`) — the "factory": reads PLC outputs, simulates physics, writes sensor values back. Complete for the filler (stages 0–9): pure physics (`plant.py` composes conveyors, `machines/filler.py`, `standins.py`; no Modbus/UI, returns sensors + events), `plcs.py` (the only Modbus file), `loop.py` (fixed-rate tick loop), `commands.py` (command queue, the only way to change the world at runtime, applied at tick start), `scenarios.py` (fixed command sequences with time or condition steps), Textual control panel `ui/` (`view.py` pure text builders, `app.py` the screen; controls only put commands on the queue; loop runs as a Textual worker), CLI `uv run simulator [--headless] [--scenario NAME]`. It also writes the HMI animation words %MW70–75 (C1/C2 slot bits, filler pocket state codes; layout in `docs/filler/io-list.md`) and reads `ModeReq` (read only) for the panel header. Never run the `tests/` scripts while the simulator runs (both write the sensors) – enforced by `plant_lock.py` (OS file lock per PLC host:port; a second simulator or sensor-writing test script stops with a message). Decisions that look odd (sub-steps, S7 on C2 slot 1, lazy Modbus client, read-back before write) are explained in `docs/simulator/design-notes.md` – keep them.
+- **FUXA** (`frangoteam/fuxa:1.3.5`, pinned) — operator screens. `hmi/` is mounted as FUXA's `_appdata` (live SQLite DBs + settings, owned by root, git-ignored); the trend history (DAQ, `server/_db`) is on the volume `fuxa-daq`, the Modbus plugin on `fuxa-plugins`; the project is versioned only as `docs/hmi/fuxa-project.json` – export it after every editor change (command above). Generated by `simulator/tests/fuxa_tags.py` (devices/tags, `Machine` per PLC) + `fuxa_views.py` (views, alarms, trend charts, side menu) + `fuxa_shapes.py` (FUXA shape formats); build/test steps and FUXA 1.3.5 findings in `docs/hmi/roadmap.md`. FUXA is an HMI writer (Cmd, ModeReq, setpoints, Man_*): `tests/hmi_guard.py` reminds `hmi.py` and the test scripts not to run while an operator uses it.
 
 Rules that span components:
 - Simulator and FUXA **never talk to each other** — everything goes through PLC memory.

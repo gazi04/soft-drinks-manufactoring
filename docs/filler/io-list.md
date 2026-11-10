@@ -105,10 +105,28 @@ Cleaned-up versions of raw sensors (`ladder-roadmap.md` stage 3). The sequencer 
 | Name | Type | Address | Modbus | Meaning |
 | --- | --- | --- | --- | --- |
 | Outfeed_Full | BOOL | %MX3.0 | coil 8216 | C2 really full: S7 ON 2 s without a break; released after S7 OFF 3 s (`state-diagram.md` rule 5) |
+| Entry_Load | BOOL | %MX3.1 | coil 8217 | Entry pocket loaded by the door, belt not moved yet: set by `Req_Door`, reset by `S8_Edge`; the door pulse needs it FALSE |
+| Jog_Block | BOOL | %MX3.2 | coil 8218 | Jog watchdog (HMI issue I3): a manual button ON > 10 s (lost mouse-up, closed HMI page) → manual branches ignored until all `Man_*` are released (`ladder-roadmap.md`, "Change: jog watchdog") |
 | S6_Edge | BOOL | – | – | One scan per discharged bottle (rising edge of S6) |
 | S8_Edge | BOOL | – | – | One scan per index step (rising edge of S8) |
 
-`Outfeed_Full` has an address so the test script and the HMI ("C2 full") can read it. Helper timers (`Full_OnTimer`, `Full_OffTimer`) are internal.
+`Outfeed_Full` has an address so the test script and the HMI ("C2 full") can read it. `Entry_Load` has one so the tests and the debugger can watch it: the entry pocket has no sensor, so this bit is the PLC's only knowledge of it (material tracking). Helper timers (`Full_OnTimer`, `Full_OffTimer`) are internal.
+
+## Animation data (written by the simulator, read by the HMI, ignored by the PLC)
+
+The physical truth (where each bottle is, its state) exists only in the simulator; FUXA can only read PLC memory. So the simulator writes it into spare words every tick (report sections 6.2 and 8.3). No PLC variable is located here; the runtime keeps written values (probed 2026-11-03). Only the simulator writes them.
+
+| Name | Type | Address | Modbus | Meaning |
+| --- | --- | --- | --- | --- |
+| Anim_C1 | INT | %MW70 | HR 1094 | C1 slots: bit i = bottle in slot i (bit 0 = entry, bit 7 = at the door) |
+| Anim_C2 | INT | %MW71 | HR 1095 | C2 slots: bit 0 = entry (after the filler), bit 7 = exit (labeler) |
+| Anim_Entry | INT | %MW72 | HR 1096 | Filler entry pocket: state code |
+| Anim_Rinse | INT | %MW73 | HR 1097 | Rinse pocket: state code |
+| Anim_Fill | INT | %MW74 | HR 1098 | Fill pocket: state code |
+| Anim_Cap | INT | %MW75 | HR 1099 | Cap pocket: state code |
+| – | – | %MW76–79 | HR 1100–1103 | Spare (C3 / other machines) |
+
+State code (highest reached): `0` empty, `1` empty bottle, `2` rinsed, `3` filled (≥ FillSetpoint), `4` capped. Conveyor words use bits 0–7 only, so no value turns negative when FUXA reads it as INT.
 
 ## Test variables (TEST ONLY: all removed from the project in stage 5b, 2026-11-02)
 

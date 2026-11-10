@@ -68,7 +68,7 @@ Steps are numbered so a step can be inserted later without renumbering.
 | 0 | IDLE | – (C1 keeps running unless E-stop/FAULT) | Auto AND Start AND no alarm | – |
 | 10 | WORK | Station jobs (table below) | All jobs done AND (S2 OR S3 OR S4 OR S5) → 15 if S5 AND `Outfeed_Full`, else 20 | Fill: 10 s, counted only while FillValve is ON |
 | 15 | WAIT_OUTFEED | – | `Outfeed_Full` released → 20 | none (waiting = **Blocked**); alarm after 2 min |
-| 20 | INDEX | IndexMotor; DoorMotor as TP pulse (e.g. 0.5 s) at step start if S2 | S8 rising edge → 10 | 5 s (index jam) |
+| 20 | INDEX | IndexMotor; DoorMotor as TP pulse (e.g. 0.5 s) at step start if S2 and the entry pocket is empty (`NOT Entry_Load`) | S8 rising edge → 10 | 5 s (index jam) |
 | 900 | FAULT | – | Reset | – |
 
 ## Station jobs inside step 10 (run in parallel)
@@ -225,6 +225,7 @@ Manual mode is for maintenance, setup and testing, for example "open the rinse v
 - **The sequencer is frozen.** The transition rungs get an extra contact `Mode = Auto`, so in Manual the step never changes.
 - **One button per actuator.** Each HMI button is its own `%MX` bit (`Man_Rinse`, `Man_Fill`, …, see `io-list.md`) and the PLC switches that output.
 - **Hold-to-run (jog).** The output is ON only while the button is held. When the operator lets go, it stops. This is safer than a toggle button that could be forgotten ON.
+- **Jog watchdog.** If a manual button stays ON longer than 10 s (for example the HMI page was closed while the button was held, so its "released" never arrives), the PLC ignores all manual buttons (`Jog_Block`, %MX3.2) until every button is released. The PLC never writes the `Man_*` bits itself, it only stops obeying them (`ladder-roadmap.md`, "Change: jog watchdog").
 - **Interlocks still apply.** The operator cannot do things that damage the machine or spill product:
   - `FillValve` only with a bottle at S4 (otherwise the product sprays onto the floor),
   - `IndexMotor` only with all valves closed and the cap head stopped (otherwise bottles break).

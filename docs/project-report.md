@@ -129,8 +129,8 @@ It is an **indexing machine**: three stations (rinse, fill, cap) on one internal
 
 - **Inputs:** bottle at entry door (S2), bottle at rinse (S3), fill (S4) and cap (S5) stations, discharge counter (S6), C2 full sensor (S7, on the labeler's infeed conveyor), index sensor (S8, belt moved one station), fill level (analog, ml), *Product available* from the syrup room.
 - **Outputs:** C1 infeed motor (runs continuously), entry door, internal index belt, rinse valve, fill valve, cap head.
-- **Sequence:** Idle → Work (rinse, fill and cap in parallel, each only if its station has a bottle) → Index (belt one station forward, door admits one bottle with a TP pulse, discharged bottle counted) → Work … Detailed state diagram: `docs/filler/state-diagram.md`.
-- **Interlocks:** filling only if *Product available*; index only when all station jobs are done; index with a bottle at the cap station only if C2 is not full (S7, filtered and latched as in section 5.3).
+- **Sequence:** Idle → Work (rinse, fill and cap in parallel, each only if its station has a bottle) → Index (belt one station forward, door admits one bottle with a TP pulse, only if the entry pocket is empty, discharged bottle counted) → Work … Detailed state diagram: `docs/filler/state-diagram.md`.
+- **Interlocks:** door only if the entry pocket is empty (the pocket has no sensor, so the PLC tracks it with a set/reset bit: set by the door, reset when the belt has moved; found by the simulator's jam scenario); filling only if *Product available*; index only when all station jobs are done; index with a bottle at the cap station only if C2 is not full (S7, filtered and latched as in section 5.3).
 - **Alarms:** fill timeout (valve open but level not rising), index jam, outfeed blocked too long.
 
 ### 4.4 Labeler and inspection (`plc-labeler`)
@@ -296,14 +296,16 @@ The simulator replaces the physical factory. It is **one Python program with one
 
 It has an optional **control panel** in the terminal (section 7.5) for the engineer who tests the line. FUXA remains the only operator screen. With `--headless` the simulator runs without the panel, for example inside Docker.
 
+**Status (2026-11-03):** built for the filler with stand-ins for its neighbours: physics, Modbus link, tick loop, command queue with fault scenarios, and the Textual control panel (`uv run simulator`, `--headless` without panel); 20 bottles run through the real filler PLC with 0 audit warnings, and 9 fault scenarios (gaps, no product, labeler stopped, index jam, slow fill, E-stop, heartbeat lost, Stop during WORK, Manual) pass against it. It writes the HMI animation data (%MW70–75) and shows the PLC's mode in the panel. The simulator is complete for the filler (`docs/simulator/roadmap.md`, stages 0–9); the structure below is the full-line target, the filler version is marked.
+
 ### 7.1 What it does
 
 - **Simulates sensors:** levels, temperatures, pressures, bottle-present signals, counts.
 - **Simulates the physical reaction to PLC outputs:** pump ON → level rises; cooling ON → temperature falls; CO2 valve ON → pressure rises; conveyor motor ON → bottles move.
 - **Simulates the hardwiring between PLCs:** copies handshake bits and the E-stop chain, and toggles the heartbeat bit once per second (section 5.2).
-- **Feeds the HMI animation:** writes conveyor slot data into the spare animation registers.
+- **Feeds the HMI animation:** writes the conveyor slots (one bit per slot) and the state of the bottle in each filler pocket (empty, bottle, rinsed, filled, capped) into the spare animation registers every tick.
 - **Injects faults for testing:** a jammed bottle, an empty label roll, a stuck valve, slow cooling. This shows that alarms and timeouts work.
-- **Audits the PLC:** every bottle is an object that carries its own state (fill level, rinsed, capped). The simulator logs a warning when the physics shows a control error: product spilled with no bottle under the valve, two bottles in one pocket, a bottle pushed onto a full conveyor, a bottle leaving uncapped or underfilled.
+- **Audits the PLC:** every bottle is an object that carries its own state (fill level, rinsed, capped). The simulator logs a warning when the physics shows a control error: product spilled with no bottle under the valve, two bottles in one pocket, a bottle pushed onto a full conveyor, a bottle leaving not rinsed, uncapped or underfilled. Setpoints are read from the PLC, so the underfill limit follows the HMI.
 
 **One writer per address.** The simulator writes only its own sensor and interface addresses. It never writes commands, modes or setpoints, which belong to the HMI. The filler's Modbus test scripts also write the sensors, so they must never run at the same time as the simulator.
 
@@ -311,23 +313,26 @@ It has an optional **control panel** in the terminal (section 7.5) for the engin
 
 ```
 simulator/src/simulator/
-├── main.py            ← entry point: panel or --headless
-├── loop.py            ← tick loop
-├── plcs.py            ← one Modbus client per PLC (5 connections), the only file that knows Modbus
-├── address_map.py     ← standard machine interface (section 6.2)
-├── wiring.py          ← handshake and E-stop wiring table
-├── conveyor.py        ← Conveyor class: slots, belt motion, full sensor
-├── bottle.py          ← Bottle objects carrying their state
-├── events.py          ← event log (bottle events, PLC state changes, audit warnings)
-├── commands.py        ← command queue: panel → simulator (supply, faults, stand-ins)
-├── faults.py          ← fault injection
-├── ui/                ← Textual control panel (section 7.5)
+├── __init__.py        ← entry point main(): panel or --headless          (built)
+├── loop.py            ← tick loop                                       (built)
+├── plant.py           ← composes conveyors, machines and stand-ins: one step() for the whole world   (built)
+├── standins.py        ← neighbours that do not exist yet (bottle supply, labeler, heartbeat)          (built)
+├── plcs.py            ← one Modbus client per PLC (5 connections), the only file that knows Modbus     (built: filler)
+├── address_map.py     ← standard machine interface (section 6.2)                                      (built: filler)
+├── wiring.py          ← handshake and E-stop wiring table                                             (later: the plant holds the wires)
+├── conveyor.py        ← Conveyor class: slots, belt motion, full sensor                               (built)
+├── bottle.py          ← Bottle objects carrying their state                                           (built)
+├── events.py          ← event log (bottle events, PLC state changes, audit warnings)                  (built)
+├── config.py          ← all parameters with the PLC time each one is checked against                  (built)
+├── commands.py        ← command queue: panel / scenario → plant (supply, faults, stand-ins)           (built)
+├── scenarios.py       ← fault injection: fixed command sequences, time or condition steps             (built, replaces faults.py)
+├── ui/                ← Textual control panel (section 7.5): view.py text, app.py screen              (built)
 └── machines/
-    ├── blow_molder.py
-    ├── syrup_carb.py
-    ├── filler.py
-    ├── labeler.py
-    └── packer.py
+    ├── blow_molder.py                                                                                 (later)
+    ├── syrup_carb.py                                                                                  (later)
+    ├── filler.py                                                                                      (built)
+    ├── labeler.py                                                                                     (later)
+    └── packer.py                                                                                      (later)
 ```
 
 Every machine class has the same small interface: it receives that machine's PLC outputs, advances its physics by one time step, and returns the sensor values to write back plus a list of events. Machine and conveyor classes are **pure Python**, with no Modbus and no UI, so they can be unit-tested without a PLC.
@@ -347,6 +352,14 @@ Because each machine is its own class, each can be tested alone with unit tests,
 
 The PLC (20 ms scan) and the simulator (100 ms tick) are not synchronised. Every sensor pulse therefore stays ON for at least one full tick, so the PLC cannot miss its edge. The physics also tolerates the PLC's reaction delay; for example, the filler's belt overruns a little after S8 before the motor stops.
 
+The real tick is never exactly 100 ms, which the first version of the physics did not tolerate (false audit warnings, bottles skipping a station). As built:
+
+- The loop sleeps until fixed 100 ms deadlines (measured 98–102 ms) instead of "work, then sleep".
+- A late tick is split into physics sub-steps of at most 0.1 s, so events keep their order and the simulator's clock stays equal to the PLC's wall-clock timers (simply limiting `dt` was tried and rejected for that reason).
+- Pulse sensors (S6, S8) are written ON if they were ON at any point of the tick; presence sensors are not stretched.
+- A tick longer than 0.3 s is logged as "slow tick", so a warning caused by the simulator is never blamed on the PLC program.
+- If the PLC cannot be reached, the physics continues with all outputs OFF, like a stopped PLC, and the link reconnects by itself. Every 10 ticks the simulator reads its sensor values back to detect a debugger force or a second writer.
+
 ### 7.4 Physics models
 
 The models are simple first-order behaviour, enough to make the control logic meaningful:
@@ -355,8 +368,8 @@ The models are simple first-order behaviour, enough to make the control logic me
 - **Temperatures:** move toward the cooling or heating target with a time constant, with slow drift back to ambient when off.
 - **Pressure:** rises while the CO2 valve is open, falls slowly when bottles are being filled.
 - **Conveyors:** a list of slots. While the motor is ON, bottles shift one slot per step, and they stop and accumulate at the end when the next machine does not take them. A full sensor sees one slot, so it flickers naturally while bottles pass and stays ON when they stand still.
-- **Indexing belt (filler):** a continuous position that grows while the motor is ON. Crossing a station pitch moves every bottle one pocket forward. The index sensor S8 is a cam that is ON in a small window after each pitch, so it stays ON when the belt stops and absorbs the overrun. The station sensors are OFF while the belt moves.
-- **Door (filler):** a bottle needs a fixed pass time to go through the open door. A correct door pulse admits exactly one bottle; a door held open too long lets the next one in as well, which the audit reports.
+- **Indexing belt (filler):** a continuous position that grows while the motor is ON. Crossing a station pitch moves every bottle one pocket forward. The index sensor S8 is a cam that is ON in a small window after each pitch (15 %), so it stays ON when the belt stops and absorbs the overrun. The station sensors see their bottle in a wider window (40 %) and are OFF while the belt moves between stations.
+- **Door (filler):** a bottle needs a fixed pass time to go through the open door. The queue behind it stands still, so the next bottle starts from rest and needs a full slot step to reach the door. A correct door pulse admits exactly one bottle; a door held open too long lets the next one in as well, which the audit reports.
 
 ### 7.5 Control panel
 
@@ -397,6 +410,21 @@ FUXA is the operator's single window onto the whole line. It connects to all fiv
 
 Clicking a machine block on the overview opens that machine's detail screen. Because every PLC uses the same interface (section 6.2), all detail screens share the same layout for state, step, alarms and mode.
 
+**As built (filler, 2026-11-04):** five screens, generated by `simulator/tests/fuxa_views.py` and checked by `simulator/tests/test_hmi_tags.py` (build steps and tests: `docs/hmi/roadmap.md`):
+
+- **Line** (start page): C1, the filler and C2, with grey stand-in blocks for the machines not built yet.
+- **Filler**: the detail screen.
+- **Alarms**: the active list with Ack and Reset; the history is in FUXA's alarm panel.
+- **Trends**: three charts.
+  - Fill level against its setpoint, last 5 min.
+  - Good bottles, last 30 min.
+  - Machine state, last 30 min.
+  - FUXA logs these four tags into its own history store: every change, and at least once a minute. The store is on the Docker volume `fuxa-daq`, so a re-created container keeps it.
+  - The lines are drawn as steps, because the history stores a value only when it changes. A straight line between two stored points would show a slope that never happened.
+  - A normal run shows one step-shaped ramp per bottle up to the setpoint.
+  - A blocked outfeed shows as State 3 with a flat count.
+- **Tags**: a test page with every tag.
+
 ### 8.2 Machine state colours
 
 Each machine block is coloured from its state register (%MW50):
@@ -426,7 +454,7 @@ The result looks clear at any refresh rate: bottles step along the belt, and the
 
 - Line Start, Stop and Reset are sent to all five PLCs.
 - Mode (Auto / Manual / Stop) is selected per machine.
-- Manual buttons (jog conveyor, open valve) are enabled only in Manual mode. The PLC still checks every manual command against its interlocks.
+- Manual buttons (jog conveyor, open valve) are enabled only in Manual mode and work hold-to-run. The PLC still checks every manual command against its interlocks, and a jog watchdog ignores a button held longer than 10 s (for example after the HMI page was closed while pressing it) until all buttons are released.
 - Setpoints and recipe values (fill level, mixing time, syrup ratio, temperature limits) are entered on the detail screens.
 
 ### 8.5 Design guideline
@@ -455,7 +483,7 @@ Mode changes are only accepted in a safe state, for example Auto → Manual only
 
 ### 9.3 Alarms
 
-Alarms are latched in the PLC's alarm word (%MW52) and shown in FUXA's alarm list until they are acknowledged and reset.
+Alarms are BOOLs in `%MX5.0–%MX5.7` (section 6.2), shown in FUXA's alarm list. Fault alarms are latched until the cause is gone and the operator presses Reset; warnings (e.g. low syrup, outfeed blocked) do not stop the machine.
 
 | Alarm type | How it is detected | Example |
 | --- | --- | --- |

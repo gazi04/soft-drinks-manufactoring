@@ -25,7 +25,7 @@ Different sensors. S8 is the index cam (index position). S3–S5 are presence se
 The PLC sees `FillLevel` as an integer. A float sum can be 499.9999 ml when the PLC already read 500 and closed the valve correctly; comparing the raw float would blame the PLC wrongly.
 
 **What is the known blind spot?**
-The entry pocket has no sensor. A bottle left there by an E-stop during INDEX with C1 empty is invisible to the PLC (Starved).
+The entry pocket has no sensor. A bottle left there by an E-stop during INDEX with C1 empty is invisible to the PLC (Starved). With bottles waiting on C1 it was worse: the restart's door pulse dropped a second bottle onto it (found by the `index_jam` scenario). The PLC now tracks the pocket with the `Entry_Load` bit (set by the door, reset by the S8 edge), so the door stays closed until the belt has moved. The simulator still models no sensor there: the PLC must remember, not see.
 
 ## Conveyors and stand-ins
 
@@ -65,3 +65,96 @@ The PLC answered with a Modbus error, e.g. illegal address when `mx_bits` = 0 in
 
 **How is the one-writer rule enforced?**
 `FillerPlc` refuses to write any address outside `SIM_WRITE_COILS` / `SIM_WRITE_REGISTERS` (`ValueError`), and `verify_writes()` reads the sensors back to detect debugger forces or a second writer. Commands and modes are written only by the HMI (`tests/hmi.py` until FUXA exists).
+
+## Tick loop (`loop.py`)
+
+**Why "sleep until the next deadline"?**
+"Do the work, then sleep 0.1 s" adds the work time to every tick (measured: 102–110 ms). Sleeping until a fixed deadline keeps 98–102 ms. A late tick does not cause catch-up ticks; `Plant.step` handles its long `dt`.
+
+**What happens when the PLC is not reachable?**
+The physics keeps running with all outputs OFF, which is what a stopped PLC does to real machines. The problem is logged once, the link comes back by itself.
+
+**Why is the read-back done before the next write?**
+It compares the PLC with what we wrote last tick, so it covers the whole gap between two ticks, where a test script or a debugger force acts. Right after our own write it would only check ~2 ms (found by `test_loop.py`).
+
+**Who presses Start?**
+Never the simulator. Until FUXA exists, `tests/hmi.py` (or the HMI client inside `test_closed_loop.py`) acts as the HMI.
+
+## Commands and scenarios (`commands.py`, `scenarios.py`)
+
+**Why are commands applied only at the start of a tick?**
+So the world changes in one place only, between two physics steps. A panel button pressed in the middle of a tick cannot change a value the physics is halfway through using.
+
+**Why does `put()` check the value, and why so strictly?**
+A typo fails where it was made (panel, scenario, test), not inside the tick. In Python `True` is an `int`, so `fill_flow = True` would silently mean 1 ml/s; number commands therefore refuse `bool`.
+
+**Why are injected faults logged as info, not warnings?**
+The fault is intended. Warnings mean "something went wrong in the physics" (spill, crash, underfill); what a fault scenario checks is the PLC's reaction, which the watcher logs next to the command.
+
+**Why can a step wait for a condition, not only for seconds?**
+Some faults must hit a certain moment: the jam during INDEX, the E-stop and the heartbeat loss while a bottle is half filled. A pure timeline would hit a different moment every run. Every scenario also starts with "until the PLC runs", so it does not matter whether Start is pressed before or after the simulator starts.
+
+**Why can a scenario not press Reset or Start?**
+Those are HMI commands; the simulator never writes them (one-writer rule). A fault scenario ends by removing the cause and prints what the operator has to press.
+
+**Why does `tests/test_scenarios.py` switch to Manual before each new plant starts?**
+The PLC still holds the last run's sensor values (e.g. S4 TRUE) and may be finishing a job. Without Manual it opened the fill valve over the new, empty plant in its first tick (spill at 0.0 s, found in the first run).
+
+## Control panel (`ui/`)
+
+**Why is the screen redrawn by a timer and not on every tick?**
+Textual and the tick loop share one asyncio loop. Drawing 10 times per second inside the tick would take time from the loop and make ticks late; 4 times per second is enough for the eye. `on_tick` only stores the stats.
+
+**Why are the text builders in `view.py` and not in the app?**
+They are pure functions of the plant and the PLC status, so they are tested without a terminal (`test_view.py`) and the app keeps only layout and event handlers.
+
+**Why `switch.prevent(Switch.Changed)` when the switches are synced?**
+A scenario can change the plant (e.g. labeler stopped). The panel then moves the switch to match. Setting a switch normally fires `Switch.Changed`, which would put the same command on the queue again; `prevent` marks the sync as "not an operator action".
+
+**Why are switches not synced while a command is queued?**
+A command is applied at the next tick. Until then the plant still holds the old value, and a sync would flip the switch back for a moment.
+
+**Why `ScenarioSlot`?**
+`loop.run()` gets its scenario once, at the start. The panel starts scenarios later, so it passes an empty slot that it fills on "Run"; the loop only calls `due()` on it.
+
+**Why is the tick less regular with the panel (85–119 ms instead of 98–102 ms)?**
+The screen is drawn in the same asyncio loop, so a redraw can delay a tick a little; the next deadline then comes sooner. The physics handles any `dt` up to the 0.3 s slow-tick warning (sub-steps, kept pulses), so this does not change what the PLC sees. Use `--headless` for timing measurements.
+
+**Why no Start / Reset buttons in the panel?**
+One-writer rule: commands, modes and setpoints belong to the HMI. The header shows the `tests/hmi.py` command while the PLC is in IDLE.
+
+## HMI animation data (stage 9)
+
+**Why does the simulator write anything for the HMI at all?**
+FUXA only reads PLC memory, and the PLC does not know where each bottle is (it only sees sensors). The simulator is the only place that knows, so it writes this "physical truth" into spare words (%MW70–75) that the PLC ignores.
+
+**Why one state code per pocket instead of bits?**
+A small number (0 empty … 4 capped) binds directly to an icon or colour in FUXA. Packing four attributes × four pockets into one word would use bit 15, which an INT reads as negative.
+
+**Why is the mode read, when the simulator never writes it?**
+After a PLC restart `ModeReq` is 0 (Stop) and Start is ignored. Without the mode in the panel this looked like "nothing happens"; now the header says why. Reading is allowed; only writing belongs to the HMI.
+
+**Parameters: confirmed 2026-11-03 (no change in stage 9)**
+
+| Parameter | Value | Checked against (PLC) | Covered by |
+| --- | --- | --- | --- |
+| `TICK_S` / `SUBSTEP_S` | 0.1 s | scan 20 ms; wall-clock timers | `test_loop.py`, closed loop `dt` 98–102 ms |
+| `SLOW_TICK_S` | 0.3 s | – | jitter tests in `test_plant.py` |
+| `SLOT_STEP_S` | 0.5 s | door TP 0.5 s admits one bottle | `test_conveyor.py`, `gaps` |
+| `S7_SLOT` | C2 slot 1 | `Outfeed_Full` 2 s / 3 s filter | `labeler_stopped` (0 crashes) |
+| `INDEX_PITCH_S` | 1.5 s | index jam 5 s | `index_jam` (alarm 5.0 s after INDEX) |
+| `CAM_WINDOW` / `STATION_WINDOW` | 15 % / 40 % | belt overrun after S8 | `test_filler.py`, closed loop |
+| `DOOR_PASS_S` | 0.3 s | door TP 0.5 s (two bottles need 0.6 s) | `test_filler.py`, 0 "two bottles" in all runs |
+| `FILL_FLOW_ML_S` | 100 ml/s | fill timeout 10 s (500 ml = 5 s) | `slow_fill` (40 ml/s → alarm 10.0 s) |
+| `RINSE_MIN_S` / `CAP_MIN_S` | 1.5 s / 1.0 s | RinseTime 2 s / CapTime 1.5 s | closed loop (all rinsed, capped) |
+| `S6_PULSE_S` | 0.3 s | one tick minimum for the edge | GoodCount +20 = 20 bottles |
+| `HEARTBEAT_S` | 1.0 s | watchdog 3 s | `heartbeat_off` (alarm 3.1 s) |
+| `SUPPLY_PER_MIN` / `LABELER_TAKE_S` | 30/min / 2 s | faster than the filler (~6.5 s/bottle) | closed loop, `labeler_stopped` |
+
+All values keep a margin to the PLC time they meet, and every one is exercised by a test that passes against the real PLC, so nothing needed tuning. The only known trade-off is the panel's tick jitter (see "Control panel").
+
+## One plant writer at a time (`plant_lock.py`)
+
+**Why a lock and not only the read-back check?** The read-back (`verify_writes`) notices a second writer only after it has written: by then the PLC has acted on a world that does not exist (two simulators lost bottles in a test). The lock stops the second simulator or sensor-writing test script before its first write, with a message naming the first one.
+
+**Why `fcntl.flock` on a file in the temp dir?** The OS releases it when the process ends, also after a crash or `kill -9`, so a stale lock can never block the next run (a "file exists" check could). The file name has the PLC host and port: the unit tests use fake PLC servers on other ports and never collide with a running simulator, and a later second PLC gets its own lock. Taken in `loop.run` (idempotent per process), in the CLI before the panel starts, and by every test script that writes sensors (`tests/hmi_guard.claim_plant`). FUXA writes no sensors and takes no lock (FUXA vs scripts: HMI issue I4, a reminder).

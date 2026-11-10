@@ -16,20 +16,29 @@ The filler PLC must run in the OpenPLC runtime (`docker compose up -d` in the re
 ## Run
 
 ```bash
-uv run simulator --headless                     # until Ctrl+C, 30 bottles/min supply
-uv run simulator --headless --rate 0 --add 20   # exactly 20 bottles
+uv run simulator                                # control panel (q quits), 30 bottles/min supply
+uv run simulator --rate 0 --add 20              # panel, exactly 20 bottles
+uv run simulator --headless                     # no panel: console + log, until Ctrl+C
 uv run simulator --headless --seconds 120       # stop after 2 minutes
 ```
 
-Events go to the console and to `logs/run-<date>-<time>.log` (`--log` to choose the file). After Ctrl+C a summary shows ticks, `dt` range, GoodCount change, bottles out, lost bottles and warnings.
+**Control panel:** left the physical truth (C1, belt pockets with bottle id, ml, `R` rinsed, `C` capped, sensor lamps, C2, wires), right the controls (supply rate, add bottles, fill flow, switches for pause supply / product available / E-stop / index jam / labeler / heartbeat, scenario + Run), below the event log (`l` cycles the filter: all, bottle, PLC, warnings). Every control only puts a command on the queue; the panel never presses Start or Reset (header shows the `tests/hmi.py` command while the PLC is in IDLE). Use a terminal of at least 120×36.
 
-The simulator never presses Start. Until the FUXA screens exist, `tests/hmi.py` acts as the HMI (second terminal, while the simulator runs, so the heartbeat can clear `Alm_CommLost`):
+**HMI animation words:** every tick the simulator also writes %MW70–75 (HR 1094–1099) for FUXA: C1 and C2 slot bits and one state code per filler pocket (0 empty, 1 bottle, 2 rinsed, 3 filled, 4 capped). Layout: `docs/filler/io-list.md`. The PLC ignores them.
+
+**Mode:** the header shows the PLC mode. After a PLC restart it is `Stop` and Start is ignored; send `tests/hmi.py auto reset start`.
+
+Headless: events go to the console and to `logs/run-<date>-<time>.log` (`--log` to choose the file). After Ctrl+C a summary shows ticks, `dt` range, GoodCount change, bottles out, lost bottles and warnings.
+
+The simulator never presses Start. The operator uses FUXA (http://localhost:1881: header with Start/Stop/Reset and the mode, screens Line, Filler, Alarms, Trends). Without FUXA, `tests/hmi.py` acts as the HMI (second terminal, while the simulator runs, so the heartbeat can clear `Alm_CommLost`); never use both at once (issue I4, `tests/hmi_guard.py` reminds you):
 
 ```bash
 uv run python tests/hmi.py auto reset start   # Auto mode, clear alarms, start
 uv run python tests/hmi.py status             # step, state, GoodCount, alarms
 uv run python tests/hmi.py stop
 ```
+
+Only one plant writer per PLC: a second simulator, or a test script that writes the sensors while the simulator runs, stops at once with `another plant writer is already writing the sensors of PLC 127.0.0.1:502 (PID …)` (`plant_lock.py`). Before a demo run `uv run python tests/demo_check.py`: it checks containers, PLC program, FUXA and simulator and prints the fix for each problem.
 
 ## Fault scenarios
 

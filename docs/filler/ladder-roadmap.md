@@ -114,7 +114,7 @@ Built in two parts, each tested before the next.
 - Door: TP 0.5 s at the start of step 20 if S2.
 - `S6_Edge` → CTU → `GoodCount` (%MW53).
 
-As built: `Req_Index := ((Mode_Auto AND Step_Index) OR (Mode_Manual AND Man_Index)) AND Ilk_Index`; `Door_TP` (TP, **EN/ENO off**, `Q` unconnected) with `IN := Mode_Auto AND P(Step_Index) AND S2`; `Req_Door := Door_TP.Q OR (Mode_Manual AND Man_Door)` → `Mot_Door`; `Good_Counter` (CTU, `CU := S6_Edge`, `PV` = 32767, `CV` → `GoodCount`). The door opens only at the *start* of INDEX: a bottle reaching S2 mid-INDEX waits for the next one.
+As built: `Req_Index := ((Mode_Auto AND Step_Index) OR (Mode_Manual AND Man_Index)) AND Ilk_Index`; `Door_TP` (TP, **EN/ENO off**, `Q` unconnected) with `IN := Mode_Auto AND P(Step_Index) AND S2`; `Req_Door := Door_TP.Q OR (Mode_Manual AND Man_Door)` → `Mot_Door`; `Good_Counter` (CTU, `CU := S6_Edge`, `PV` = 32767, `CV` → `GoodCount`). The door opens only at the *start* of INDEX: a bottle reaching S2 mid-INDEX waits for the next one. **Added 2026-11-03 (entry tracking):** `Door_TP.IN` also needs `NOT Entry_Load`; two rungs below `Req_Door`: `Req_Door → (S) Entry_Load`, `S8_Edge → (R) Entry_Load` (%MX3.1). Without it a stop inside INDEX (jam, E-stop) left a bottle in the sensorless entry pocket and the restart's door pulse dropped a second one onto it (found by `simulator/tests/test_scenarios.py index_jam`).
 
 **Test** (`simulator/tests/test_index_door.py`, 19 checks): belt runs in INDEX and stops on the S8 edge; door pulse 0.5 s even if S2 stays TRUE; next INDEX → new pulse; S2 arriving mid-INDEX → no door; Manual door hold-to-run; E-stop in INDEX → all off; 5 S6 pulses → `GoodCount` +5, S6 held → counts once.
 
@@ -139,3 +139,70 @@ As built (section 8, last section of `main`): `Jam_Timer` (TON 5 s, `IN := Step_
 ## After stage 8
 
 Run the full test list in `progress.md` section 4 by forcing, then continue with the Python simulator, which replaces the hand forcing.
+
+## Change: jog watchdog  *(HMI issue I3, week VII: timers as watchdogs)*
+
+**Why.** In Manual, a FUXA hold-to-run button writes `Man_x = 1` on mouse-down and `0` on mouse-up or when the pointer leaves the button. If the browser tab is closed (or the network drops) while the button is held, the `0` never comes: `Man_x` stays 1 and the actuator runs on. FUXA cannot notice a closed tab, so the PLC must protect itself: **a manual button that stays ON longer than 10 s is ignored until every manual button is released.** The PLC never writes `Man_x` itself (they belong to the HMI, one writer per address); it only stops obeying them. 10 s is longer than any normal jog (a full manual fill takes 6 s, one index pitch 1.5 s, the longest hold in `test_scenarios.py manual` is C1 with at most 8 s).
+
+```
+Jog_TON (TON):  IN := Man_C1 OR Man_Door OR Man_Rinse OR Man_Fill OR Man_Cap OR Man_Index,  PT := T#10s
+Rung J1:  Man_C1 | Man_Door | Man_Rinse | Man_Fill | Man_Cap | Man_Index  ──[Jog_TON]── Q ──(S) Jog_Block
+Rung J2:  /Man_C1  /Man_Door  /Man_Rinse  /Man_Fill  /Man_Cap  /Man_Index ───────────────(R) Jog_Block
+Each manual branch:   Mode_Manual ─ Man_x ─ /Jog_Block ─ (rest unchanged)
+```
+
+Set and reset never fight: while a button is held, J2 is false; when all are released, `Jog_TON.IN` is false, so `Q` is false and J1 cannot set.
+
+**Steps in the OpenPLC Editor** (blocks used: TON, NO/NC contact, parallel branch, set/reset coil – all used in this program already):
+1. **Variables** (Variables table of `main`):
+   - `Jog_Block : BOOL AT %MX3.2 := FALSE;` – comment: `Jog watchdog (HMI issue I3): a manual button held > 10 s, e.g. HMI page closed while pressing it. Manual outputs ignored until all Man_* are released`
+   - `Jog_TON : TON;` – comment: `Jog watchdog timer: any Man_* ON continuously for 10 s`
+2. **Rung J1** – place it in section 6 OUTPUTS **before** the first request rung (Rinse request), so the block acts in the same scan:
+   - six NO contacts `Man_C1`, `Man_Door`, `Man_Rinse`, `Man_Fill`, `Man_Cap`, `Man_Index` **in parallel** (one under the other, joined left and right),
+   - then the `TON` block `Jog_TON` on `IN`, `PT` = `T#10s`,
+   - from `Q` a **Set** coil `Jog_Block`.
+   - Rung comment: `Jog watchdog 1/2: any manual button ON for 10 s (lost mouse-up, closed HMI page) -> set Jog_Block`
+3. **Rung J2** – directly below J1:
+   - six NC contacts `/Man_C1` … `/Man_Index` **in series**,
+   - a **Reset** coil `Jog_Block`.
+   - Rung comment: `Jog watchdog 2/2: all manual buttons released -> reset Jog_Block (manual operation possible again)`
+4. **Six manual branches** – in each rung below, find the lower branch `Mode_Manual … Man_x` and insert an **NC contact `Jog_Block`** directly after the `Man_x` contact:
+   - Rinse request (`Man_Rinse`), Fill request (`Man_Fill`, before the `S4` interlock contact), Cap request (`Man_Cap`), Belt request (`Man_Index`), Door 2/2 (`Man_Door`), C1 request (`Man_C1`).
+   - Add to each rung comment: `Manual branch also needs NOT Jog_Block (jog watchdog).`
+5. **Compile, upload, start** (Runtime v4, address `localhost`).
+6. **Test** (simulator and FUXA not operating the machine):
+   ```
+   cd simulator
+   uv run python tests/test_jog_watchdog.py     # J0-J6, ~30 s
+   uv run python tests/test_outputs.py          # regression: 36 checks, manual part M1-M5
+   ```
+
+## Change: manual interlocks for door and fill  *(planned – found in HMI stage 7.3, week VI: interlocks, week VIII: compare)*
+
+**Status:** open, not built yet. Found 2026-11-04 while operating the filler by hand from FUXA (HMI stage 7.3, scenario 9). In Auto both problems are already prevented; only the **Manual** branches miss the check. Auto does not change.
+
+An **interlock** is a condition in the PLC that blocks a command when carrying it out would cause damage – also in Manual, so an operator cannot break the machine by mistake.
+
+### Finding 1 – Door: a second bottle falls into a loaded entry pocket
+- **Seen:** `Bottle 11 two bottles in one pocket (with Bottle 10), fell off` – Door was held while bottle 10 was still in the entry pocket.
+- **Why:** in Auto the door pulse needs `NOT Entry_Load` (the PLC's memory "entry pocket is loaded", set by the door, reset by the index cam edge `S8_Edge`). The Manual branch `Mode_Manual AND Man_Door` ignores it.
+- **Trap:** simply adding `NOT Entry_Load` to the hold-to-run branch does not work: the door sets `Entry_Load` in the same scan it opens, so the next scan closes the door again before the bottle has passed.
+- **Proposed fix (recommended):** in Manual the door also becomes a **pulse**, one bottle per press, through the same `Door_TP`:
+  ```
+  Door_TP.IN := ((Mode_Auto AND P(Step_Index) AND S2) OR (Mode_Manual AND P(Man_Door) AND NOT Jog_Block)) AND NOT Entry_Load
+  Req_Door   := Door_TP.Q          (the hold-to-run Manual branch is removed)
+  ```
+  `P(Man_Door)` is a rising-edge contact. Holding the button longer no longer lets more bottles through. To verify before building: `S8_Edge` (and so the `Entry_Load` reset) also works when the belt is jogged in Manual.
+- **Alternative:** keep hold-to-run and set `Entry_Load` only when the door closes (falling edge of `Req_Door`). Weaker: one long press can still let two bottles through.
+
+### Finding 2 – Fill: manual fill overflows the bottle
+- **Seen:** `Bottle 7 filled to 811 ml` – Fill held too long (setpoint 500 ml).
+- **Why:** in Auto the valve closes at the setpoint (fill done bit). The Manual branch `Mode_Manual AND Man_Fill AND /Jog_Block AND S4` has no upper limit.
+- **Proposed fix:** one compare block in series in the Manual branch of the Fill request:
+  ```
+  Req_Fill := (Auto branch, unchanged) OR (Mode_Manual AND Man_Fill AND NOT Jog_Block AND S4 AND FillLevel < FillSetpoint)
+  ```
+  `LT` with `IN1 = FillLevel`, `IN2 = FillSetpoint` (both INT in ml, no conversion). Check that `LT` is in the Editor v4 library before building. A bottle can then be topped up by hand, but never past the setpoint.
+
+### Test (to write when built)
+New script or extension of `test_jog_watchdog.py` / `test_outputs.py` manual part: (1) door press with `Entry_Load` TRUE → door stays closed; (2) one long door press → exactly one pulse; (3) `Man_Fill` held with `FillLevel` ≥ `FillSetpoint` → valve closed; below it → valve open. Regression: `test_outputs.py` 36, `test_jog_watchdog.py` 9, `test_scenarios.py manual`.
