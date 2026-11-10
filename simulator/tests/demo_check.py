@@ -4,10 +4,11 @@
 
 Each line is PASS / WARN / FAIL and says how to fix it. The checks follow the things
 that broke during development:
-    D1 containers openplc and fuxa are running
-    D2 a compiled PLC program exists in the runtime (gone after a container re-creation
-       before the openplc-build volume existed; then: upload it again)
-    D3 the PLC program is running (Modbus answers)
+    D1 containers openplc and fuxa are running (plc-syrup-carb: WARN only, not in the demo yet)
+    D2 per runtime: a compiled PLC program exists AND its Modbus server is enabled. A container
+       re-creation resets /workdir/plugins.conf (container layer, not a volume): the program
+       still runs from the build volume, but modbus_slave is off until the next upload
+    D3 per runtime: the PLC program answers on Modbus
     D4 FUXA is up and connected to the PLC (connection status 5; no Modbus plugin = 0)
     D5 FUXA has the current screens (live project = docs/hmi/fuxa-project.json)
     D6 one simulator is running (plant lock held) - WARN if none
@@ -32,6 +33,25 @@ ROOT = Path(__file__).resolve().parents[2]
 EXPORT = ROOT / "docs" / "hmi" / "fuxa-project.json"
 FUXA = "http://localhost:1881"
 STATUS_TAG = "t_filler_connection_status"
+SYRUP_PORT = 5022
+
+
+class Runtime:
+    """One OpenPLC runtime container. required=False: problems are WARN (not in the demo yet)."""
+
+    def __init__(self, service: str, label: str, editor_ip: str, project: str, port: int, required: bool):
+        self.service, self.label, self.editor_ip = service, label, editor_ip
+        self.project, self.port, self.required = project, port, required
+
+    @property
+    def bad(self) -> str:
+        return "FAIL" if self.required else "WARN"
+
+
+RUNTIMES = [
+    Runtime("openplc", "filler", "localhost", "plcs/filler", config.PLC_PORT, True),
+    Runtime("plc-syrup-carb", "syrup", "127.0.0.2", "plcs/syrup", SYRUP_PORT, False),
+]
 COLOURS = {"PASS": "\033[32m", "WARN": "\033[33m", "FAIL": "\033[31m"}
 results: list[str] = []
 
@@ -66,32 +86,44 @@ def d1_containers() -> bool:
                "(stop/start keep the PLC program; `down` keeps it too since the openplc-build volume)")
         return False
     report("PASS", "D1 containers", "openplc and fuxa running")
+    if "plc-syrup-carb" not in running:
+        report("WARN", "D1 containers", "plc-syrup-carb not running – `docker compose up -d plc-syrup-carb`")
     return True
 
 
-def d2_program() -> None:
-    ls = compose("exec", "-T", "openplc", "sh", "-c", "ls /workdir/build/libplc_*.so")
-    if ls is None:
-        report("WARN", "D2 PLC program", "skipped (no docker)")
-    elif ls.returncode != 0 or "libplc_" not in ls.stdout:
-        report("FAIL", "D2 PLC program", "no compiled program in the runtime – OpenPLC Editor: connect to `localhost`, "
-               "compile and upload `plcs/filler` (the container was re-created)")
+def d2_program(rt: Runtime) -> None:
+    name = f"D2 {rt.label} program"
+    upload = f"OpenPLC Editor: open `{rt.project}`, device `{rt.editor_ip}`, compile and upload"
+    # one exec: the program file, then the enabled flag (3rd field) of the modbus_slave line in plugins.conf
+    out = compose("exec", "-T", rt.service, "sh", "-c",
+                  "ls /workdir/build/libplc_*.so; grep '^modbus_slave,' /workdir/plugins.conf | cut -d, -f3")
+    if out is None:
+        report("WARN", name, "skipped (no docker)")
+        return
+    lines = out.stdout.split()
+    program = next((Path(l).name for l in lines if "libplc_" in l), None)
+    if program is None:
+        report(rt.bad, name, f"no compiled program in the runtime – {upload} (the container was re-created)")
+    elif lines[-1] != "1":
+        report(rt.bad, name, f"{program} present, but the Modbus server is OFF (plugins.conf reset by a container "
+               f"re-creation; the program still runs) – {upload} once more")
     else:
-        report("PASS", "D2 PLC program", Path(ls.stdout.split()[0]).name)
+        report("PASS", name, f"{program}, Modbus server enabled")
 
 
-def d3_plc() -> ModbusTcpClient | None:
-    client = ModbusTcpClient(config.PLC_HOST, port=config.PLC_PORT, timeout=2)
+def d3_plc(rt: Runtime) -> ModbusTcpClient | None:
+    name = f"D3 {rt.label} running"
+    client = ModbusTcpClient(config.PLC_HOST, port=rt.port, timeout=2)
     try:
         if client.connect():
-            client.read_holding_registers(am.STATE, count=1)  # the runtime accepts TCP even when stopped
-            report("PASS", "D3 PLC running", f"Modbus answers on {config.PLC_HOST}:{config.PLC_PORT}")
+            client.read_holding_registers(am.STATE, count=1)  # docker-proxy accepts TCP even without a Modbus server
+            report("PASS", name, f"Modbus answers on {config.PLC_HOST}:{rt.port}")
             return client
     except Exception:  # noqa: BLE001 - any Modbus/socket error means "not answering"
         pass
     client.close()
-    report("FAIL", "D3 PLC running", "the PLC program does not answer – OpenPLC Editor (localhost): Start PLC; "
-           "if D2 failed: upload first")
+    report(rt.bad, name, f"no Modbus answer on port {rt.port} – if D2 says Modbus OFF or no program: upload; "
+           f"else OpenPLC Editor ({rt.editor_ip}): Start PLC")
     return None
 
 
@@ -150,8 +182,12 @@ def d7_ready(client: ModbusTcpClient) -> None:
 def main() -> None:
     print("Demo check (read only)\n")
     if d1_containers():
-        d2_program()
-    client = d3_plc()
+        for rt in RUNTIMES:
+            d2_program(rt)
+    client = d3_plc(RUNTIMES[0])
+    syrup = d3_plc(RUNTIMES[1])
+    if syrup is not None:
+        syrup.close()
     if d4_fuxa():
         d5_project()
     d6_simulator()

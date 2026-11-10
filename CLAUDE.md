@@ -23,6 +23,11 @@ The student must be able to explain every part of the code (plagiarism rules), s
 # Runtime stack (currently: one OpenPLC runtime + FUXA)
 docker compose up -d          # filler: editor 127.0.0.1:8443, Modbus 502; syrup room: editor 127.0.0.2:8443, Modbus 5022; FUXA http://localhost:1881
 docker compose logs -f openplc
+# The PLC program (libplc_*.so) lives in the build volume (openplc-build / syrup-build) and starts by itself at boot: stop/start/restart
+# keep everything. A container RE-CREATION (compose change, down/up, new image) keeps the program but resets /workdir/plugins.conf
+# (container layer): the program runs, the Modbus server is OFF, port drops every connection -> upload once more from the Editor.
+# A deliberate runtime update (new image digest) also needs `docker volume rm <project>_openplc-build` + upload.
+(cd simulator && uv run python tests/demo_check.py)  # before every demo: containers, per PLC program present + Modbus server enabled + answering, FUXA linked + current screens, simulator, mode/alarms (read only, prints the fix)
 
 # Simulator (uv project, Python 3.13, pymodbus)
 cd simulator
