@@ -93,7 +93,7 @@ Each machine owns and drives its **infeed conveyor** motor. The conveyor's **ful
 | # | PLC project | Machine | Infeed | Main analog value |
 | --- | --- | --- | --- | --- |
 | 1 | `plc-blowmolder` | Stretch blow moulder | Preform hopper | Oven temperature (°C) |
-| 2 | `plc-syrup-carb` | Syrup room, mixer, carbonator | Water and syrup tanks | Tank level (%), temperature (°C), CO2 pressure (bar) |
+| 2 | `plc-syrup-carb` | Syrup room, mixer, carbonator | Mains water, syrup tank | Tank levels (L), product temperature (0.1 °C), CO2 pressure (0.01 bar) |
 | 3 | `plc-filler` | Rinser, filler, capper (monobloc) | C1 | Fill level (ml) |
 | 4 | `plc-labeler` | Labeler and inspection | C2 | Fill level check (ml) |
 | 5 | `plc-packer` | Multipack shrink-wrapper | C3 | Shrink tunnel temperature (°C) |
@@ -111,15 +111,17 @@ Turns PET preforms into empty bottles.
 
 ### 4.2 Syrup room and carbonator (`plc-syrup-carb`)
 
-Makes the carbonated drink in batches and keeps the filler supplied. This is the process-control machine of the line.
+Makes the carbonated drink in batches and keeps the filler supplied. This is the process-control machine of the line: a **batch** machine (one step at a time, analog values), next to the filler's indexing machine. Details: `docs/syrup/` (I/O list, state diagram, ladder roadmap, progress).
 
-- **Inputs:** water tank level, syrup tank level, mixing tank level, product temperature, carbonator pressure, buffer tank level.
+- **Vessels:** one mixing tank that is also the carbonator (mixing, cooling and carbonating in one vessel), and a **buffer tank** between it and the filler. The buffer decouples the batch rhythm from the filler, which draws product all the time; without it the filler would be Starved during every batch.
+- **Inputs:** syrup tank level, mixing tank level, product temperature, carbonator pressure, buffer tank level (INT with fixed-point units: L, 0.1 °C, 0.01 bar), plus a high-high level switch on the mixing tank as a hardware overflow backup. Water comes from the mains and is always available.
 - **Outputs:** water pump, syrup pump, agitator, cooling valve, CO2 valve, transfer pump.
-- **Sequence:** Idle → Dose water → Dose syrup (ratio from recipe, e.g. 5:1) → Mix (TON) → Cool to 4 °C → Carbonate to pressure → Transfer to buffer tank → Idle (new batch when buffer is low).
-- **Math and compare:** syrup amount computed from water amount and recipe ratio; hysteresis on temperature and pressure.
-- **Interlocks:** agitator only above minimum level; no CO2 unless temperature is below the limit.
-- **Alarms:** tank overflow, over-pressure, cooling timeout, low syrup.
-- **Output to the line:** a *Product available* signal (buffer level above minimum and pressure in range) for the filler.
+- **Sequence:** Idle → Wait for demand → Dose water → Dose syrup (ratio from recipe ×10, e.g. 55 = 5.5:1) → Mix (TON) → Cool to 4 °C → Carbonate (pressure held without the CO2 valve for a set time = saturated) → (Wait for room in the buffer) → Transfer to buffer tank → Wait for demand (new batch when the buffer is low).
+- **Math and compare:** syrup amount = water amount × 10 / ratio (multiply before dividing, because INT division truncates); hysteresis (two thresholds + seal-in) on temperature, pressure and the buffer level.
+- **Interlocks:** dosing pumps off at the high limit or the high-high switch; agitator only above minimum level; no CO2 unless the product is cold and the pressure is below the limit; transfer pump not dry and not into a full buffer.
+- **Alarms:** tank overflow, over-pressure, cooling timeout and dosing timeout (pump failure) → Fault; low syrup → warning only (state Starved, clears itself after the refill).
+- **Stop and resume:** Stop takes effect at the end of the current step. On restart the tank levels show where the batch is; one memory bit (`Batch_Dosed`) prevents water from being added to a finished batch.
+- **Output to the line:** `Product_Available` for the filler = buffer level above minimum, with hysteresis so the handshake does not chatter. It stays TRUE during a Fault or E-stop of the syrup room, because the product already in the buffer is good.
 
 ### 4.3 Rinser, filler and capper (`plc-filler`)
 
@@ -160,7 +162,7 @@ The five PLCs never read each other's memory. They coordinate through **conveyor
 ### 5.1 Conveyor sensors and handshake signal
 
 - **Bottle flow (conveyors C1–C3):** no handshake is needed. Each conveyor's full sensor is wired directly to the upstream machine, which stops by itself when the conveyor is full (section 5.3).
-- **Liquid flow (syrup room → filler):** the filler cannot see the syrup room's tank, so one handshake is used: `Product_Available`, sent by the syrup room = buffer tank level above minimum **and** CO2 pressure in range.
+- **Liquid flow (syrup room → filler):** the filler cannot see the syrup room's tank, so one handshake is used: `Product_Available`, sent by the syrup room = buffer tank level above minimum (with hysteresis). The buffer has no pressure sensor; only finished, carbonated product is ever transferred into it.
 
 Until the syrup room exists, the simulator holds `Product_Available` TRUE.
 
@@ -255,15 +257,19 @@ All components talk over **Modbus TCP**. Each OpenPLC runtime is a Modbus server
 
 All containers run on one Docker network and are started with one `docker compose up`. Inside the network every PLC listens on port 502 under its own service name. Different host ports are mapped only for debugging from the laptop.
 
-| Service | Role | Modbus inside network | Host Modbus port | Host editor port |
+**Editor connection:** OpenPLC Editor v4 always connects to port **8443** (hard-coded, verified 2026-11-09 in Editor 4.3.3); only the device IP can be set in the project. So every PLC gets its own **loopback IP** on port 8443 (PLC *n* → `127.0.0.n`), like real PLCs on one network with the same port and different addresses. Exception until the filler service is renamed: the filler uses `127.0.0.1` (= `localhost`).
+
+| Service | Role | Modbus inside network | Host Modbus port | Editor address (port 8443) |
 | --- | --- | --- | --- | --- |
-| `plc-blowmolder` | PLC 1 | `plc-blowmolder:502` | 5021 | 8441 |
-| `plc-syrup-carb` | PLC 2 | `plc-syrup-carb:502` | 5022 | 8442 |
-| `plc-filler` | PLC 3 | `plc-filler:502` | 5023 | 8443 |
-| `plc-labeler` | PLC 4 | `plc-labeler:502` | 5024 | 8444 |
-| `plc-packer` | PLC 5 | `plc-packer:502` | 5025 | 8445 |
+| `plc-blowmolder` | PLC 1 | `plc-blowmolder:502` | 5021 | 127.0.0.1* |
+| `plc-syrup-carb` | PLC 2 | `plc-syrup-carb:502` | 5022 | 127.0.0.2 |
+| `plc-filler` | PLC 3 | `plc-filler:502` | 5023 | 127.0.0.3 (today `127.0.0.1`, service `openplc`) |
+| `plc-labeler` | PLC 4 | `plc-labeler:502` | 5024 | 127.0.0.4 |
+| `plc-packer` | PLC 5 | `plc-packer:502` | 5025 | 127.0.0.5 |
 | `simulator` | Plant model | client only | – | – |
 | `fuxa` | HMI / SCADA | client only | – | 1881 (web) |
+
+\* The blow moulder gets `127.0.0.1` only after the filler has moved to `127.0.0.3`.
 
 ### 6.2 Standard machine interface
 
@@ -273,22 +279,24 @@ Every PLC uses the **same register layout**. The simulator and the HMI can then 
 | --- | --- | --- | --- |
 | %MW0 | Command: 1 = Start, 2 = Stop, 3 = Reset | HMI | PLC |
 | %MW1 | Mode request: 0 = Stop, 1 = Auto, 2 = Manual | HMI | PLC |
-| %MW2 | Manual commands (one bit per actuator) | HMI | PLC |
-| %MW10–%MW11 | Digital sensors, packed as bits | Simulator | PLC |
-| %MW12–%MW19 | Analog sensors (level, temperature, pressure) | Simulator | PLC, HMI |
-| %MW20 | Interface in: `Product_Available` (filler only), `E_Stop_OK`, heartbeat bit | Simulator (wiring) | PLC |
+| %MX0.0–%MX0.7 | Digital sensors (one BOOL each) | Simulator | PLC |
+| %MX1.0–%MX1.2 | Interface in: `Product_Available` (filler only), `E_Stop_OK`, heartbeat bit | Simulator (wiring) | PLC |
+| %MX2.0–%MX2.7 | Manual hold-to-run buttons (one BOOL per actuator) | HMI | PLC |
+| %MX3.0–%MX3.7 | Conditioned signals (filtered sensors, hysteresis bits, jog watchdog) | PLC | Tests, HMI |
+| %MX5.0–%MX5.7 | Alarms, one BOOL each; **`Alm_CommLost` is `%MX5.3` in every PLC**, the other bits are per machine | PLC | HMI |
+| %MX6.0 | Interface out: `Product_Available` (syrup room only) | PLC | Simulator (wiring) |
+| %MW12–%MW19 | Analog sensors (level, temperature, pressure), INT with fixed-point units | Simulator | PLC, HMI |
 | %MW30–%MW39 | Setpoints and recipe values | HMI | PLC |
+| %MW40–%MW49 | Computed values (e.g. syrup target) | PLC | Tests, HMI |
 | %MW50 | Machine state: 0 Stopped, 1 Running, 2 Starved, 3 Blocked, 9 Fault | PLC | HMI |
 | %MW51 | Current sequencer step | PLC | HMI |
-| %MW52 | Alarm word (one bit per alarm) | PLC | HMI |
-| %MW53–%MW55 | Counters (good, rejects, run hours) | PLC | HMI |
-| %MW60 | Interface out: `Product_Available` (syrup room only) | PLC | Simulator (wiring) |
-| %MW70–%MW79 | Animation data (conveyor slots), ignored by the PLC | Simulator | HMI |
+| %MW53 | Main counter (filler: good bottles, syrup room: batches) | PLC | HMI |
+| %MW70–%MW79 | Animation data (conveyor slots, filler pocket states), ignored by the PLC; filler layout in `docs/filler/io-list.md` | Simulator | HMI |
 | %QX0.0–%QX1.7 | Actuator outputs (motors, valves, heaters) | PLC | Simulator, HMI |
 
-Sensors are written to memory words (%MW), not to physical inputs (%IX), because external Modbus clients cannot write the PLC's input image. The PLC program reads these words as its sensors.
+Sensors are written to memory (%MX bits, %MW words), not to physical inputs (%IX), because external Modbus clients cannot write the PLC's input image. The PLC program reads this memory as its sensors. Booleans are single `%MX` bits instead of bits packed inside a word, so ladder contacts and coils can use them directly.
 
-**To verify in OpenPLC v4 before coding:** the exact Modbus offset of %MW registers (in OpenPLC v3, %MW0 is holding register 1024) and whether coils are available for memory bits.
+**Verified in OpenPLC v4** (2026-10-28, filler `smoke_test.py`): `%MWn` = holding register 1024 + n, `%MXa.b` = coil 8192 + 8a + b, `%QXa.b` = coil 8a + b. `%MX` is only reachable over Modbus with the project setting `mx_bits` = 64 (*Device → Servers → RuntimeServer*). Each machine's exact addresses are in its I/O list (`docs/filler/io-list.md`, `docs/syrup/io-list.md`).
 
 ## 7. Python simulator: the virtual plant
 
@@ -510,30 +518,32 @@ Every weekly topic of the course appears in at least one machine.
 | IV | Relay logic diagrams | Start/stop seal-in circuits, interlocks between valves, conveyor-full latch |
 | VI | Logic gate functions | Permissives: fill only if bottle present AND product available AND NOT fault |
 | VII | Timers and counters | TON for mixing, rinsing, blowing, jam timeouts, sensor filtering and heartbeat watchdog; TP for the filler's door pulse; CTU for 6-packs, rejects and pack totals |
-| VIII | Math, compare, jump, MCR | Syrup ratio calculation, level, temperature and pressure compares; master enable as MCR equivalent |
+| VIII | Math, compare, jump, MCR | Syrup ratio calculation (`MUL` before `DIV`, INT truncation), batch and buffer sums (`ADD`), level, temperature and pressure compares with hysteresis; master enable as MCR equivalent |
 | IX | Subroutines | `FB_Motor` and `FB_Valve`, reused in all five projects |
 | X | Data handling | MOVE of recipe values and setpoints, copying sensor words |
 | XI | Sequencer | Step variable plus compare in every machine (the IEC equivalent of SQO) |
-| XIII | PLC networks | Modbus TCP between five PLCs, the simulator and FUXA; `Product_Available` handshake, E-stop chain, heartbeat |
+| XIII | PLC networks | Modbus TCP between five PLCs, the simulator and FUXA; `Product_Available` handshake, E-stop chain, heartbeat; FUXA as a small SCADA with alarm history and trends (data logging) |
 
 The project also shows the difference between **combinational control** (interlocks and permissives, labelled as such in every program) and **sequential control** (the step sequencers). Grounding of sensors and motors and preventive maintenance are covered in the documentation, supported by the run-hour counters.
 
 ## 11. Development plan and risks
 
-The line is built **one machine at a time, end to end**: PLC project, simulator class, HMI screen. After each machine, the project is a working demo, even if later machines are not finished.
+The line is built **one machine at a time, end to end**: paper design, PLC project, simulator class, HMI screen. After each machine, the project is a working demo, even if later machines are not finished.
+
+**Committed scope (decided 2026-11-09, `docs/scope-options.md` option B): filler + syrup room and carbonator.** These two machines cover every syllabus topic of section 10, including math/analog control (week VIII) and a real handshake between two PLCs (week XIII). The labeler, packer and blow moulder (steps 4–6) are **stretch goals**; until they exist, the simulator replaces them with stand-ins (held signals, an empty-bottle supply, a free outfeed), so neither PLC program changes when one is added later.
 
 1. **Foundation:** process description, I/O lists, standard machine interface, Docker Compose with five runtimes.
-2. **Filler:** first complete machine, since it has a sequence and an analog value. Includes `FB_Motor`, `FB_Valve` and the mode and alarm template.
-3. **Syrup room and carbonator:** the process-control machine; links to the filler through `Product_Available`.
-4. **Labeler:** adds inspection, rejects and the first real conveyor link (C2).
-5. **Packer:** adds the 6-pack counter and shrink tunnel.
-6. **Blow moulder:** completes the start of the line.
+2. **Filler** (done): first complete machine, since it has a sequence and an analog value. Includes `FB_Motor`, `FB_Valve` and the mode and alarm template.
+3. **Syrup room and carbonator** (in progress): the process-control machine; links to the filler through `Product_Available`.
+4. *(stretch)* **Labeler:** adds inspection, rejects and the first real conveyor link (C2).
+5. *(stretch)* **Packer:** adds the 6-pack counter and shrink tunnel.
+6. *(stretch)* **Blow moulder:** completes the start of the line.
 7. **Line overview and integration tests:** full line run, starved and blocked situations (e.g. the filler-stop scenario in section 5.5), E-stop, communication loss (simulator stopped), fault injection.
 8. **Documentation and presentation.**
 
 ### Risks and fallbacks
 
-- **Scope:** five machines is a large amount of work for one semester. Each machine is kept to 4–6 sequencer steps. If time runs short, the blow moulder is replaced by a simple "empty bottle supply" in the simulator.
+- **Scope:** five machines is a large amount of work for one semester (the filler alone took about a week of design, ladder and simulator work). Therefore only the filler and the syrup room are committed (see above); the other three are added only if time remains, the blow moulder last.
 - **OpenPLC v4 Modbus mapping:** the %MW offsets must be confirmed before the address map is fixed.
-- **Five runtimes:** five OpenPLC containers use more memory and must each be programmed separately from the editor. Each project is stored in its own folder under `plc/` in Git.
+- **Five runtimes:** five OpenPLC containers use more memory and must each be programmed separately from the editor. Each project is stored in its own folder under `plcs/` in Git.
 - **HMI refresh rate:** polling five devices may slow FUXA; the polling interval is tuned per device, and animation uses slots instead of continuous motion.
