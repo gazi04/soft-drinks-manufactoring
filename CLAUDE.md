@@ -47,6 +47,7 @@ uv run python tests/test_jog_watchdog.py      # jog watchdog: manual button held
 uv run python tests/test_syrup_stage0.py      # syrup ladder stage 0: MixLevel / E_Stop_OK on port 5022, filler unaffected (5 checks; needs the uploaded program)
 uv run python tests/test_syrup_stage1.py      # syrup ladder stage 1: defaults, Cmd clear, heartbeat watchdog on port 5022 (7 checks, ~15 s)
 uv run python tests/test_syrup_stage2.py      # syrup ladder stage 2: ratio math, guard against division by zero (8 checks) + debugger steps D1-D5 in a terminal
+uv run python tests/test_syrup_hysteresis.py  # syrup ladder stage 3: Temp_OK / CO2_Demand / Product_Available set, hold and reset thresholds on port 5022 (21 checks)
 uv run python tests/test_link.py              # simulator stage 5: plcs.py first contact, heartbeat only (5 checks; --restart adds the reconnect check)
 uv run python tests/hmi.py auto reset start   # command-line HMI for the test scripts (Cmd / ModeReq only; FUXA's header does the same – never both at once); `status` prints step, state, alarms
 uv run python tests/test_closed_loop.py       # simulator stage 6: 20 bottles through the REAL PLC (5 checks incl. animation words, ~2.5 min; arg = number of bottles)

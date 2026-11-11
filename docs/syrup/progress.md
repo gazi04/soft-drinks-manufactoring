@@ -4,7 +4,7 @@ Batch mixer and carbonator with a buffer tank. Second machine of the line, after
 Design reference: `docs/project-report.md` sections 4.2 (machine), 5.1–5.2 (`Product_Available` handshake), 6.2 (register layout), 9 (modes/alarms).
 Syrup docs: `io-list.md`, `state-diagram.md`, `ladder-roadmap.md` (stages for the ladder program).
 
-**Current step:** ladder stage 0 done (2026-11-09). Next: ladder stage 1 (modes and safety, heartbeat watchdog).
+**Current step:** ladder stages 0–3 done (2026-11-11). Next: ladder stage 4 (sequencer skeleton: step decode, done bits, transitions, `Batch_Dosed`).
 - The filler's leftovers (HMI stage 7, manual interlocks) are independent of this machine.
 
 ## Why the syrup room second
@@ -36,15 +36,20 @@ Same as the filler (`docs/filler/progress.md`): **paper → ladder → simulator
   - [x] Modbus test script `simulator/tests/test_syrup_stage0.py` (Z1–Z5, port 5022)
   - [x] Open in the Editor, compile, upload to 127.0.0.2 → runtime RUNNING (2026-11-09)
   - [x] `test_syrup_stage0.py` 5/5 (2026-11-09) + debugger shows MixLevel 4242 / E_Stop_OK TRUE
-- [ ] Stage 1 – Modes and safety (copied from the filler, new defaults), heartbeat watchdog
+- [x] Stage 1 – Modes and safety (copied from the filler, new defaults), heartbeat watchdog
   - [x] Variables declared (2026-11-09): `Init_Done`, 10 × `Def_…`, `Mode_*`, `*_Cmd`, `Master_Enable`, `Hb_Last`/`Hb_Changed`/`Hb_Timer` (77 in `main`)
-  - [ ] Rungs built in the Editor (filler section 1 as template), compiled, uploaded
-  - [ ] Test script `test_syrup_stage1.py` passes (A1–A7; first run 6/7: A3 FAIL, `Cmd` clear rung missing → added as rung 5 (copy of filler R7), comments on all 11 rungs, unused `Hb_` / `TON0` removed; re-upload + re-run pending)
-- [ ] Stage 2 – Math and compare: `SyrupTarget` (DIV with zero guard), `DoseTarget`, `Buffer_Room`, `Ingredients_OK`, seconds → `TIME`
+  - [x] Rungs built in the Editor (filler section 1 as template), compiled, uploaded (11 rungs, incl. rung 5 `Cmd` clear)
+  - [x] Test script `test_syrup_stage1.py` passes (A1–A7): 7/7 on 2026-11-11 (first run 6/7: A3 FAIL, `Cmd` clear rung missing → added as rung 5, copy of filler R7). Debugger check of `Master_Enable` = `E_Stop_OK` AND NOT `Alm_CommLost` (all 4 combinations, `Alm_CommLost` forced) passed 2026-11-11.
+- [x] Stage 2 – Math and compare: `SyrupTarget` (DIV with zero guard), `DoseTarget`, `Buffer_Room`, `Ingredients_OK`, seconds → `TIME`
   - [x] Variables declared (2026-11-09): `Ratio_OK`, `Water_x10`, `Buffer_Sum`, `Buffer_Room`, `Ingredients_OK`, `Ms_Per_s` (DINT 1000), `MixTime_D`/`Mix_ms`/`Mix_PT`, `CarbTime_D`/`Carb_ms`/`Carb_PT` (89 in `main`)
-  - [ ] Rungs 11–17 built in the Editor (header, ratio guard, ratio math, buffer room, ingredients, two time conversions), compiled, uploaded
-  - [ ] Test script `test_syrup_stage2.py` passes (B1–B7 automatic 8/8 on 2026-11-10; debugger checks D1–D5 pending)
-- [ ] Stage 3 – Hysteresis bits: `Temp_OK`, `CO2_Demand`, `Product_Available`
+  - [x] Rungs 11–17 built in the Editor (header, ratio guard, ratio math, buffer room, ingredients, two time conversions), compiled, uploaded
+  - [x] Test script `test_syrup_stage2.py` passes (B1–B7 automatic 8/8 on 2026-11-10; debugger checks D1–D5 passed 2026-11-11)
+- [x] Stage 3 – Hysteresis bits: `Temp_OK`, `CO2_Demand`, `Product_Available`
+  - [x] Variables declared (2026-11-11): `Temp_Upper`/`Temp_Cold`/`Temp_InBand`, `Press_Lower`/`Press_Low`/`Press_Below`, `Avail_Upper`/`Buf_Enough`/`Buf_AboveMin` (98 in `main`)
+  - [x] Rungs 18–24 written into `main.ld` (header; per bit one threshold rung ADD/SUB + 2 compares → helper BOOLs, one seal-in rung SET ∥ (bit AND HOLD) → coil; `SUB` / `LT` checked in the Editor 4.3.3 library)
+  - [x] Opened in the Editor, compiled, uploaded to 127.0.0.2 (2026-11-11)
+  - [x] Debugger check `ProductTemp` 60 → 40 → 44 → 46: `Temp_OK` F → T → T → F (covered by H1 of the script)
+  - [x] Test script `test_syrup_hysteresis.py` passes (H1–H3): 21/21 on 2026-11-11; regression stage 1 7/7, stage 2 8/8
 - [ ] Stage 4 – Sequencer skeleton: steps 0, 5, 10–60, 55, 900; done bits; `Batch_Dosed`
 - [ ] Stage 5 – Outputs: jog watchdog, Auto OR Manual requests, interlocks, FB instances
 - [ ] Stage 6 – Stop at step ends, `State`, `BatchCount`
@@ -128,3 +133,6 @@ All answered 2026-11-09 (see Decisions). Left for later:
 | 2026-11-09 | Stage 0 files: FBs copied, `main` with all io-list variables + constants and one empty rung, `test_syrup_stage0.py`. First run before the upload: connection reset on 5022 (no program → no Modbus server inside the runtime). |
 | 2026-11-09 | Stage 0 done: compile first failed ("Nothing produces %MW / %QX": server Buffer Mapping had only `mxBits`), fixed with the filler's mapping; uploaded, RUNNING. `test_syrup_stage0.py` 5/5 after re-uploading the filler: its re-create at 06:04 had reset `/workdir/plugins.conf` (container layer, not a volume) → `modbus_slave` disabled, program still RUNNING but port 502 dropped every connection. |
 | 2026-11-09 | Open questions answered (units, ratio ×10, mains water, alarm bits, high-high switch, dosing timeout, severities, service rename); drafts updated. |
+| 2026-11-11 | Stage 1 re-test: first attempt connection reset on 5022. Cause: both runtimes hit the runtime watchdog at 15:39:41 ("dispatcher stalled, no tick for ~2.7 s", same moment in filler and syrup → host stall, not the program) and restarted in SAFE MODE without the program. `docker compose restart plc-syrup-carb` loaded the program again (RUNNING); `test_syrup_stage1.py` 7/7. |
+| 2026-11-11 | Stage 1 debugger check (`Master_Enable` truth table) and stage 2 debugger checks D1–D5 (`Buffer_Room`, `Ingredients_OK` boundaries, `Mix_PT` / `Carb_PT`) passed. Stages 0–2 done. |
+| 2026-11-11 | Stage 3 done: hysteresis variables and rungs 18–24 written into `main.ld` (cloned from existing rungs), compiled and uploaded; `test_syrup_hysteresis.py` 21/21, stages 1–2 re-run green. |
