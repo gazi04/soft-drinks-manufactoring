@@ -20,13 +20,14 @@ One program `main`, sections in this order (a value is computed **above** every 
 ```
 main
  ├─ 1  Modes and safety        (copied from the filler: defaults, mode/cmd decode, Master_Enable, heartbeat)
- ├─ 2  Math and conditioning   (SyrupTarget, DoseTarget, Buffer_Room, Ingredients_OK, hysteresis bits)
- ├─ 3  Step decode             (Step -> Step_Idle / Step_Wait / Step_Water / ..., Seq_Enable)
- ├─ 4  Step done bits          (Water_Done, Syrup_Done, Mix_Timer, Carb_Timer, Transfer_Done)
- ├─ 5  Sequencer transitions   (Stop_Request, abort, change Step, Batch_Dosed)
- ├─ 6  Outputs                 (jog watchdog, Auto branch OR Manual branch, interlocks, FB instances)
- ├─ 7  Counters and status     (BatchCount, State)
- └─ 8  Alarms                  (limits, timeouts, latches, reset, MOVE 900 last)
+ ├─ 2  Math and conditioning   (SyrupTarget, DoseTarget, Buffer_Room, Ingredients_OK, seconds -> TIME)
+ ├─ 3  Hysteresis              (Temp_OK, CO2_Demand, Product_Available)
+ ├─ 4  Step decode             (Step -> Step_Idle / Step_Wait / Step_Water / ..., Seq_Enable)
+ ├─ 5  Step done bits          (Water_Done, Syrup_Done, Tank_Empty, Batch_Needed, Water/Syrup/Mix/Carb_Timer)
+ ├─ 6  Sequencer transitions   (abort, change Step, Batch_Dosed; Stop_Request in stage 6)
+ ├─ 7  Outputs                 (jog watchdog, Auto branch OR Manual branch, interlocks, FB instances)
+ ├─ 8  Counters and status     (BatchCount, State)
+ └─ 9  Alarms                  (limits, timeouts, latches, reset, MOVE 900 last)
 Function blocks: FB_Motor, FB_Valve (copied from plcs/filler/)
 ```
 
@@ -84,7 +85,7 @@ A1  ├──┤ LE ProductTemp,CoolSetpoint ├──────────�
 ## Stage 4 – Sequencer skeleton  *(weeks VIII, XI: compare, move, sequencer)*
 
 - Step decode (EQ → `Step_Idle`, `Step_Wait`, `Step_Water`, `Step_Syrup`, `Step_Mix`, `Step_Cool`, `Step_Carb`, `Step_WaitBuffer`, `Step_Transfer`, `Step_Fault`), `Seq_Enable := Mode_Auto AND Master_Enable`.
-- Step done bits (section 4): `Water_Done := MixLevel ≥ WaterBatch`, `Syrup_Done := MixLevel ≥ DoseTarget`, `Water_Timer` / `Syrup_Timer` (TON `DoseTimeout`, `IN := Step_Water` / `Step_Syrup`; two timers, because with one shared timer `IN` would stay TRUE across 10 → 20 and the timer would not restart), `Mix_Timer` (TON, `IN := Step_Mix`), `Carb_Timer` (TON, `IN := Step_Carb AND NOT CO2_Demand`, rule 3), `Transfer_Done := MixLevel ≤ MixEmpty`.
+- Step done bits (section 4): `Water_Done := MixLevel ≥ WaterBatch`, `Syrup_Done := MixLevel ≥ DoseTarget`, `Water_Timer` / `Syrup_Timer` (TON `DoseTimeout`, `IN := Step_Water` / `Step_Syrup`; two timers, because with one shared timer `IN` would stay TRUE across 10 → 20 and the timer would not restart), `Mix_Timer` (TON, `IN := Step_Mix`), `Carb_Timer` (TON, `IN := Step_Carb AND NOT CO2_Demand`, rule 3), `Tank_Empty := MixLevel ≤ MixEmpty` (named `Transfer_Done` in the first draft; also used negated in WAIT_DEMAND), `Batch_Needed := BufferLevel < BufferLow`.
 - Transition rungs from the step table, **no outputs yet**. `Batch_Dosed` (%MX3.3): (S) on 20 → 30, (R) on 60 → 5.
 - Abort rung: `NOT Master_Enable OR NOT Mode_Auto` → step 0 (as in the filler).
 

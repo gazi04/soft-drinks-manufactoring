@@ -4,7 +4,7 @@ Batch mixer and carbonator with a buffer tank. Second machine of the line, after
 Design reference: `docs/project-report.md` sections 4.2 (machine), 5.1–5.2 (`Product_Available` handshake), 6.2 (register layout), 9 (modes/alarms).
 Syrup docs: `io-list.md`, `state-diagram.md`, `ladder-roadmap.md` (stages for the ladder program).
 
-**Current step:** ladder stages 0–3 done (2026-11-11). Next: ladder stage 4 (sequencer skeleton: step decode, done bits, transitions, `Batch_Dosed`).
+**Current step:** ladder stages 0–4 done (2026-11-11). Next: ladder stage 5 (outputs: jog watchdog, Auto OR Manual requests, interlocks, FB instances).
 - The filler's leftovers (HMI stage 7, manual interlocks) are independent of this machine.
 
 ## Why the syrup room second
@@ -50,7 +50,11 @@ Same as the filler (`docs/filler/progress.md`): **paper → ladder → simulator
   - [x] Opened in the Editor, compiled, uploaded to 127.0.0.2 (2026-11-11)
   - [x] Debugger check `ProductTemp` 60 → 40 → 44 → 46: `Temp_OK` F → T → T → F (covered by H1 of the script)
   - [x] Test script `test_syrup_hysteresis.py` passes (H1–H3): 21/21 on 2026-11-11; regression stage 1 7/7, stage 2 8/8
-- [ ] Stage 4 – Sequencer skeleton: steps 0, 5, 10–60, 55, 900; done bits; `Batch_Dosed`
+- [x] Stage 4 – Sequencer skeleton: steps 0, 5, 10–60, 55, 900; done bits; `Batch_Dosed`
+  - [x] Variables declared (2026-11-11): 10 step bits, `Seq_Enable`, `Water_Done`, `Syrup_Done`, `Tank_Empty` (roadmap: `Transfer_Done`; also used negated in WAIT_DEMAND), `Batch_Needed`, `Water_Timer`/`Syrup_Timer`/`Mix_Timer`/`Carb_Timer` (117 in `main`)
+  - [x] Rungs 25–48 written into `main.ld`: section 4 step decode (4 EQ rungs + `Seq_Enable`), section 5 done bits (level compares, `Batch_Needed`, 4 TONs), section 6 transitions (abort, 0→5, 5→30, 5→10, 10→20, 20→30 + (S) `Batch_Dosed`, 30→40, 40→50, 50→60, 50→55, 55→60, 60→5 + (R) `Batch_Dosed`, 900→0); no Stop yet (stage 6), no MOVE 900 yet (stage 7)
+  - [x] Opened in the Editor, compiled, uploaded to 127.0.0.2 (2026-11-11)
+  - [x] Test script `test_syrup_sequencer.py` passes (Q1–Q23): 26/26 on 2026-11-11; regression stage 2 8/8, stage 3 21/21. Debugger: `Water_Timer` / `Syrup_Timer` ET counts in 10 / 20
 - [ ] Stage 5 – Outputs: jog watchdog, Auto OR Manual requests, interlocks, FB instances
 - [ ] Stage 6 – Stop at step ends, `State`, `BatchCount`
 - [ ] Stage 7 – Alarms and FAULT
@@ -136,3 +140,4 @@ All answered 2026-11-09 (see Decisions). Left for later:
 | 2026-11-11 | Stage 1 re-test: first attempt connection reset on 5022. Cause: both runtimes hit the runtime watchdog at 15:39:41 ("dispatcher stalled, no tick for ~2.7 s", same moment in filler and syrup → host stall, not the program) and restarted in SAFE MODE without the program. `docker compose restart plc-syrup-carb` loaded the program again (RUNNING); `test_syrup_stage1.py` 7/7. |
 | 2026-11-11 | Stage 1 debugger check (`Master_Enable` truth table) and stage 2 debugger checks D1–D5 (`Buffer_Room`, `Ingredients_OK` boundaries, `Mix_PT` / `Carb_PT`) passed. Stages 0–2 done. |
 | 2026-11-11 | Stage 3 done: hysteresis variables and rungs 18–24 written into `main.ld` (cloned from existing rungs), compiled and uploaded; `test_syrup_hysteresis.py` 21/21, stages 1–2 re-run green. |
+| 2026-11-11 | Stage 4 done: 19 variables and rungs 25–48 (step decode, done bits, transitions) written into `main.ld` with a rung builder from existing nodes, compiled and uploaded; `test_syrup_sequencer.py` 26/26 (one batch, WAIT_BUFFER, resume with `Batch_Dosed`, abort, FAULT exit). |
