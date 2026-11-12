@@ -35,6 +35,8 @@ uv sync
 uv run simulator                          # Textual control panel against the PLC (q quits); same options as headless
 uv run simulator --headless               # tick loop without panel (console + logs/run-*.log); --seconds, --rate, --add; Ctrl+C stops
 uv run pytest                             # simulator unit tests in tests/unit (no PLC needed; link/loop tests use a local pymodbus server)
+uv run python tests/run_filler.py         # ALL filler PLC test scripts in one command (~25 min; --quick ~6 min without closed loop/scenarios; names to pick some; --list, --fail-fast)
+uv run python tests/run_syrup.py          # ALL syrup room PLC test scripts in one command (~2 min; stage 0 also needs the filler on 502, else NOT RUN)
 uv run python tests/test_signal_conditioning.py  # stage 3: Outfeed_Full filter + S6 edge (counted via GoodCount)
 uv run python tests/test_sequencer.py         # stage 4 (add --done with done bits forced in the debugger)
 uv run python tests/test_station_jobs.py      # stage 5a: done bits / job durations
@@ -50,6 +52,7 @@ uv run python tests/test_syrup_stage2.py      # syrup ladder stage 2: ratio math
 uv run python tests/test_syrup_hysteresis.py  # syrup ladder stage 3: Temp_OK / CO2_Demand / Product_Available set, hold and reset thresholds on port 5022 (21 checks)
 uv run python tests/test_syrup_sequencer.py   # syrup ladder stage 4: one batch 0->5->10->...->60->5 by writing the sensors, resume with Batch_Dosed, abort, FAULT exit (26 checks, ~45 s)
 uv run python tests/test_syrup_outputs.py     # syrup ladder stage 5: outputs per step, interlocks in Auto and Manual, jog watchdog, E-stop (35 checks, ~25 s)
+uv run python tests/test_syrup_stop_state.py  # syrup ladder stage 6: Stop at the end of every step, State 0/1/2/3/9, BatchCount (S1-S12, T1-T9, C1; ~45 s)
 uv run python tests/test_link.py              # simulator stage 5: plcs.py first contact, heartbeat only (5 checks; --restart adds the reconnect check)
 uv run python tests/hmi.py auto reset start   # command-line HMI for the test scripts (Cmd / ModeReq only; FUXA's header does the same – never both at once); `status` prints step, state, alarms
 uv run python tests/test_closed_loop.py       # simulator stage 6: 20 bottles through the REAL PLC (5 checks incl. animation words, ~2.5 min; arg = number of bottles)
@@ -63,7 +66,7 @@ curl -X POST -H 'Content-Type: application/json' --data @docs/hmi/fuxa-project.j
 (cd simulator && uv run python tests/test_hmi_tags.py)  # FUXA: tags = address_map (H1) + header/Filler/Line/Alarms/Trends (H5-H9) offline (--offline); FUXA value = PLC value, write path, connected, DAQ history (H2-H4, H10)
 ```
 
-The test scripts are plain Modbus scripts run one by one against the filler PLC in the runtime (not collected by pytest; `test_outputs.py` also holds the shared helpers the later scripts import). Release all debugger forces first. No linter or formatter is configured yet.
+The test scripts are plain Modbus scripts against the PLC in the runtime (not collected by pytest; `test_outputs.py` also holds the shared helpers the later filler scripts import). `run_filler.py` / `run_syrup.py` run one machine's scripts in order, each in its own process with stdin closed (interactive debugger steps skipped), and print a summary (shared code `tests/suite.py`); every script exits 0/1. Add a new test script to the `SCRIPTS` list of its machine. Release all debugger forces first. No linter or formatter is configured yet.
 
 ## Architecture
 

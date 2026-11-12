@@ -104,8 +104,9 @@ Section 6, in this order (as the filler):
 ## Stage 6 – Stop, State, counter  *(weeks IV, VII: latch, CTU)*
 
 - `Stop_Request := (Stop_Cmd OR Stop_Request) AND NOT Step_Idle`; in every "step done" transition, a `Stop_Request` branch goes to 0 instead of the next step; WAIT_DEMAND and WAIT_BUFFER go to 0 at once (`state-diagram.md` rule 4). `NOT Stop_Request` in the normal transitions, so one transition per scan.
-- `Batch_Counter` (CTU, `CU := Step_Transfer AND Transfer_Done`, `CV` → `BatchCount` %MW53).
-- `State` (%MW50): five mutually exclusive MOVE rungs (rule 5): Stopped (IDLE, Mode Stop, Manual), Running, Starved (`Step_Wait AND batch needed AND NOT Ingredients_OK`), Blocked (`Step_WaitBuffer`), Fault.
+- `Batch_Counter` (CTU, `CU := Step_Transfer AND Tank_Empty`, `CV` → `BatchCount` %MW53).
+- `(S) Batch_Dosed` (end of DOSE_SYRUP) and `(R) Batch_Dosed` (end of TRANSFER) get their own rungs instead of hanging on the transitions 20 → 30 / 60 → 5: a Stop at those step ends skips the transition, but the batch must still be marked dosed / finished (otherwise Start would resume an empty tank at MIX).
+- `State` (%MW50): five mutually exclusive MOVE rungs (rule 5): Stopped (IDLE, Mode Stop, Manual), Running (NOT IDLE / WAIT_BUFFER / FAULT / Starved), Starved (helper coil `Starved := Step_Wait AND Batch_Needed AND NOT Ingredients_OK`), Blocked (`Step_WaitBuffer`), Fault.
 
 **Test** (`test_syrup_stop_state.py`): Stop in DOSE_WATER → pump runs until `WaterBatch`, then IDLE; Start → resumes at DOSE_SYRUP via WAIT_DEMAND; Stop in COOL → IDLE after `Temp_OK`, Start → MIX (`Batch_Dosed`); Stop in WAIT_DEMAND → IDLE at once; one full batch → `BatchCount` +1; State 0/1/2/3/9 in each situation.
 

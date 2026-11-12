@@ -4,7 +4,7 @@ Batch mixer and carbonator with a buffer tank. Second machine of the line, after
 Design reference: `docs/project-report.md` sections 4.2 (machine), 5.1–5.2 (`Product_Available` handshake), 6.2 (register layout), 9 (modes/alarms).
 Syrup docs: `io-list.md`, `state-diagram.md`, `ladder-roadmap.md` (stages for the ladder program).
 
-**Current step:** ladder stages 0–4 done (2026-11-11). Next: ladder stage 5 (outputs: jog watchdog, Auto OR Manual requests, interlocks, FB instances).
+**Current step:** ladder stages 0–6 done (2026-11-12). Next: ladder stage 7 (alarms and FAULT).
 - The filler's leftovers (HMI stage 7, manual interlocks) are independent of this machine.
 
 ## Why the syrup room second
@@ -55,8 +55,16 @@ Same as the filler (`docs/filler/progress.md`): **paper → ladder → simulator
   - [x] Rungs 25–48 written into `main.ld`: section 4 step decode (4 EQ rungs + `Seq_Enable`), section 5 done bits (level compares, `Batch_Needed`, 4 TONs), section 6 transitions (abort, 0→5, 5→30, 5→10, 10→20, 20→30 + (S) `Batch_Dosed`, 30→40, 40→50, 50→60, 50→55, 55→60, 60→5 + (R) `Batch_Dosed`, 900→0); no Stop yet (stage 6), no MOVE 900 yet (stage 7)
   - [x] Opened in the Editor, compiled, uploaded to 127.0.0.2 (2026-11-11)
   - [x] Test script `test_syrup_sequencer.py` passes (Q1–Q23): 26/26 on 2026-11-11; regression stage 2 8/8, stage 3 21/21. Debugger: `Water_Timer` / `Syrup_Timer` ET counts in 10 / 20
-- [ ] Stage 5 – Outputs: jog watchdog, Auto OR Manual requests, interlocks, FB instances
-- [ ] Stage 6 – Stop at step ends, `State`, `BatchCount`
+- [x] Stage 5 – Outputs: jog watchdog, Auto OR Manual requests, interlocks, FB instances
+  - [x] Variables declared (2026-11-11): `Jog_TON`, interlock compares `Mix_BelowMax`/`Mix_Covered`/`Press_BelowMax`/`Buf_BelowMax`, step groups `CO2_Steps`/`Cool_Steps`/`Agit_Steps`, 6 × `Req_…`, `Mot_Water`/`Mot_Syrup`/`Mot_Agitator`/`Mot_Transfer` (FB_Motor), `Vlv_Cooling`/`Vlv_CO2` (FB_Valve) (137 in `main`)
+  - [x] Rungs 49–67 written into `main.ld`: section 7 jog watchdog (cloned from filler rungs 42–43), interlock compares, step groups (each a 2-branch OR of a step bit and the next smaller group), 6 request rungs (Auto OR Manual, interlocks in series after the OR), 6 FB instance rungs (Enable = `Master_Enable`, one writer per `%QX`)
+  - [x] Opened in the Editor, compiled, uploaded to 127.0.0.2 (2026-11-12)
+  - [x] Test script `test_syrup_outputs.py` passes (O1–O13, M1–M17, J1–J3): 35/35 on 2026-11-12
+- [x] Stage 6 – Stop at step ends, `State`, `BatchCount`
+  - [x] Variables declared (2026-11-12): `Stop_Request`, `Starved`, `Batch_Counter` (CTU) (140 in `main`)
+  - [x] Rungs written into `main.ld` (82 rungs): section 6 Stop latch (rung 37, copy of filler rung 24) + 4 "Stop at a safe point -> 0" rungs (38–41, two step ends each); the 10 normal transitions 5→30 … 60→5 rebuilt with `NOT Stop_Request` (same rung ids); `(S)` / `(R) Batch_Dosed` moved out of 20→30 / 60→5 into their own rungs 47 / 54, so a Stop at the end of DOSE_SYRUP / TRANSFER still sets / resets it; new section 8 (rungs 75–81): `Batch_Counter` (CU = `Step_Transfer AND Tank_Empty`, CV → `BatchCount`), `Starved`, 5 State MOVE rungs
+  - [x] Opened in the Editor, compiled, uploaded to 127.0.0.2 (2026-11-12)
+  - [x] Test script `test_syrup_stop_state.py` passes (S1–S12, T1–T9, C1) on 2026-11-12; regression `tests/run_syrup.py` all passed
 - [ ] Stage 7 – Alarms and FAULT
 
 ### 2. Python simulator
@@ -120,6 +128,7 @@ Drafted 2026-11-08 from the design talk; to confirm in the review.
 | 2026-11-09 | **Editor address per PLC = loopback IP:** Editor 4.3.3 hard-codes port 8443 (`RUNTIME_API_PORT`), only the IP is configurable, so a host port 8442 is unreachable from the editor. Filler editor bound to `127.0.0.1` + `::1`, syrup to `127.0.0.2` (both port 8443); container IPs were rejected because they can change on re-create. |
 | 2026-11-09 | **Docker service rename** (`openplc` → `plc-filler`, 5023/8443 per report 6.1) **postponed**: separate step later, not mixed with syrup stage 0. |
 | 2026-11-09 | Timeouts and times (`CoolTimeout`, `DoseTimeout`, `MixTime`, `CarbTime`) are in **simulator time** (batch ~2 min instead of ~30 min). |
+| 2026-11-12 | **Stop rungs like the filler:** one Stop latch, separate "-> 0 at a safe point" rungs (two step ends per rung), `NOT Stop_Request` in every normal transition (one transition per scan). `Batch_Dosed` set / reset and `BatchCount` hang on the step-end condition, not on the transition, so they also happen when a Stop ends the step. |
 | 2026-11-08 | `Product_Available` depends on the buffer level only (no pressure sensor on the buffer); it stays TRUE during FAULT / E-stop of the syrup room, because the product in the buffer is still good. |
 
 ## Open questions
@@ -141,3 +150,6 @@ All answered 2026-11-09 (see Decisions). Left for later:
 | 2026-11-11 | Stage 1 debugger check (`Master_Enable` truth table) and stage 2 debugger checks D1–D5 (`Buffer_Room`, `Ingredients_OK` boundaries, `Mix_PT` / `Carb_PT`) passed. Stages 0–2 done. |
 | 2026-11-11 | Stage 3 done: hysteresis variables and rungs 18–24 written into `main.ld` (cloned from existing rungs), compiled and uploaded; `test_syrup_hysteresis.py` 21/21, stages 1–2 re-run green. |
 | 2026-11-11 | Stage 4 done: 19 variables and rungs 25–48 (step decode, done bits, transitions) written into `main.ld` with a rung builder from existing nodes, compiled and uploaded; `test_syrup_sequencer.py` 26/26 (one batch, WAIT_BUFFER, resume with `Batch_Dosed`, abort, FAULT exit). |
+| 2026-11-12 | Stage 5 done: 20 variables and rungs 49–67 (jog watchdog, interlock compares, step groups, 6 request rungs Auto OR Manual with interlocks after the OR, 6 FB instances) compiled and uploaded; `test_syrup_outputs.py` 35/35 (outputs per step, interlocks in Auto and Manual, jog watchdog, E-stop). |
+| 2026-11-12 | Test runners `tests/run_filler.py` / `tests/run_syrup.py` (one command per PLC, shared `tests/suite.py`); filler scripts now exit 0/1. |
+| 2026-11-12 | Stage 6 written: 3 variables, Stop latch + 4 safe-point rungs, 10 transitions with `NOT Stop_Request`, `Batch_Dosed` set/reset in own rungs, section 8 counter + State; `test_syrup_stop_state.py` written. Compiled, uploaded; `test_syrup_stop_state.py` and `tests/run_syrup.py` pass. Stage 6 done. |
