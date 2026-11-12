@@ -8,7 +8,7 @@ University PLC course project (master's, *PLC Programming*): a full soft drink p
 
 Read before proposing structure or code:
 - `docs/project-report.md` — the design: machines, handshakes, address map, simulator, HMI, modes/alarms, syllabus coverage, plan. **Source of truth for design decisions.**
-- `docs/<machine>/progress.md` — per-machine checklist, decisions, open questions and log (`docs/filler/` complete, `docs/syrup/` in progress: paper done, ladder next). Check the current step there before starting work on a machine, and update it as steps complete.
+- `docs/<machine>/progress.md` — per-machine checklist, decisions, open questions and log (`docs/filler/` complete, `docs/syrup/` in progress: paper and ladder (stages 0–7) done, simulator next). Check the current step there before starting work on a machine, and update it as steps complete.
 - `docs/simulator/roadmap.md` — staged build plan for the Python simulator (stages 0–9, test per stage); progress is ticked in `docs/filler/progress.md` section 2.
 - `docs/simulator/design-notes.md` — short answers to the simulator's non-obvious decisions (timing, windows, Modbus link); keep it updated when such a decision changes.
 - `docs/hmi/roadmap.md` — staged build plan for the FUXA HMI (stages 0–7, test per stage, open issues I1–I11); progress is ticked there and in `docs/filler/progress.md` section 3.
@@ -36,7 +36,7 @@ uv run simulator                          # Textual control panel against the PL
 uv run simulator --headless               # tick loop without panel (console + logs/run-*.log); --seconds, --rate, --add; Ctrl+C stops
 uv run pytest                             # simulator unit tests in tests/unit (no PLC needed; link/loop tests use a local pymodbus server)
 uv run python tests/run_filler.py         # ALL filler PLC test scripts in one command (~25 min; --quick ~6 min without closed loop/scenarios; names to pick some; --list, --fail-fast)
-uv run python tests/run_syrup.py          # ALL syrup room PLC test scripts in one command (~2 min; stage 0 also needs the filler on 502, else NOT RUN)
+uv run python tests/run_syrup.py          # ALL syrup room PLC test scripts in one command (~4.5 min, --quick ~2.5 min; stage 0 also needs the filler on 502, else NOT RUN)
 uv run python tests/test_signal_conditioning.py  # stage 3: Outfeed_Full filter + S6 edge (counted via GoodCount)
 uv run python tests/test_sequencer.py         # stage 4 (add --done with done bits forced in the debugger)
 uv run python tests/test_station_jobs.py      # stage 5a: done bits / job durations
@@ -51,8 +51,9 @@ uv run python tests/test_syrup_stage1.py      # syrup ladder stage 1: defaults, 
 uv run python tests/test_syrup_stage2.py      # syrup ladder stage 2: ratio math, guard against division by zero (8 checks) + debugger steps D1-D5 in a terminal
 uv run python tests/test_syrup_hysteresis.py  # syrup ladder stage 3: Temp_OK / CO2_Demand / Product_Available set, hold and reset thresholds on port 5022 (21 checks)
 uv run python tests/test_syrup_sequencer.py   # syrup ladder stage 4: one batch 0->5->10->...->60->5 by writing the sensors, resume with Batch_Dosed, abort, FAULT exit (26 checks, ~45 s)
-uv run python tests/test_syrup_outputs.py     # syrup ladder stage 5: outputs per step, interlocks in Auto and Manual, jog watchdog, E-stop (35 checks, ~25 s)
+uv run python tests/test_syrup_outputs.py     # syrup ladder stage 5: outputs per step, interlocks in Auto and Manual, jog watchdog, E-stop (36 checks, ~25 s)
 uv run python tests/test_syrup_stop_state.py  # syrup ladder stage 6: Stop at the end of every step, State 0/1/2/3/9, BatchCount (S1-S12, T1-T9, C1; ~45 s)
+uv run python tests/test_syrup_alarms.py      # syrup ladder stage 7: overflow / over-pressure / LowSyrup / dose + cool timeouts, Reset only when the cause is gone, resume at MIX (~2.5 min; --quick ~30 s without the timeouts)
 uv run python tests/test_link.py              # simulator stage 5: plcs.py first contact, heartbeat only (5 checks; --restart adds the reconnect check)
 uv run python tests/hmi.py auto reset start   # command-line HMI for the test scripts (Cmd / ModeReq only; FUXA's header does the same – never both at once); `status` prints step, state, alarms
 uv run python tests/test_closed_loop.py       # simulator stage 6: 20 bottles through the REAL PLC (5 checks incl. animation words, ~2.5 min; arg = number of bottles)

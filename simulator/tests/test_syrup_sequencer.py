@@ -51,6 +51,7 @@ HR_BUFFER_LEVEL = 1040  # %MW16
 HR_MIX_TIME = 1056  # %MW32
 HR_CARB_TIME = 1063  # %MW39
 HR_STEP = 1075  # %MW51
+COIL_MIX_HIGH_HIGH = 8192  # %MX0.0
 COIL_E_STOP_OK = 8201  # %MX1.1
 COIL_HEARTBEAT = 8202  # %MX1.2
 COIL_BATCH_DOSED = 8219  # %MX3.3
@@ -100,6 +101,38 @@ class Heartbeat:
                 self._stop.wait(0.5)
         finally:
             client.close()
+
+
+def reset_to_idle(client: ModbusTcpClient) -> int:
+    """Auto, then Reset until Step = 0 (at most 3 Resets); returns the Step reached.
+
+    Auto first: the transition 900 -> 0 needs Seq_Enable (Auto), in Mode Stop the abort rung keeps FAULT.
+    Repeated: if Alm_CommLost is latched too (a script that stopped its heartbeat), the first Reset only
+    clears it - Master_Enable (rung 6) is computed before the Reset rung of the watchdog (rung 10), so in
+    that scan Seq_Enable is still FALSE and FAULT stays. The second Reset then leaves FAULT.
+    Needs the heartbeat running and E_Stop_OK TRUE."""
+    client.write_register(HR_MODE_REQ, MODE_AUTO)
+    time.sleep(SETTLE)
+    step = -1
+    for _ in range(3):
+        client.write_register(HR_CMD, RESET)
+        time.sleep(SETTLE)
+        step = client.read_holding_registers(HR_STEP, count=1).registers[0]
+        if step == 0:
+            break
+    return step
+
+
+def leave_idle(client: ModbusTcpClient) -> None:
+    """End state of every syrup script, so the next one starts clean: sensors 0, MixHighHigh FALSE,
+    E_Stop_OK TRUE, then reset_to_idle and Mode Stop -> Step 0, no alarm latched.
+    Call it while the heartbeat still runs (Master_Enable must be on)."""
+    for address in (HR_SYRUP_LEVEL, HR_MIX_LEVEL, HR_PRODUCT_TEMP, HR_CO2_PRESSURE, HR_BUFFER_LEVEL):
+        client.write_register(address, 0)
+    client.write_coil(COIL_MIX_HIGH_HIGH, False)
+    client.write_coil(COIL_E_STOP_OK, True)
+    reset_to_idle(client)  # causes gone: clears the alarms and leaves FAULT
+    client.write_register(HR_MODE_REQ, MODE_STOP)
 
 
 class Plc:
@@ -182,9 +215,7 @@ def main() -> int:
         plc.coil(COIL_BATCH_DOSED, False)
         heartbeat.start()
         time.sleep(1.0)
-        plc.cmd(RESET)
-        plc.write(HR_MODE_REQ, MODE_AUTO)
-        time.sleep(SETTLE)
+        reset_to_idle(client)  # Auto + Reset until Step 0 (a FAULT left by another script)
         lost = plc.coil(COIL_COMMLOST)
         results.append(check("Q1", plc.step() == 0 and not lost,
                              f"Auto, heartbeat, Reset -> Step {plc.step()}, Alm_CommLost {lost} (expected 0 / False)"))
@@ -280,17 +311,15 @@ def main() -> int:
         plc.cmd(RESET)
         reach("Q23", 0, 1, "Auto + Reset in FAULT")
     finally:
-        plc.write(HR_MODE_REQ, MODE_STOP)
+        leave_idle(client)
         plc.write(HR_MIX_TIME, DEFAULT_MIX_TIME)
         plc.write(HR_CARB_TIME, DEFAULT_CARB_TIME)
-        for address in (HR_SYRUP_LEVEL, HR_MIX_LEVEL, HR_PRODUCT_TEMP, HR_CO2_PRESSURE, HR_BUFFER_LEVEL):
-            plc.write(address, 0)
         plc.coil(COIL_BATCH_DOSED, False)
         heartbeat.stop()
         client.close()
 
     passed = sum(results)
-    print(f"\n{passed}/{len(results)} checks passed (Mode Stop, MixTime 20 / CarbTime 10, sensors 0)")
+    print(f"\n{passed}/{len(results)} checks passed (Step 0, no alarms, Mode Stop, MixTime 20 / CarbTime 10, sensors 0)")
     return 0 if passed == len(results) else 1
 
 

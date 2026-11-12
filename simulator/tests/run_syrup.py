@@ -1,6 +1,7 @@
 """All syrup room PLC tests in one command (port 5022), in ladder-stage order.
 
-    uv run python tests/run_syrup.py              # all scripts, about 2 min
+    uv run python tests/run_syrup.py              # all scripts, about 4.5 min
+    uv run python tests/run_syrup.py --quick      # alarm test without the two 60 s timeouts, about 2.5 min
     uv run python tests/run_syrup.py outputs      # only the scripts whose name contains "outputs"
     uv run python tests/run_syrup.py --fail-fast  # stop at the first failing script
     uv run python tests/run_syrup.py --list       # show the list
@@ -20,6 +21,7 @@ SCRIPTS = [
     Script("test_syrup_sequencer.py", "one batch through all steps, resume, abort"),
     Script("test_syrup_outputs.py", "outputs per step, interlocks, jog watchdog, E-stop"),
     Script("test_syrup_stop_state.py", "Stop at step ends, State word, BatchCount"),
+    Script("test_syrup_alarms.py", "alarms, FAULT, Reset, low-syrup warning, timeouts", quick_args=("--quick",)),
 ]
 
 if __name__ == "__main__":

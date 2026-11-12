@@ -12,7 +12,8 @@ Auto (the script writes Step directly; the sensors are chosen so the step does n
     O7  55 warm again                          -> Agitator + CoolingValve, CO2 off (interlock Temp_OK)
     O8  60 TRANSFER    -> TransferPump         O9  900 FAULT, O10 0 IDLE -> nothing
     O11 30 MIX with MixLevel 50                -> nothing (agitator interlock)
-    O12 10 with MixHighHigh TRUE               -> nothing (high-high switch alone stops the pump)
+    O12 10 with MixHighHigh TRUE               -> nothing (high-high switch alone stops the pump, Alm_Overflow -> FAULT)
+    O12b MixHighHigh FALSE again               -> nothing (alarm latched);  O12c Reset + step 10 -> WaterPump
     O13 10, E_Stop_OK FALSE                    -> nothing
 Manual (ModeReq 2, hold-to-run, interlocks still apply):
     M1-M3  Man_WaterPump: 300 L on, 950 L off (MixMax), MixHighHigh off
@@ -38,6 +39,7 @@ import time
 from pymodbus.client import ModbusTcpClient
 
 from hmi_guard import claim_plant, warn_if_fuxa
+from test_syrup_sequencer import leave_idle, reset_to_idle
 
 HOST = "127.0.0.1"
 PORT = 5022
@@ -156,8 +158,7 @@ def main() -> int:
         sensors(mix=300, temp=200, pressure=400, buffer=1700)
         heartbeat.start()
         time.sleep(1.0)
-        write(HR_CMD, RESET)
-        time.sleep(SETTLE)
+        reset_to_idle(client)  # Auto + Reset until Step 0 (a FAULT left by another script)
         if coil(COIL_COMMLOST):
             raise SystemExit("Alm_CommLost still TRUE after Reset: Master_Enable is off, all outputs stay off")
 
@@ -194,7 +195,11 @@ def main() -> int:
         step(10)
         expect("O12", set(), "Auto step 10, MixLevel 300 but MixHighHigh TRUE")
         coil(COIL_MIX_HIGH_HIGH, False)
-        expect("O12b", {"WaterPump"}, "Auto step 10, MixHighHigh FALSE again")
+        expect("O12b", set(), "Auto, MixHighHigh FALSE again but Alm_Overflow latched (FAULT until Reset)")
+        write(HR_CMD, RESET)
+        time.sleep(SETTLE)
+        step(10)
+        expect("O12c", {"WaterPump"}, "Auto, Reset (cause gone) + step 10")
         coil(COIL_E_STOP_OK, False)
         expect("O13", set(), "Auto step 10, E_Stop_OK FALSE")
         coil(COIL_E_STOP_OK, True)
@@ -277,15 +282,12 @@ def main() -> int:
     finally:
         for button in COIL_MAN:
             press(button, False)
-        coil(COIL_MIX_HIGH_HIGH, False)
-        write(HR_MODE_REQ, MODE_STOP)
-        for address in (HR_SYRUP_LEVEL, HR_MIX_LEVEL, HR_PRODUCT_TEMP, HR_CO2_PRESSURE, HR_BUFFER_LEVEL):
-            write(address, 0)
+        leave_idle(client)  # M2/M5/M11/M15 latch alarms (limits reached): leave Step 0 without alarms
         heartbeat.stop()
         client.close()
 
     passed = sum(results)
-    print(f"\n{passed}/{len(results)} checks passed (buttons released, Mode Stop, sensors 0)")
+    print(f"\n{passed}/{len(results)} checks passed (buttons released, Step 0, no alarms, Mode Stop, sensors 0)")
     return 0 if passed == len(results) else 1
 
 

@@ -4,7 +4,7 @@ Batch mixer and carbonator with a buffer tank. Second machine of the line, after
 Design reference: `docs/project-report.md` sections 4.2 (machine), 5.1–5.2 (`Product_Available` handshake), 6.2 (register layout), 9 (modes/alarms).
 Syrup docs: `io-list.md`, `state-diagram.md`, `ladder-roadmap.md` (stages for the ladder program).
 
-**Current step:** ladder stages 0–6 done (2026-11-12). Next: ladder stage 7 (alarms and FAULT).
+**Current step:** ladder stages 0–7 done (2026-11-12), the syrup room PLC program is complete. Next: Python simulator for the syrup room (section 2: physics class `machines/syrup.py`).
 - The filler's leftovers (HMI stage 7, manual interlocks) are independent of this machine.
 
 ## Why the syrup room second
@@ -65,7 +65,11 @@ Same as the filler (`docs/filler/progress.md`): **paper → ladder → simulator
   - [x] Rungs written into `main.ld` (82 rungs): section 6 Stop latch (rung 37, copy of filler rung 24) + 4 "Stop at a safe point -> 0" rungs (38–41, two step ends each); the 10 normal transitions 5→30 … 60→5 rebuilt with `NOT Stop_Request` (same rung ids); `(S)` / `(R) Batch_Dosed` moved out of 20→30 / 60→5 into their own rungs 47 / 54, so a Stop at the end of DOSE_SYRUP / TRANSFER still sets / resets it; new section 8 (rungs 75–81): `Batch_Counter` (CU = `Step_Transfer AND Tank_Empty`, CV → `BatchCount`), `Starved`, 5 State MOVE rungs
   - [x] Opened in the Editor, compiled, uploaded to 127.0.0.2 (2026-11-12)
   - [x] Test script `test_syrup_stop_state.py` passes (S1–S12, T1–T9, C1) on 2026-11-12; regression `tests/run_syrup.py` all passed
-- [ ] Stage 7 – Alarms and FAULT
+- [x] Stage 7 – Alarms and FAULT
+  - [x] Variables declared (2026-11-12): `Cool_Timer` (TON), `Mix_Overflow`, `Overflow_Cause`, `No_Fault` (144 in `main`)
+  - [x] Rungs 82–94 built in the Editor by hand, compiles: overflow cause (stage 5 interlock compares, negated), set / reset pairs per FAULT alarm (Reset only when the cause is gone), `Alm_LowSyrup` = `Starved` (warning, not latched), `No_Fault` (De Morgan), last rung `NOT No_Fault` → MOVE 900 → `Step`
+  - [x] Rung 88: `Step_Cool` contact added before `Cool_Timer.IN` (was missing: timer ran in every step → `Alm_CoolTimeout` after 60 s)
+  - [x] Uploaded to 127.0.0.2; test script `test_syrup_alarms.py` passes (N1, O1–O5, P1–P4, R1, L1–L2, D1–D2, C1–C2; `--quick` without the timeouts) on 2026-11-12
 
 ### 2. Python simulator
 - [ ] Physics class `machines/syrup.py`: tank levels from pump flows, temperature (first-order toward coolant / room), pressure (CO2 in, dissolving out), buffer drained by the filler's `FillValve`
@@ -128,12 +132,14 @@ Drafted 2026-11-08 from the design talk; to confirm in the review.
 | 2026-11-09 | **Editor address per PLC = loopback IP:** Editor 4.3.3 hard-codes port 8443 (`RUNTIME_API_PORT`), only the IP is configurable, so a host port 8442 is unreachable from the editor. Filler editor bound to `127.0.0.1` + `::1`, syrup to `127.0.0.2` (both port 8443); container IPs were rejected because they can change on re-create. |
 | 2026-11-09 | **Docker service rename** (`openplc` → `plc-filler`, 5023/8443 per report 6.1) **postponed**: separate step later, not mixed with syrup stage 0. |
 | 2026-11-09 | Timeouts and times (`CoolTimeout`, `DoseTimeout`, `MixTime`, `CarbTime`) are in **simulator time** (batch ~2 min instead of ~30 min). |
+| 2026-11-12 | **`Alm_LowSyrup` not latched** (normal coil = `Starved`): waiting for syrup is not a malfunction, the machine continues by itself after the refill, and the refill is the operator's acknowledgement. The four FAULT alarms are latched because their cause (a timer Q) disappears as soon as the step changes, and a fault needs an operator Reset. Limitation: `Ingredients_OK` has no hysteresis, so the warning may flicker at the exact limit. |
 | 2026-11-12 | **Stop rungs like the filler:** one Stop latch, separate "-> 0 at a safe point" rungs (two step ends per rung), `NOT Stop_Request` in every normal transition (one transition per scan). `Batch_Dosed` set / reset and `BatchCount` hang on the step-end condition, not on the transition, so they also happen when a Stop ends the step. |
 | 2026-11-08 | `Product_Available` depends on the buffer level only (no pressure sensor on the buffer); it stays TRUE during FAULT / E-stop of the syrup room, because the product in the buffer is still good. |
 
 ## Open questions
 
 All answered 2026-11-09 (see Decisions). Left for later:
+- **Double Reset after comm loss in FAULT:** `Master_Enable` (rung 6) is computed above the watchdog Reset (rung 10), so with `Alm_CommLost` and FAULT both latched the first Reset only clears `Alm_CommLost`, a second one leaves FAULT. Fix if wanted: move the `Master_Enable` rung below rung 10 (the filler has the same order). For now documented; the test scripts reset until Step 0.
 - Animation words `%MW70–79` for the HMI: probably none needed (`io-list.md`), decided at the HMI step.
 
 ## Log
@@ -153,3 +159,5 @@ All answered 2026-11-09 (see Decisions). Left for later:
 | 2026-11-12 | Stage 5 done: 20 variables and rungs 49–67 (jog watchdog, interlock compares, step groups, 6 request rungs Auto OR Manual with interlocks after the OR, 6 FB instances) compiled and uploaded; `test_syrup_outputs.py` 35/35 (outputs per step, interlocks in Auto and Manual, jog watchdog, E-stop). |
 | 2026-11-12 | Test runners `tests/run_filler.py` / `tests/run_syrup.py` (one command per PLC, shared `tests/suite.py`); filler scripts now exit 0/1. |
 | 2026-11-12 | Stage 6 written: 3 variables, Stop latch + 4 safe-point rungs, 10 transitions with `NOT Stop_Request`, `Batch_Dosed` set/reset in own rungs, section 8 counter + State; `test_syrup_stop_state.py` written. Compiled, uploaded; `test_syrup_stop_state.py` and `tests/run_syrup.py` pass. Stage 6 done. |
+| 2026-11-12 | Stage 7 done: 4 variables and rungs 82–94 built by hand in the Editor (alarm causes from the stage 5 interlock compares, set / reset pair per FAULT alarm, `Alm_LowSyrup` = `Starved` as a non-latched warning, `No_Fault` by De Morgan, last rung MOVE 900). Review found the missing `Step_Cool` contact in the `Cool_Timer` rung, fixed. `test_syrup_alarms.py` passes. Ladder stages 0–7 complete. |
+| 2026-11-12 | Suite regression after stage 7: `test_syrup_outputs.py` O12b and `test_syrup_stop_state.py` failed. Not the PLC: the stage 5/6 scripts predate the latched alarms. O12b now expects the latch (O12b nothing, O12c Reset → WaterPump; 36 checks); every syrup script now resets with `reset_to_idle` (Auto first, Reset until Step 0) and ends with `leave_idle` (Step 0, no alarms), both in `test_syrup_sequencer.py`. `tests/run_syrup.py` all green twice (stage 0 not run: filler Modbus off). |

@@ -38,7 +38,7 @@ from test_syrup_sequencer import (
     COIL_BATCH_DOSED, COIL_COMMLOST, COIL_E_STOP_OK, DEFAULT_CARB_TIME, DEFAULT_MIX_TIME, HOST,
     HR_BUFFER_LEVEL, HR_CARB_TIME, HR_CO2_PRESSURE, HR_MIX_LEVEL, HR_MIX_TIME, HR_MODE_REQ,
     HR_PRODUCT_TEMP, HR_STEP, HR_SYRUP_LEVEL, MODE_AUTO, MODE_STOP, PORT, RESET, SETTLE, START,
-    Heartbeat, Plc, check, connect,
+    Heartbeat, Plc, check, connect, leave_idle, reset_to_idle,
 )
 
 HR_STATE = 1074  # %MW50
@@ -96,9 +96,7 @@ def main() -> int:
         plc.coil(COIL_BATCH_DOSED, False)
         heartbeat.start()
         time.sleep(1.0)
-        plc.cmd(RESET)
-        plc.write(HR_MODE_REQ, MODE_AUTO)
-        time.sleep(SETTLE)
+        reset_to_idle(client)  # Auto + Reset until Step 0 (a FAULT left by another script)
         if plc.coil(COIL_COMMLOST) or plc.step() != 0:
             raise SystemExit(f"Setup failed: Step {plc.step()}, Alm_CommLost {plc.coil(COIL_COMMLOST)} (expected 0 / False)")
         state("T1", 0, "Auto, IDLE")
@@ -208,17 +206,15 @@ def main() -> int:
         plc.write(HR_MODE_REQ, MODE_MANUAL)
         state("T9", 0, "Manual mode (abort -> IDLE)")
     finally:
-        plc.write(HR_MODE_REQ, MODE_STOP)
+        leave_idle(client)
         plc.write(HR_MIX_TIME, DEFAULT_MIX_TIME)
         plc.write(HR_CARB_TIME, DEFAULT_CARB_TIME)
-        for address in (HR_SYRUP_LEVEL, HR_MIX_LEVEL, HR_PRODUCT_TEMP, HR_CO2_PRESSURE, HR_BUFFER_LEVEL):
-            plc.write(address, 0)
         plc.coil(COIL_BATCH_DOSED, False)
         heartbeat.stop()
         client.close()
 
     passed = sum(results)
-    print(f"\n{passed}/{len(results)} checks passed (Mode Stop, MixTime 20 / CarbTime 10, sensors 0)")
+    print(f"\n{passed}/{len(results)} checks passed (Step 0, no alarms, Mode Stop, MixTime 20 / CarbTime 10, sensors 0)")
     return 0 if passed == len(results) else 1
 
 
