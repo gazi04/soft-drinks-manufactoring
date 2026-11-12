@@ -18,6 +18,7 @@ A background thread toggles the heartbeat, otherwise Alm_CommLost would switch
 Master_Enable off after 3 s.
 """
 
+import sys
 import threading
 import time
 
@@ -341,6 +342,7 @@ def main():
     print()
     print(f"{sum(results)}/{len(results)} checks passed")
     print("Outputs OK" if all(results) else "Outputs NOT OK, see the FAIL lines above")
+    sys.exit(0 if all(results) else 1)  # exit code for run_filler.py
 
 
 if __name__ == "__main__":

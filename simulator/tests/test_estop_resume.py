@@ -13,6 +13,7 @@ Helpers and addresses come from test_outputs.py (same folder).
     uv run python tests/test_estop_resume.py
 """
 
+import sys
 import time
 
 from pymodbus.client import ModbusTcpClient
@@ -128,6 +129,7 @@ def main():
     print()
     print(f"{sum(results)}/{len(results)} checks passed")
     print("E-stop + resume OK" if all(results) else "E-stop + resume NOT OK, see the FAIL lines above")
+    sys.exit(0 if all(results) else 1)  # exit code for run_filler.py
 
 
 if __name__ == "__main__":

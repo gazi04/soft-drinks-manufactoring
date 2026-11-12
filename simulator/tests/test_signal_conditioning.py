@@ -14,6 +14,7 @@ Addresses:
     GoodCount      %MW53   HR 1077          written by the PLC (CTU CV)
 """
 
+import sys
 import time
 
 from pymodbus.client import ModbusTcpClient
@@ -126,6 +127,7 @@ def main():
         print("Signal conditioning OK")
     else:
         print("Signal conditioning NOT OK, see the FAIL lines above")
+    sys.exit(0 if all(results) else 1)  # exit code for run_filler.py
 
 
 if __name__ == "__main__":

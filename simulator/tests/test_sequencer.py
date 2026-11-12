@@ -238,6 +238,7 @@ def main():
 
     print()
     print("Sequencer OK" if all(results) else "Sequencer NOT OK, see the FAIL lines above")
+    sys.exit(0 if all(results) else 1)  # exit code for run_filler.py
 
 
 if __name__ == "__main__":

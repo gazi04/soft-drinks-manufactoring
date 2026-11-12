@@ -26,5 +26,6 @@ dev = [
 
 [tool.pytest.ini_options]
 # Only the pure-Python unit tests. The scripts in tests/ talk to a live PLC
-# and must be run one by one with `uv run python tests/<script>.py`.
+# and run on their own (`uv run python tests/<script>.py`) or per machine
+# (`uv run python tests/run_filler.py`, `tests/run_syrup.py`).
 testpaths = ["tests/unit"]

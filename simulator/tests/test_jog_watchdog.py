@@ -22,6 +22,7 @@ Checks:
 Do not run it while the simulator or FUXA is operating the machine (one writer per address).
 """
 
+import sys
 import time
 
 from pymodbus.client import ModbusTcpClient
@@ -92,6 +93,7 @@ def main() -> None:
         heartbeat.stop_event.set()
         heartbeat.join()
     print(f"\n{sum(results)}/{len(results)} checks passed")
+    sys.exit(0 if all(results) else 1)  # exit code for run_filler.py
 
 
 if __name__ == "__main__":

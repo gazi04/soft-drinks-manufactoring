@@ -21,6 +21,7 @@ A background thread toggles the heartbeat, otherwise Alm_CommLost would switch
 Master_Enable off after 3 s and the abort rung would send Step back to 0.
 """
 
+import sys
 import threading
 import time
 
@@ -268,6 +269,7 @@ def main():
 
     print()
     print("Station jobs OK" if all(results) else "Station jobs NOT OK, see the FAIL lines above")
+    sys.exit(0 if all(results) else 1)  # exit code for run_filler.py
 
 
 if __name__ == "__main__":

@@ -241,6 +241,7 @@ def main():
     print()
     print(f"{sum(results)}/{len(results)} checks passed")
     print("Alarms OK" if all(results) else "Alarms NOT OK, see the FAIL lines above")
+    sys.exit(0 if all(results) else 1)  # exit code for run_filler.py
 
 
 if __name__ == "__main__":

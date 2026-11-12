@@ -16,6 +16,7 @@ Helpers and addresses come from test_outputs.py (same folder).
     uv run python tests/test_index_door.py
 """
 
+import sys
 import time
 
 from pymodbus.client import ModbusTcpClient
@@ -201,6 +202,7 @@ def main():
     print()
     print(f"{sum(results)}/{len(results)} checks passed")
     print("INDEX, door, counter OK" if all(results) else "INDEX, door, counter NOT OK, see the FAIL lines above")
+    sys.exit(0 if all(results) else 1)  # exit code for run_filler.py
 
 
 if __name__ == "__main__":
