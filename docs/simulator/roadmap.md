@@ -290,3 +290,36 @@ Each new machine follows the same pattern:
 5. One tab in the panel.
 
 The filler classes do not change.
+
+---
+
+## Syrup room simulator
+
+Second machine, same pattern as above. The filler classes and `address_map.py` do not change. Addresses: `docs/syrup/io-list.md`; behaviour: `docs/syrup/state-diagram.md`; checklist: `docs/syrup/progress.md` section 2.
+
+| # | Stage | Content | Test |
+| --- | --- | --- | --- |
+| 0 | Address map | `address_map_syrup.py` (own module, converters imported from `address_map`) | unit: numbers = io-list (parsed from the doc), blocks contiguous, one-writer rule |
+| 1 | Tank physics | `machines/syrup.py`: syrup, mixing and buffer volumes from pump flows, `MixHighHigh`, buffer drained by the filler | pump N s = right level, empty tank moves nothing |
+| 2 | Temperature + CO2 | first-order cooling, room heat, pressure with dissolving CO2, vent when the tank is empty | cool time < `CoolTimeout`; pressure holds when saturated |
+| 3 | Plant + wiring | `SyrupRoom` in `Plant`; `Product_Available` copied syrup `%MX6.0` -> filler `%MX1.0`; shared E-stop, own heartbeat | test controller runs one batch without a PLC |
+| 4 | Second link | shared link base class, `SyrupPlc`, 6 alarms | heartbeat only, reconnect |
+| 5 | Closed loop, two PLCs | `loop.py` with two links, plant lock per port | one real batch, `BatchCount` +1 |
+| 6 | Commands + scenarios | refill syrup, chiller failed, CO2 stuck, pump failed, sensor stuck, buffer draw | scenarios of `docs/syrup/progress.md` section 4 |
+| 7 | Panel | syrup rows, new switches | pilot test + one scenario |
+| 8 | Wrap-up | design-notes, README, `demo_check.py`, report section 7 | – |
+
+Open decisions for stages 1–3 (proposed): buffer draw scaled ×50 per simulated bottle so a batch lasts about 2 min; passive vent to 0 bar when the mixing tank is empty; `--filler-only` keeps the old stand-in behaviour.
+
+**Stage 0 as built (2026-11-12):** `address_map_syrup.py` defines outputs (coils 0–5), the 11-coil sensor block 8192–8202 (`MixHighHigh`, spares and the unused %MX1.0 written FALSE, `E_Stop_OK`, `Heartbeat`), the 5-register analog block HR 1036–1040, status HR 1074–1077, 6 alarms 8232–8237, `PRODUCT_AVAILABLE_OUT` 8240, conditioned bits, setpoints HR 1054–1063 and manual buttons, plus `SIM_WRITE_COILS` / `SIM_WRITE_REGISTERS`. `tests/unit/test_address_map_syrup.py` (9 tests) parses the tables of `io-list.md`, so a typo in code or doc fails. Differences to the filler map: 6 alarms, 5 analog sensors, `Product_Available` is an output here. Unit suite 161 passed.
+
+**Stage 1 as built (2026-11-12):** `machines/syrup.py`: `SyrupOutputs` (6 coils), `SyrupSensors` (levels in L, `product_temp` / `co2_pressure` already present as constants, `mix_high_high`), `SyrupRoom` with public volumes `syrup_l` / `mix_l` / `buffer_l`, ledger counters (`water_in_l`, `delivered_l`, `drawn_l`, `spilled_l`), `step(out, dt, now)`, `sensors()`, `deliver_syrup()`, `draw_buffer()`. Audit warnings (one per period): mixing tank / buffer overflow, syrup pump or transfer pump dry, agitator with the propeller uncovered. Parameters in `config.py`:
+
+| Parameter | Value | Must fit with (PLC) |
+| --- | --- | --- |
+| Water / syrup / transfer flow | 20 / 5 / 25 L/s | doses 25 s, 18 s, 23.4 s vs `DoseTimeout` 60 s; overshoot <= flow x 0.1 s keeps the 5.5:1 ratio |
+| Tanks syrup / mix / buffer | 1000 / 1000 / 2000 L | `MixMax` 950, `BufferMax` 1950 are the PLC interlocks |
+| `MixHighHigh` switch | 980 L | above `MixMax` 950 |
+| Start levels | syrup 600, buffer 500 L | buffer < `BufferLow` 800 (first batch at once), > `BufferMin` + 20 (`Product_Available` TRUE) |
+
+Tests: `tests/unit/test_syrup.py` (20): flows, empty / full tanks, rounding, `MixHighHigh`, PLC timeout fit, dose precision with the real loop order, one scripted batch, and a 5 000-tick conservation test. Unit suite 182 passed.

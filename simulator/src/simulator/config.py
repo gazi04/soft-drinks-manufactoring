@@ -51,3 +51,21 @@ HEARTBEAT_S = 1.0  # heartbeat toggle period; the PLC's watchdog fires after 3 s
 # --- Neighbour stand-ins ----------------------------------------------------------
 SUPPLY_PER_MIN = 30  # bottles per minute put onto C1 (replaces the blow moulder)
 LABELER_TAKE_S = 2.0  # the labeler stand-in takes one bottle from the end of C2 every 2 s
+
+# --- Syrup room: tanks and pumps (docs/syrup/state-diagram.md, constants in the PLC's main.ld) -----
+SYRUP_TANK_L = 1000.0  # syrup storage tank capacity
+MIX_TANK_L = 1000.0  # mixing tank / carbonator capacity; PLC MixMax 950 L is the interlock, this the steel
+BUFFER_TANK_L = 2000.0  # buffer tank capacity; PLC BufferMax 1950 L
+MIX_HIGH_HIGH_L = 980.0  # MixHighHigh switch: above the PLC's MixMax (950 L), below the brim
+AGITATOR_MIN_L = 100.0  # propeller uncovered below this (PLC AgitatorMin); only used for the audit
+# Flows. The PLC doses by ABSOLUTE level (water to 500 L, syrup to 590 L) and sees one level per
+# tick, so a pump overshoots by up to flow x 0.1 s: a small flow keeps the 5.5:1 ratio accurate
+# (water <= 2 L, syrup <= 0.5 L). Each dose must stay far below the PLC's DoseTimeout (60 s).
+WATER_FLOW_L_S = 20.0  # 500 L in 25 s
+SYRUP_FLOW_L_S = 5.0  # 90 L in 18 s
+TRANSFER_FLOW_L_S = 25.0  # a 590 L batch down to MixEmpty (5 L) in 23.4 s
+# Start state: buffer below BufferLow (800 L) so the first batch starts at once, and above
+# BufferMin + AvailBand (120 L) so Product_Available is TRUE.
+SYRUP_START_L = 600.0
+BUFFER_START_L = 500.0
+ROOM_TEMP_X10 = 200  # 20.0 degC in the PLC's unit (0.1 degC); constant until the temperature physics

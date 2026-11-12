@@ -4,7 +4,7 @@ Batch mixer and carbonator with a buffer tank. Second machine of the line, after
 Design reference: `docs/project-report.md` sections 4.2 (machine), 5.1–5.2 (`Product_Available` handshake), 6.2 (register layout), 9 (modes/alarms).
 Syrup docs: `io-list.md`, `state-diagram.md`, `ladder-roadmap.md` (stages for the ladder program).
 
-**Current step:** ladder stages 0–7 done (2026-11-12), the syrup room PLC program is complete. Next: Python simulator for the syrup room (section 2: physics class `machines/syrup.py`).
+**Current step:** ladder stages 0–7 done (2026-11-12), the syrup room PLC program is complete. Simulator stages 0 (address map) and 1 (tank physics) done; next: stage 2, temperature and CO2 pressure (section 2).
 - The filler's leftovers (HMI stage 7, manual interlocks) are independent of this machine.
 
 ## Why the syrup room second
@@ -71,8 +71,10 @@ Same as the filler (`docs/filler/progress.md`): **paper → ladder → simulator
   - [x] Rung 88: `Step_Cool` contact added before `Cool_Timer.IN` (was missing: timer ran in every step → `Alm_CoolTimeout` after 60 s)
   - [x] Uploaded to 127.0.0.2; test script `test_syrup_alarms.py` passes (N1, O1–O5, P1–P4, R1, L1–L2, D1–D2, C1–C2; `--quick` without the timeouts) on 2026-11-12
 
-### 2. Python simulator
-- [ ] Physics class `machines/syrup.py`: tank levels from pump flows, temperature (first-order toward coolant / room), pressure (CO2 in, dissolving out), buffer drained by the filler's `FillValve`
+### 2. Python simulator – stages in `docs/simulator/roadmap.md` (section "Syrup room simulator")
+- [x] Stage 0 – Address map `address_map_syrup.py` + `tests/unit/test_address_map_syrup.py` (2026-11-12; doc guard against `io-list.md`, live read of all blocks on 5022 ok)
+- [x] Stage 1 – `machines/syrup.py` tank volumes from pump flows, `MixHighHigh`, audit warnings, `deliver_syrup` / `draw_buffer` (2026-11-12)
+- [ ] Stage 2 – physics class `machines/syrup.py` (rest): temperature (first-order toward coolant / room), pressure (CO2 in, dissolving out), buffer drained by the filler's `FillValve`
 - [ ] Second PLC client; copy `Product_Available` (this PLC `%MX6.0`) → filler `%MX1.0` every tick, replacing the stand-in
 - [ ] Fault scenarios (low syrup, cooling failure, over-pressure, buffer full, pump failure, level sensor stuck → `MixHighHigh`)
 - [ ] Panel: syrup room rows (tanks, temperature, pressure)
@@ -161,3 +163,5 @@ All answered 2026-11-09 (see Decisions). Left for later:
 | 2026-11-12 | Stage 6 written: 3 variables, Stop latch + 4 safe-point rungs, 10 transitions with `NOT Stop_Request`, `Batch_Dosed` set/reset in own rungs, section 8 counter + State; `test_syrup_stop_state.py` written. Compiled, uploaded; `test_syrup_stop_state.py` and `tests/run_syrup.py` pass. Stage 6 done. |
 | 2026-11-12 | Stage 7 done: 4 variables and rungs 82–94 built by hand in the Editor (alarm causes from the stage 5 interlock compares, set / reset pair per FAULT alarm, `Alm_LowSyrup` = `Starved` as a non-latched warning, `No_Fault` by De Morgan, last rung MOVE 900). Review found the missing `Step_Cool` contact in the `Cool_Timer` rung, fixed. `test_syrup_alarms.py` passes. Ladder stages 0–7 complete. |
 | 2026-11-12 | Suite regression after stage 7: `test_syrup_outputs.py` O12b and `test_syrup_stop_state.py` failed. Not the PLC: the stage 5/6 scripts predate the latched alarms. O12b now expects the latch (O12b nothing, O12c Reset → WaterPump; 36 checks); every syrup script now resets with `reset_to_idle` (Auto first, Reset until Step 0) and ends with `leave_idle` (Step 0, no alarms), both in `test_syrup_sequencer.py`. `tests/run_syrup.py` all green twice (stage 0 not run: filler Modbus off). |
+| 2026-11-12 | Syrup simulator stage 0: `address_map_syrup.py` (same block shapes as the filler: sensor coils 8192–8202, analog HR 1036–1040, outputs 0–5, status HR 1074–1077, 6 alarms 8232–8237, `Product_Available` out 8240) and 9 unit tests incl. a parser that compares every name with the tables of `io-list.md`. Read-only live check on 5022: all blocks answer, setpoint defaults and `SyrupTarget` 90 / `DoseTarget` 590 as expected. |
+| 2026-11-12 | Syrup simulator stage 1: `machines/syrup.py` + `config.py` parameters + 20 unit tests (suite 182). Flows 20 / 5 / 25 L/s chosen after an overshoot analysis (level-based dosing, one level per tick). Found while testing: overflow warnings must be evaluated every step, not only while a pump runs, or they never re-arm. |

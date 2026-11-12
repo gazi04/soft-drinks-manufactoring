@@ -158,3 +158,20 @@ All values keep a margin to the PLC time they meet, and every one is exercised b
 **Why a lock and not only the read-back check?** The read-back (`verify_writes`) notices a second writer only after it has written: by then the PLC has acted on a world that does not exist (two simulators lost bottles in a test). The lock stops the second simulator or sensor-writing test script before its first write, with a message naming the first one.
 
 **Why `fcntl.flock` on a file in the temp dir?** The OS releases it when the process ends, also after a crash or `kill -9`, so a stale lock can never block the next run (a "file exists" check could). The file name has the PLC host and port: the unit tests use fake PLC servers on other ports and never collide with a running simulator, and a later second PLC gets its own lock. Taken in `loop.run` (idempotent per process), in the CLI before the panel starts, and by every test script that writes sensors (`tests/hmi_guard.claim_plant`). FUXA writes no sensors and takes no lock (FUXA vs scripts: HMI issue I4, a reminder).
+
+## Syrup room physics (`machines/syrup.py`)
+
+**Why are the flows 20 / 5 / 25 L/s and not faster?**
+The PLC doses by absolute level (water to 500 L, syrup to 590 L) and sees one level per tick, so a pump runs one step too long: overshoot up to flow x 0.1 s. A water overshoot is taken away from the syrup dose, so 25 L/s would shift the ratio from 5.5:1 to about 5.8:1. At 20 L/s water the error is at most 2 L. Each dose still takes under half of the PLC's 60 s `DoseTimeout`. It is a real property of level-based dosing, not only of the simulator.
+
+**Why does the mixing tank keep a little product after TRANSFER?**
+The PLC stops TRANSFER at `MixLevel <= 5` (the sensor is rounded), so up to 5 L stay. The next water dose is that much shorter. The physics does not clean it; stage 2 has to carry its temperature and pressure.
+
+**Why `MixHighHigh` from the true level but `MixLevel` rounded?**
+The switch is hardware and sees the real liquid; the analog sensor reports an INT. `sensors()` is the only place where the true state becomes reported values, so a stuck level sensor (stage 6) is a change in one place and the switch still works.
+
+**Why a ledger (`water_in_l`, `drawn_l`, `spilled_l`, ...)?**
+So conservation can be tested: `syrup + mix + buffer + spilled = start + water_in + delivered - drawn` after any sequence of outputs. It catches liquid created or lost in clamping or in the last partial step.
+
+**When is a pump "dry"?**
+When it is on and its source is empty at the START of the step. The last partial step (0.25 L left, 0.5 L wanted) is normal operation and gives no warning.
