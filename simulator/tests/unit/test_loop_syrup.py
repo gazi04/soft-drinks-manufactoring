@@ -282,3 +282,91 @@ def test_panel_runs_the_second_link_and_closes_it(tmp_path):
             await pilot.press("q")
 
     asyncio.run(test())
+
+
+# --- A PLC that accepts the connection and never answers (Docker's proxy in front of a runtime whose
+# --- Modbus server is off). Found live: it slowed the HEALTHY PLC and starved its heartbeat. ----------
+async def start_silent_plc(port: int):
+    """Accepts TCP connections and reads, but never replies."""
+    async def hold(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            while await reader.read(1024):
+                pass
+        finally:
+            writer.close()
+
+    return await asyncio.start_server(hold, "127.0.0.1", port)
+
+
+def test_a_silent_plc_is_retried_less_and_less_often():
+    async def scenario() -> None:
+        port = free_port()
+        server = await start_silent_plc(port)
+        plc = FillerPlc(port=port, reconnect_s=0.2, timeout_s=0.1)
+        attempts, start = [], asyncio.get_running_loop().time()
+        while asyncio.get_running_loop().time() - start < 4.0:
+            before = plc._last_try
+            if await plc.ensure_connected():
+                attempts.append(round(asyncio.get_running_loop().time() - start, 1))
+                try:
+                    await plc.read_outputs()  # no answer: PlcCommError after 0.1 s, the link is dropped
+                except Exception:
+                    pass
+            await asyncio.sleep(0.02)
+        # 0.2 s spacing would give about 13 attempts in 4 s; the backoff 0.4, 0.8, 1.6, 1.6 ... gives 4-5
+        assert 3 <= len(attempts) <= 6, attempts
+        assert plc._failures >= 3
+        server.close()
+
+    asyncio.run(scenario())
+
+
+def test_the_backoff_is_forgotten_when_the_plc_answers():
+    async def scenario() -> None:
+        port = free_port()
+        plc = FillerPlc(port=port, reconnect_s=0.1, timeout_s=0.2)
+        assert not await plc.ensure_connected()  # nobody there
+        assert not await plc.ensure_connected() or True
+        failures = plc._failures
+        assert failures >= 1
+        server = await start_fake_plc(port)
+        for _ in range(100):
+            if await plc.ensure_connected():
+                break
+            await asyncio.sleep(0.1)
+        await plc.read_outputs()
+        assert plc.link_ok and plc._failures == 0
+        plc.close()
+        await server.shutdown()
+
+    asyncio.run(scenario())
+
+
+def test_a_silent_filler_does_not_starve_the_syrup_plc_of_heartbeat_toggles():
+    async def scenario() -> None:
+        fp, sp = free_port(), free_port()
+        silent, ss = await start_silent_plc(fp), await start_fake_plc(sp)
+        other = await client(sp)
+        seen: list[tuple[float, bool]] = []
+
+        async def sample() -> None:  # what the syrup PLC would see: its heartbeat coil, polled often
+            start = asyncio.get_running_loop().time()
+            while True:
+                seen.append((asyncio.get_running_loop().time() - start, await coil(other, sm.HEARTBEAT)))
+                await asyncio.sleep(0.05)
+
+        task = asyncio.create_task(sample())
+        plant, log = Plant(with_syrup=True), EventLog()
+        stats = await loop.run(FillerPlc(port=fp, timeout_s=0.5), plant, log, seconds=9.0,
+                               syrup_plc=SyrupPlc(port=sp))
+        task.cancel()
+        changes = [t for (t, v), (_, w) in zip(seen, seen[1:]) if v != w]
+        gaps = [b - a for a, b in zip(changes, changes[1:])]
+        assert len(changes) >= 4 and max(gaps) < 2.9  # the syrup PLC's 3 s watchdog would never fire
+        slow = [t for t in sim_texts(log) if "slow tick" in t]
+        assert len(slow) <= 4, slow  # the dead link costs a few timeouts, not one every 2 s
+        other.close()
+        silent.close()
+        await ss.shutdown()
+
+    asyncio.run(scenario())

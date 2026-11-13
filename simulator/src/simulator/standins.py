@@ -104,6 +104,15 @@ class Heartbeat:
     """A bit that toggles every `period_s` seconds; the PLC's watchdog checks that it changes.
 
     `enabled = False` freezes it (fault injection: the PLC raises Alm_CommLost after 3 s).
+
+    At most ONE toggle per step() call, and the plant calls it once per tick. The PLC only sees
+    the value the simulator writes at the end of a tick. After a stall of 2 s the old "catch up
+    with every missed toggle" gave two toggles inside one tick, i.e. the same value as before: the
+    PLC saw a heartbeat that never changed and raised Alm_CommLost (found with a second PLC whose
+    link stalled the loop). Now a late tick gives exactly ONE toggle and keeps only the phase (the
+    part of the period already run): after a 2.5 s stall the bit toggles once and the next toggle
+    follows 0.5 s later. The other missed toggles are dropped, on purpose: the PLC only needs to see
+    a change within 3 s, not a count of them.
     """
 
     def __init__(self, period_s: float = config.HEARTBEAT_S) -> None:
@@ -115,7 +124,9 @@ class Heartbeat:
     def step(self, dt: float) -> bool:
         if self.enabled:
             self._timer += dt
-            while self._timer >= self.period_s - _EPSILON:
-                self._timer -= self.period_s
+            if self._timer >= self.period_s - _EPSILON:
+                # keep the phase: the remainder is always < one period, so this tick toggles once and
+                # any further missed toggles of a stall are dropped (exact over normal 0.1 s ticks)
+                self._timer = self._timer - self.period_s if self._timer < 2 * self.period_s else self._timer % self.period_s
                 self.value = not self.value
         return self.value

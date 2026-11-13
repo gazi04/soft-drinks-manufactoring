@@ -217,6 +217,22 @@ def test_the_syrup_plc_outputs_move_the_syrup_room():
     assert plant.syrup.mix_l == pytest.approx(5 * config.WATER_FLOW_L_S)
 
 
+def test_a_late_tick_never_hides_a_heartbeat_toggle():
+    plant = Plant(with_syrup=True)
+    filler_hb, syrup_hb, t, changes = [], [], 0.0, {"filler": [], "syrup": []}
+    for dt in ([TICK] * 9 + [2.05]) * 4:  # a 2 s stall every 3 s, like a second PLC that does not answer
+        plant.step(FillerOutputs(), dt, YES)
+        t += dt
+        for name, value, history in (("filler", plant.writes().heartbeat, filler_hb),
+                                     ("syrup", plant.syrup_writes().heartbeat, syrup_hb)):
+            if history and value != history[-1]:  # what the PLC is given at the end of the tick
+                changes[name].append(t)
+            history.append(value)
+    for name, times in changes.items():
+        gaps = [b - a for a, b in zip(times, times[1:])]
+        assert len(times) >= 7 and max(gaps) < 3.0, (name, times)  # the PLC's 3 s watchdog never fires
+
+
 def test_heartbeats_are_separate_and_the_e_stop_is_shared():
     plant = Plant(with_syrup=True)
     plant.syrup_heartbeat.enabled = False

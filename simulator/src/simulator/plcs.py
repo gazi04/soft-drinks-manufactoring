@@ -80,6 +80,7 @@ from simulator.machines.syrup import SyrupOutputs
 from simulator.plant import SimWrites, SyrupSignals, SyrupWrites
 
 RECONNECT_S = 2.0  # default: at most one connection attempt every 2 s while the PLC is away
+MAX_BACKOFF = 8  # a PLC that never answered is retried at most every RECONNECT_S x 8 (16 s by default)
 TIMEOUT_S = 1.0  # one request may take at most 1 s (a tick is 0.1 s; pymodbus default is 3 s)
 SETPOINTS_COUNT = 3  # FillSetpoint, RinseTime, CapTime = %MW30..32, read in one request
 INT_MAX = 32767  # %MW is a signed 16-bit INT in the PLC
@@ -309,6 +310,8 @@ class PlcLink:
         self.link_ok = False  # True = the last request was answered by the PLC
         self._client: AsyncModbusTcpClient | None = None
         self._last_try = float("-inf")  # monotonic time of the last connect attempt
+        self._answered = False  # the PLC answered since the last connect
+        self._failures = 0  # connections in a row that never got an answer (backoff)
 
     @property
     def connected(self) -> bool:
@@ -319,7 +322,7 @@ class PlcLink:
         """Connect if needed, at most once per reconnect_s. True if a connection is open."""
         if self.connected:
             return True
-        if time.monotonic() - self._last_try < self.reconnect_s:
+        if time.monotonic() - self._last_try < self.reconnect_s * min(MAX_BACKOFF, 2**self._failures):
             return False  # tried a moment ago: do not block every tick
         self._last_try = time.monotonic()
         self._drop()  # forget a dead client, if any
@@ -332,10 +335,12 @@ class PlcLink:
             ok = await client.connect()
         except (ModbusException, OSError, asyncio.TimeoutError):
             ok = False
+        self._answered = False
         if ok:
             self._client = client
         else:
             client.close()
+            self._failures += 1
         return ok
 
     def close(self) -> None:
@@ -346,6 +351,8 @@ class PlcLink:
         if self._client is not None:
             self._client.close()
             self._client = None
+            if not self._answered:  # connected, but the PLC never answered: Docker's proxy in front of a
+                self._failures += 1  # runtime whose Modbus server is off. Each retry costs a full timeout (1 s)
         self.link_ok = False
 
     # --- Requests ----------------------------------------------------------------
@@ -371,6 +378,8 @@ class PlcLink:
             self._drop()  # timeout or broken link: the next ensure_connected() makes a new client
             raise PlcCommError(f"{what}: {error}") from error
         self.link_ok = True  # the PLC answered (even an error reply is an answer)
+        self._answered = True
+        self._failures = 0
         if result.isError():
             raise PlcReplyError(f"{what}: PLC replied {result} (check mx_bits in the runtime / the address map)")
         return result

@@ -123,6 +123,10 @@ class Plant:
         syrup_out = signals.outputs if signals is not None else SyrupOutputs()
         if dt > config.SLOW_TICK_S:
             events.append(Event.sim(self.now + dt, f"slow tick: {dt:.2f} s (outputs were old for that long)", warning=True))
+        # The heartbeats are stepped once per TICK, not per sub-step: the PLC only sees the value at the
+        # end of the tick, and a late tick must not hide a toggle (see Heartbeat)
+        self.heartbeat.step(dt)
+        self.syrup_heartbeat.step(dt)
         n = max(1, math.ceil(dt / config.SUBSTEP_S - 1e-9))
         self._s6_seen = self._s8_seen = False
         for _ in range(n):
@@ -136,8 +140,6 @@ class Plant:
         """One physics step of at most SUBSTEP_S."""
         self.now += dt
         events: list[Event] = []
-        self.heartbeat.step(dt)
-        self.syrup_heartbeat.step(dt)
         # Bottles flow from left to right: supply -> C1 -> filler -> C2 -> labeler
         events += self.supply.step(dt, self.now)
         self.c1.step(out.conveyor1, dt)

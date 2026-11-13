@@ -91,3 +91,23 @@ def test_heartbeat_frozen_when_disabled():
     hb = Heartbeat()
     hb.enabled = False
     assert {hb.step(TICK) for _ in range(50)} == {False}
+
+
+def test_heartbeat_toggles_at_most_once_per_step_so_a_stall_cannot_hide_it():
+    hb = Heartbeat()
+    assert hb.step(2.5) is True  # a 2.5 s stall: ONE toggle (two would be the same value the PLC saw before)
+    # the phase is kept (0.5 s into the next period): the next toggle comes 0.5 s later, not 1 s
+    assert [hb.step(TICK) for _ in range(5)] == [True] * 4 + [False]
+    assert hb.step(7.0) is True  # even a very long stall is one visible toggle, never an even number of them
+
+
+def test_every_written_value_after_a_stall_differs_from_the_one_before():
+    """Ticks of 0.1 s with a 2 s stall now and then: the PLC (3 s watchdog) always sees a change in time."""
+    hb = Heartbeat()
+    t, last_change, worst, last = 0.0, 0.0, 0.0, hb.value
+    for dt in ([TICK] * 9 + [2.05] + [TICK] * 9) * 6:
+        t += dt
+        value = hb.step(dt)
+        if value != last:
+            worst, last_change, last = max(worst, t - last_change), t, value
+    assert worst < 3.0  # before the fix a stall gave two toggles in one tick and gaps of 4 s and more
