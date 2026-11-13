@@ -68,4 +68,22 @@ TRANSFER_FLOW_L_S = 25.0  # a 590 L batch down to MixEmpty (5 L) in 23.4 s
 # BufferMin + AvailBand (120 L) so Product_Available is TRUE.
 SYRUP_START_L = 600.0
 BUFFER_START_L = 500.0
-ROOM_TEMP_X10 = 200  # 20.0 degC in the PLC's unit (0.1 degC); constant until the temperature physics
+MIX_EMPTY_L = 5.0  # the mixing tank counts as empty at or below this (PLC MixEmpty)
+
+# --- Syrup room: temperature (PLC: CoolSetpoint 4.0 degC, TempHyst 0.5 degC, CoolTimeout 60 s) ------
+ROOM_C = 20.0  # room temperature: syrup is stored here, and it slowly warms the mixing tank
+ROOM_TAU_S = 600.0  # heat leaks in slowly: 0.5 degC take about 19 s at 4 degC, so the PLC's band is real
+WATER_TEMP_C = 15.0  # mains water
+SYRUP_TEMP_C = 20.0  # syrup tank, room temperature
+COOLANT_C = 0.0  # chiller; "chiller failed" (stage 6) raises it
+COOL_TAU_S = 20.0  # jacket: 15.8 -> 4.0 degC in about 29 s, well below CoolTimeout (60 s)
+
+# --- Syrup room: CO2 pressure (PLC: PressSetpoint 3.50 bar, PressHyst 0.20 bar, CarbTime 10 s, PressMax 6 bar)
+CO2_FILL_BAR_S = 0.5  # CO2 valve open: pressure rise per second
+DISSOLVE_K_STIRRED = 0.10  # 1/s, liquid takes CO2 up this fast with the agitator on ...
+DISSOLVE_K_STILL = 0.01  # ... and 10x slower without it
+HEADSPACE_GAIN = 0.286  # bar of headspace pressure lost per bar of CO2 pressure the liquid gains.
+#                         With the two values above: pressure falls fast at first, so the PLC's valve
+#                         opens 2-3 times, and holds after about 20 s, so Carb_Timer (10 s) can finish.
+VENT_TAU_S = 5.0  # transfer pump running: the headspace empties into the buffer, pressure -> 0
+PRESS_RELIEF_BAR = 8.0  # relief valve lifts here (the PLC faults at PressMax 6.00 bar long before)

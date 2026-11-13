@@ -169,11 +169,6 @@ def test_high_high_switch_uses_the_true_level():
     assert room.sensors().mix_high_high is True
 
 
-def test_temperature_and_pressure_are_constants_for_now():
-    s = SyrupRoom().sensors()
-    assert (s.product_temp, s.co2_pressure) == (config.ROOM_TEMP_X10, 0)
-
-
 # --- Interfaces -------------------------------------------------------------------
 def test_deliver_syrup_is_limited_by_the_tank():
     room = SyrupRoom(syrup_l=900)
@@ -260,3 +255,246 @@ def test_no_liquid_is_created_or_lost():
         inside = room.syrup_l + room.mix_l + room.buffer_l + room.spilled_l
         assert inside == pytest.approx(room.start_l + room.water_in_l + room.delivered_l - room.drawn_l, abs=1e-6)
     assert rig.room.spilled_l > 0 and rig.room.water_in_l > 0  # the run really exercised the limits
+
+
+# === Stage 2: temperature and CO2 pressure =============================================
+# PLC numbers (main.ld): CoolSetpoint 40 (4.0 degC), TempHyst 5, PressSetpoint 350, PressHyst 20,
+# PressMax 600, CarbTime 10 s, CoolTimeout 60 s.
+PLC_COOL_SETPOINT, PLC_TEMP_HYST = 40, 5
+PLC_PRESS_SETPOINT, PLC_PRESS_HYST, PLC_PRESS_MAX = 350, 20, 600
+PLC_CARB_TIME_S, PLC_COOL_TIMEOUT_S = 10.0, 60.0
+
+
+class PlcRules:
+    """The PLC's hysteresis latches and Carb_Timer, ported to Python to drive the physics in tests."""
+
+    def __init__(self) -> None:
+        self.temp_ok = False
+        self.co2_demand = False
+        self.carb_s = 0.0
+
+    def update(self, s: SyrupSensors, dt: float, carbonating: bool = False) -> None:
+        if s.product_temp <= PLC_COOL_SETPOINT:
+            self.temp_ok = True
+        elif s.product_temp > PLC_COOL_SETPOINT + PLC_TEMP_HYST:
+            self.temp_ok = False
+        if s.co2_pressure < PLC_PRESS_SETPOINT - PLC_PRESS_HYST:
+            self.co2_demand = True
+        elif s.co2_pressure >= PLC_PRESS_SETPOINT:
+            self.co2_demand = False
+        # Carb_Timer: runs while the valve is NOT wanted, restarts whenever it is
+        self.carb_s = self.carb_s + dt if carbonating and not self.co2_demand else 0.0
+
+    def outputs(self, s: SyrupSensors) -> SyrupOutputs:
+        return SyrupOutputs(
+            agitator=True,
+            cooling_valve=not self.temp_ok,
+            co2_valve=self.co2_demand and self.temp_ok and s.co2_pressure < PLC_PRESS_MAX,
+        )
+
+
+def cool(rig: Rig, rules: PlcRules, limit_s: float = 120.0) -> float:
+    """COOL step: valve on until Temp_OK. Returns the seconds it took."""
+    t = 0.0
+    rules.update(rig.room.sensors(), 0.0)
+    while not rules.temp_ok and t < limit_s:
+        rig.tick(rules.outputs(rig.room.sensors()))
+        t += TICK
+        rules.update(rig.room.sensors(), TICK)
+    return t
+
+
+def carbonate(rig: Rig, rules: PlcRules, limit_s: float = 120.0) -> tuple[float, int]:
+    """CARBONATE step until Carb_Timer is done. Returns (seconds, number of CO2 valve openings)."""
+    t, openings, was_open = 0.0, 0, False
+    while rules.carb_s < PLC_CARB_TIME_S and t < limit_s:
+        out = rules.outputs(rig.room.sensors())
+        openings += out.co2_valve and not was_open
+        was_open = out.co2_valve
+        rig.tick(out)
+        t += TICK
+        rules.update(rig.room.sensors(), TICK, carbonating=True)
+    return t, openings
+
+
+# --- Temperature ------------------------------------------------------------------
+def test_cooling_valve_pulls_toward_the_coolant_but_never_below():
+    rig = Rig(mix_l=300, temp_c=15.0)
+    temps = []
+    for _ in range(1200):  # 120 s
+        rig.tick(SyrupOutputs(cooling_valve=True))
+        temps.append(rig.room.temp_c)
+    assert temps == sorted(temps, reverse=True)  # only falls
+    assert rig.room.coolant_c < min(temps) < 1.0  # settles just above the coolant (room heat leaks in)
+
+
+def test_without_cooling_the_product_warms_toward_the_room():
+    rig = Rig(mix_l=300, temp_c=4.0)
+    rig.run(60, OFF)
+    assert 4.0 < rig.room.temp_c < config.ROOM_C
+
+
+def test_a_late_tick_gives_the_same_temperature_as_three_short_ones():
+    late, steps = Rig(mix_l=300, temp_c=15.0), Rig(mix_l=300, temp_c=15.0)
+    late.tick(SyrupOutputs(cooling_valve=True), dt=0.3)
+    for _ in range(3):
+        steps.tick(SyrupOutputs(cooling_valve=True))
+    assert late.room.temp_c == pytest.approx(steps.room.temp_c, abs=1e-9)  # exact solution of the lag
+
+
+def test_water_and_syrup_mix_by_volume():
+    room = SyrupRoom(mix_l=500, temp_c=config.WATER_TEMP_C)
+    room._into_mix(90, config.SYRUP_TEMP_C, from_mains=False)
+    assert room.temp_c == pytest.approx((500 * 15 + 90 * 20) / 590)  # 15.76 degC
+    residue = SyrupRoom(mix_l=5, temp_c=4.0)  # the product left after a transfer
+    residue._into_mix(500, config.WATER_TEMP_C, from_mains=True)
+    assert residue.temp_c == pytest.approx((5 * 4 + 500 * 15) / 505)
+
+
+def test_dosing_through_the_pumps_gives_about_the_same_mix_temperature():
+    rig = Rig(syrup_l=600, mix_l=0)
+    dose(rig, "water_pump", PLC_WATER_BATCH)
+    dose(rig, "syrup_pump", PLC_DOSE_TARGET)
+    assert rig.room.temp_c == pytest.approx(15.76, abs=0.3)  # room heat warms it a little while dosing
+
+
+def test_an_empty_tank_has_no_temperature_to_change():
+    rig = Rig(mix_l=0, temp_c=15.0)
+    rig.run(60, SyrupOutputs(cooling_valve=True))
+    assert rig.room.temp_c == 15.0
+
+
+def test_sensor_resolution_is_a_tenth_of_a_degree():
+    room = SyrupRoom(mix_l=300, temp_c=4.04)
+    assert room.sensors().product_temp == 40  # reads 4.0 degC: the PLC's Temp_OK sets here
+
+
+# --- Pressure ---------------------------------------------------------------------
+def test_co2_valve_raises_the_pressure():
+    rig = Rig(mix_l=300)
+    rig.run(1, SyrupOutputs(co2_valve=True))
+    assert rig.room.pressure_bar == pytest.approx(config.CO2_FILL_BAR_S, abs=0.02)
+    assert rig.room.sensors().co2_pressure == pytest.approx(50, abs=2)
+
+
+def test_unsaturated_liquid_takes_up_co2_and_the_pressure_falls():
+    stirred, still = Rig(mix_l=300, pressure_bar=3.5), Rig(mix_l=300, pressure_bar=3.5)
+    stirred.run(5, ON_AGITATOR)
+    still.run(5, OFF)
+    fall_stirred = 3.5 - stirred.room.pressure_bar
+    fall_still = 3.5 - still.room.pressure_bar
+    assert fall_stirred > 0.3  # about 0.45 bar
+    assert fall_stirred > 5 * fall_still  # without the agitator it is about 10x slower
+
+
+def test_saturated_liquid_holds_the_pressure():
+    rig = Rig(mix_l=300, pressure_bar=3.5, dissolved_bar=3.5)
+    rig.run(30, ON_AGITATOR)
+    assert rig.room.pressure_bar == pytest.approx(3.5, abs=1e-9)
+
+
+def test_co2_is_conserved_while_dissolving():
+    """P + G*D stays constant with the valve closed and no vent: no CO2 appears or disappears."""
+    rig = Rig(mix_l=300, pressure_bar=3.5, dissolved_bar=0.5)
+    total = rig.room.pressure_bar + config.HEADSPACE_GAIN * rig.room.dissolved_bar
+    rig.run(60, ON_AGITATOR)
+    assert rig.room.pressure_bar + config.HEADSPACE_GAIN * rig.room.dissolved_bar == pytest.approx(total, abs=1e-9)
+    assert rig.room.pressure_bar == pytest.approx(rig.room.dissolved_bar, abs=0.01)  # in balance after 60 s
+
+
+def test_fresh_water_dilutes_the_dissolved_co2():
+    room = SyrupRoom(mix_l=300, dissolved_bar=3.0)
+    room._into_mix(300, config.WATER_TEMP_C, from_mains=True)
+    assert room.dissolved_bar == pytest.approx(1.5)
+
+
+def test_a_late_tick_gives_nearly_the_same_pressure_as_three_short_ones():
+    out = SyrupOutputs(co2_valve=True, agitator=True)
+    late, steps = Rig(mix_l=300, pressure_bar=3.0), Rig(mix_l=300, pressure_bar=3.0)
+    late.tick(out, dt=0.3)
+    for _ in range(3):
+        steps.tick(out)
+    assert late.room.pressure_bar == pytest.approx(steps.room.pressure_bar, abs=1e-3)
+
+
+def test_relief_valve_limits_the_pressure_and_warns_once_per_period():
+    rig = Rig(mix_l=300, pressure_bar=7.9)
+    rig.run(5, SyrupOutputs(co2_valve=True))
+    assert rig.room.pressure_bar == config.PRESS_RELIEF_BAR
+    assert len([w for w in rig.warnings if "relief" in w]) == 1
+    rig.run(2, OFF)  # pressure drops a little below the limit: period over
+    rig.run(5, SyrupOutputs(co2_valve=True))
+    assert len([w for w in rig.warnings if "relief" in w]) == 2
+
+
+def test_transfer_vents_the_headspace_and_an_empty_tank_holds_no_co2():
+    rig = Rig(mix_l=590, buffer_l=500, pressure_bar=3.5)
+    rig.run(23.4, ON_TRANSFER)
+    assert rig.room.pressure_bar < 0.1  # the next batch must not start under pressure
+    low = Rig(mix_l=3, dissolved_bar=2.0)
+    low.tick(OFF)
+    assert low.room.dissolved_bar == 0.0
+
+
+def test_pressure_sensor_resolution_is_a_hundredth_of_a_bar():
+    assert SyrupRoom(mix_l=300, pressure_bar=3.4949).sensors().co2_pressure == 349
+
+
+def test_a_stuck_open_co2_valve_reaches_the_plc_overpressure_limit():
+    rig = Rig(mix_l=590, temp_c=4.0)
+    t = 0.0
+    while rig.room.sensors().co2_pressure < PLC_PRESS_MAX and t < 60:
+        rig.tick(SyrupOutputs(co2_valve=True, agitator=True))  # forced open, whatever the PLC wants
+        t += TICK
+    assert t < 40  # Alm_OverPressure can happen long before the relief valve
+
+
+# --- Fit with the PLC: its rules driving the physics ---------------------------------
+def test_cooling_reaches_temp_ok_well_inside_the_cool_timeout():
+    rig = Rig(syrup_l=600, mix_l=0)
+    dose(rig, "water_pump", PLC_WATER_BATCH)
+    dose(rig, "syrup_pump", PLC_DOSE_TARGET)
+    rig.run(20, ON_AGITATOR)  # MIX step: the room warms the product a little meanwhile
+    seconds = cool(rig, PlcRules())
+    print(f"COOL took {seconds:.1f} s")
+    assert seconds * 1.8 <= PLC_COOL_TIMEOUT_S
+
+
+def test_the_thermostat_does_not_chatter():
+    rig = Rig(mix_l=590, temp_c=4.0)
+    rules = PlcRules()
+    openings, was_open = 0, False
+    for _ in range(1200):  # 120 s with the agitator on and the cooling held, as in CARBONATE
+        s = rig.room.sensors()
+        rules.update(s, TICK)
+        out = SyrupOutputs(agitator=True, cooling_valve=not rules.temp_ok)
+        openings += out.cooling_valve and not was_open
+        was_open = out.cooling_valve
+        rig.tick(out)
+    assert 2 <= openings <= 8  # the 0.5 degC band is real: a few cycles per minute, not a flutter
+
+
+def test_carbonation_cycles_the_valve_then_holds_so_carb_timer_can_finish():
+    rig = Rig(mix_l=590, temp_c=4.0)
+    rules = PlcRules()
+    rules.temp_ok = True
+    seconds, openings = carbonate(rig, rules)
+    print(f"CARBONATE took {seconds:.1f} s with {openings} valve openings")
+    assert PLC_CARB_TIME_S < seconds <= 60
+    assert openings >= 2  # the pressure fell after the first fill: not saturated yet
+
+
+def test_a_whole_batch_leaves_the_tank_unpressurised_and_in_the_buffer():
+    rig = Rig(syrup_l=600, mix_l=0, buffer_l=500)
+    rules = PlcRules()
+    dose(rig, "water_pump", PLC_WATER_BATCH)
+    dose(rig, "syrup_pump", PLC_DOSE_TARGET)
+    rig.run(20, ON_AGITATOR)
+    cool(rig, rules)
+    carbonate(rig, rules)
+    batch = rig.room.mix_l
+    while rig.room.sensors().mix_level > PLC_MIX_EMPTY:
+        rig.tick(ON_TRANSFER)
+    assert rig.room.pressure_bar < 0.1
+    assert rig.room.buffer_l == pytest.approx(500 + batch - rig.room.mix_l)
+    assert rig.warnings == []
