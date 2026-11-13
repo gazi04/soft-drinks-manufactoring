@@ -19,7 +19,15 @@ from simulator.events import Event, Source
 from simulator.loop import LoopStats
 from simulator.machines.filler import CAP, ENTRY, FILL, RINSE
 from simulator.plant import Plant
-from simulator.plcs import MODE_NAMES, STATE_NAMES, STEP_NAMES, FillerPlc
+from simulator.plcs import (
+    MODE_NAMES,
+    STATE_NAMES,
+    STEP_NAMES,
+    SYRUP_STATE_NAMES,
+    SYRUP_STEP_NAMES,
+    FillerPlc,
+    SyrupPlc,
+)
 from simulator.scenarios import ScenarioSlot
 
 ON, OFF = "●", "○"
@@ -92,7 +100,40 @@ def world_text(plant: Plant) -> Text:
     return t
 
 
-def header_text(stats: LoopStats | None, plc: FillerPlc) -> Text:
+def syrup_header_text(stats: LoopStats | None, plc: SyrupPlc) -> Text:
+    """The syrup room PLC's line under the filler's (link, mode, step, state, batches, alarms)."""
+    t = Text()
+    link = "up" if plc.link_ok else "not connected"
+    t.append(f"syrup PLC {plc.host}:{plc.port} {link}", style="green" if plc.link_ok else "bold red")
+    status = stats.syrup_status if stats else None
+    if status is None:
+        return t
+    mode = MODE_NAMES.get(status.mode, status.mode)
+    t.append(f"  │  mode {mode}", style="" if status.mode == MODE_AUTO else "bold yellow")
+    t.append(f"  │  step {SYRUP_STEP_NAMES.get(status.step, status.step)}"
+             f"  │  state {SYRUP_STATE_NAMES.get(status.state, status.state)}"
+             f"  │  BatchCount {status.batch_count}  │  ")
+    active = [name for name, on in status.alarms.items() if on]
+    t.append(f"alarms: {', '.join(active)}" if active else "alarms: none", style="bold red" if active else "")
+    if status.mode != MODE_AUTO:
+        t.append(f"\nsyrup mode {mode}: Start is ignored. Auto + start:  uv run python tests/hmi.py --syrup auto reset start",
+                 style="yellow")
+    elif status.step == IDLE:
+        t.append("\nsyrup PLC in IDLE: start it with  uv run python tests/hmi.py --syrup auto reset start",
+                 style="yellow")
+    return t
+
+
+def header_text(stats: LoopStats | None, plc: FillerPlc, syrup_plc: SyrupPlc | None = None) -> Text:
+    """The filler PLC's line, and under it the syrup room PLC's when there is one."""
+    t = filler_header_text(stats, plc)
+    if syrup_plc is not None:
+        t.append("\n")
+        t.append_text(syrup_header_text(stats, syrup_plc))
+    return t
+
+
+def filler_header_text(stats: LoopStats | None, plc: FillerPlc) -> Text:
     t = Text()
     link = "up" if plc.link_ok else "not connected"
     t.append(f"PLC {plc.host}:{plc.port} {link}", style="green" if plc.link_ok else "bold red")

@@ -30,7 +30,7 @@ from simulator import config, loop
 from simulator.commands import CommandQueue
 from simulator.events import Event, EventLog
 from simulator.plant import Plant
-from simulator.plcs import FillerPlc
+from simulator.plcs import FillerPlc, SyrupPlc
 from simulator.scenarios import SCENARIOS, ScenarioSlot
 from simulator.ui import view
 
@@ -78,10 +78,14 @@ class SimulatorApp(App):
         ("l", "next_filter", "Log filter"),
     ]
 
-    def __init__(self, plant: Plant, plc: FillerPlc, log_path: Path | None, scenario: str | None = None) -> None:
+    def __init__(
+        self, plant: Plant, plc: FillerPlc, log_path: Path | None, scenario: str | None = None,
+        syrup_plc: SyrupPlc | None = None,
+    ) -> None:
         super().__init__()
         self.plant = plant
         self.plc = plc
+        self.syrup_plc = syrup_plc  # the second PLC (None = filler only)
         self.queue = CommandQueue()
         self.slot = ScenarioSlot()
         if scenario:
@@ -138,6 +142,7 @@ class SimulatorApp(App):
         self.stats = await loop.run(
             self.plc, self.plant, self.events,
             stop=self._stop, on_tick=self._on_tick, commands=self.queue, scenario=self.slot,
+            syrup_plc=self.syrup_plc,
         )
 
     def _on_tick(self, stats: loop.LoopStats) -> None:
@@ -145,7 +150,7 @@ class SimulatorApp(App):
 
     # --- Redraw ----------------------------------------------------------------------
     def refresh_view(self) -> None:
-        self.query_one("#header", Static).update(view.header_text(self.stats, self.plc))
+        self.query_one("#header", Static).update(view.header_text(self.stats, self.plc, self.syrup_plc))
         self.query_one("#world", Static).update(view.world_text(self.plant))
         self.query_one("#scenario-status", Static).update(view.scenario_text(self.slot))
         # A queued command is applied at the next tick: until then the plant still has the
@@ -218,5 +223,7 @@ class SimulatorApp(App):
         if self._worker is not None:
             await self._worker.wait()
         self.plc.close()
+        if self.syrup_plc is not None:
+            self.syrup_plc.close()
         self.events.close()
         self.exit(self.stats)

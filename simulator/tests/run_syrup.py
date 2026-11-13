@@ -23,6 +23,8 @@ SCRIPTS = [
     Script("test_syrup_outputs.py", "outputs per step, interlocks, jog watchdog, E-stop"),
     Script("test_syrup_stop_state.py", "Stop at step ends, State word, BatchCount"),
     Script("test_syrup_alarms.py", "alarms, FAULT, Reset, low-syrup warning, timeouts", quick_args=("--quick",)),
+    Script("test_closed_loop_syrup.py", "the simulator drives BOTH real PLCs through one batch, the filler is fed",
+           slow=True, needs=(502,)),
 ]
 
 if __name__ == "__main__":
