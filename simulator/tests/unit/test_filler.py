@@ -175,6 +175,19 @@ def test_valve_without_bottle_spills_once():
     assert rig.filler.sensors().fill_level == 0
 
 
+def test_dispensed_ml_counts_every_ml_that_left_the_valve():
+    rig = Rig()
+    rig.filler.pockets[FILL] = Bottle(1)
+    rig.run(5.0, FILL_ON)
+    assert rig.filler.dispensed_ml == pytest.approx(500)  # = the bottle
+    spill = Rig()
+    spill.run(2.0, FILL_ON)  # no bottle: the product is lost, but it was used
+    assert spill.filler.dispensed_ml == pytest.approx(200)
+    none = Rig()
+    none.run(3.0, FILL_ON, product=False)  # no product from the syrup room: nothing flows
+    assert none.filler.dispensed_ml == 0
+
+
 def test_half_filled_bottle_keeps_level_and_is_topped_up():
     rig = Rig()
     rig.filler.pockets[FILL] = Bottle(1)

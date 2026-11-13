@@ -107,6 +107,7 @@ class Filler:
         self.pockets: list[Bottle | None] = [None, None, None, None]  # ENTRY .. CAP
         self.shifts = 0  # pitch boundaries crossed since the start
         self.lost: list[Bottle] = []  # bottles that fell off (crash, two in a pocket)
+        self.dispensed_ml = 0.0  # all product that left the fill valve, also when it was spilled
 
         self._phase = 0.0  # seconds the belt has run since the last pitch boundary
         self._door_timer = 0.0  # how long the current bottle has been passing the door
@@ -218,6 +219,8 @@ class Filler:
                 self._log(bottle, "capped")
 
     def _fill(self, flow: bool, dt: float) -> None:
+        if flow:  # the syrup room's buffer pays for every ml, also for a spill
+            self.dispensed_ml += self.fill_flow_ml_s * dt
         bottle = self._at_station(FILL)
         receiving = bottle if flow else None  # the bottle that gets product this tick
 

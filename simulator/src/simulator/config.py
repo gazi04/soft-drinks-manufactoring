@@ -87,3 +87,11 @@ HEADSPACE_GAIN = 0.286  # bar of headspace pressure lost per bar of CO2 pressure
 #                         opens 2-3 times, and holds after about 20 s, so Carb_Timer (10 s) can finish.
 VENT_TAU_S = 5.0  # transfer pump running: the headspace empties into the buffer, pressure -> 0
 PRESS_RELIEF_BAR = 8.0  # relief valve lifts here (the PLC faults at PressMax 6.00 bar long before)
+
+# --- Syrup room <-> filler ------------------------------------------------------------------
+BUFFER_DRAW_SCALE = 30.0  # litres taken from the buffer per litre the filler fills (a 500 ml bottle = 15 L).
+#                           Without it a 590 L batch would last hours. The batch only arrives at the END of its
+#                           cycle (about 145 s), so the buffer must carry the filler through the whole cycle:
+#                           measured with the whole-line test (600 s): x50 starves the filler after 114 s,
+#                           x40 keeps only 24 L above Product_Available's reset, x30 keeps 113 L (lowest level
+#                           233 L, highest 1049 L, batches wait in WAIT_DEMAND now and then).
