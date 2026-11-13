@@ -125,10 +125,12 @@ def main() -> None:
 
     if args.list_scenarios:
         for scenario in SCENARIOS.values():
-            print(f"{scenario.name:<16} {scenario.description}")
+            print(f"{scenario.name:<18} [{scenario.target}] {scenario.description}")
         return
     if args.scenario and args.scenario not in SCENARIOS:
         raise SystemExit(f"unknown scenario {args.scenario!r} (known: {', '.join(SCENARIOS)})")
+    if args.scenario and args.filler_only and SCENARIOS[args.scenario].target == "syrup":
+        raise SystemExit(f"scenario {args.scenario!r} needs the syrup room: leave out --filler-only")
     from simulator import plant_lock
 
     who = "simulator" + (" --headless" if args.headless else " (panel)")

@@ -267,4 +267,4 @@ def test_the_whole_line_runs_ten_minutes_with_both_machines():
     room = plant.syrup
     assert room.drawn_l == pytest.approx(plant.filler.dispensed_ml / 1000 * plant.buffer_draw_scale)
     inside = room.syrup_l + room.mix_l + room.buffer_l + room.spilled_l
-    assert inside == pytest.approx(room.start_l + room.water_in_l + room.delivered_l - room.drawn_l, abs=1e-6)
+    assert inside == pytest.approx(room.start_l + room.water_in_l + room.delivered_l - room.drawn_l + room.manual_l, abs=1e-6)

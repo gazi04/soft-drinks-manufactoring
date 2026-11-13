@@ -253,7 +253,7 @@ def test_no_liquid_is_created_or_lost():
         assert 0 <= room.mix_l <= config.MIX_TANK_L + 1e-9
         assert 0 <= room.buffer_l <= config.BUFFER_TANK_L + 1e-9
         inside = room.syrup_l + room.mix_l + room.buffer_l + room.spilled_l
-        assert inside == pytest.approx(room.start_l + room.water_in_l + room.delivered_l - room.drawn_l, abs=1e-6)
+        assert inside == pytest.approx(room.start_l + room.water_in_l + room.delivered_l - room.drawn_l + room.manual_l, abs=1e-6)
     assert rig.room.spilled_l > 0 and rig.room.water_in_l > 0  # the run really exercised the limits
 
 

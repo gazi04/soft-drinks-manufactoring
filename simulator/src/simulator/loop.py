@@ -222,7 +222,7 @@ async def run(
 
         # 1. Commands, before anything is read or moved
         if scenario is not None:
-            due, events = scenario.due(plant, stats.status)
+            due, events = scenario.due(plant, stats.status, stats.syrup_status)
             log.extend(events)
             for command in due:
                 commands.put_command(command)

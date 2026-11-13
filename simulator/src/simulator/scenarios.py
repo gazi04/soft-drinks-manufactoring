@@ -18,20 +18,28 @@ A scenario can never press Reset or Start: those are HMI commands and the
 simulator never writes them (one-writer rule). A fault scenario therefore ends
 by removing the cause (jam cleared, heartbeat on) and prints a note saying what
 the operator has to press.
+
+A scenario has a `target`: "filler" (default) or "syrup". Its conditions look at the status of that
+PLC (both status types have .step / .state / .alarms). A syrup scenario needs the syrup room in the
+plant (not --filler-only); the operator presses Reset / Start with `tests/hmi.py --syrup ...`.
+Faults that leave a mark the PLC cannot clear itself (tank full of water, 7 bar in the headspace)
+end with the maintenance command (drain_mix_tank, vent_tank) before the note.
 """
 
 from collections.abc import Callable
 from dataclasses import dataclass
 
 from simulator import config
-from simulator.commands import Command, check
+from simulator.commands import SYRUP_COMMANDS, Command, check
 from simulator.events import Event
 from simulator.plant import Plant
-from simulator.plcs import PlcStatus
+from simulator.plcs import PlcStatus, SyrupStatus
 
 # PLC step and state numbers (plcs.STEP_NAMES / STATE_NAMES)
 IDLE, INDEX, FAULT = 0, 20, 900
 BLOCKED = 3
+# Syrup room steps (plcs.SYRUP_STEP_NAMES)
+S_WAIT_DEMAND, S_DOSE_WATER, S_MIX, S_COOL, S_CARBONATE, S_TRANSFER = 5, 10, 30, 40, 50, 60
 
 
 @dataclass(frozen=True)
@@ -62,6 +70,14 @@ def alarm(name: str) -> Condition:
     return Condition(f"{name} ON", lambda p, s: s is not None and s.alarms[name])
 
 
+def no_product() -> Condition:
+    return Condition("filler has no Product_Available", lambda p, s: not p.filler_product_available)
+
+
+def product_available() -> Condition:
+    return Condition("filler has Product_Available", lambda p, s: p.filler_product_available)
+
+
 def fill_level_at_least(ml: int) -> Condition:
     return Condition(f"bottle at S4 has {ml} ml", lambda p, s: p.filler.sensors().fill_level >= ml)
 
@@ -84,11 +100,16 @@ class Scenario:
     name: str
     description: str
     steps: tuple[Step, ...]
+    target: str = "filler"  # which PLC's status the conditions see: "filler" or "syrup"
 
     def __post_init__(self) -> None:
+        if self.target not in ("filler", "syrup"):
+            raise ValueError(f"scenario {self.name}: target must be 'filler' or 'syrup', got {self.target!r}")
         for step in self.steps:  # a typo in a scenario fails when it is defined, not mid-run
             if step.command is not None:
                 check(step.command)
+                if self.target == "filler" and step.command.name in SYRUP_COMMANDS:
+                    raise ValueError(f"scenario {self.name}: {step.command.name} needs target='syrup'")
 
 
 class ScenarioRunner:
@@ -103,8 +124,14 @@ class ScenarioRunner:
     def done(self) -> bool:
         return self.index >= len(self.scenario.steps)
 
-    def due(self, plant: Plant, status: PlcStatus | None) -> tuple[list[Command], list[Event]]:
-        """Commands of every step that is due now (several if they follow at once)."""
+    def due(
+        self, plant: Plant, status: PlcStatus | None, syrup_status: SyrupStatus | None = None
+    ) -> tuple[list[Command], list[Event]]:
+        """Commands of every step that is due now (several if they follow at once).
+
+        Conditions see `syrup_status` in a syrup scenario, `status` (the filler) otherwise."""
+        if self.scenario.target == "syrup":
+            status = syrup_status
         if self._since is None:
             self._since = plant.now  # the timeline starts with the first tick
         commands: list[Command] = []
@@ -139,10 +166,12 @@ class ScenarioSlot:
     def start(self, scenario: Scenario) -> None:
         self.runner = ScenarioRunner(scenario)
 
-    def due(self, plant: Plant, status: PlcStatus | None) -> tuple[list[Command], list[Event]]:
+    def due(
+        self, plant: Plant, status: PlcStatus | None, syrup_status: SyrupStatus | None = None
+    ) -> tuple[list[Command], list[Event]]:
         if self.runner is None:
             return [], []
-        return self.runner.due(plant, status)
+        return self.runner.due(plant, status, syrup_status)
 
 
 # --- Built-in scenarios ------------------------------------------------------------
@@ -195,5 +224,61 @@ SCENARIOS: dict[str, Scenario] = {
             Step(in_step(FAULT)),
             Step(0, _c("fill_flow", config.FILL_FLOW_ML_S), RESET_START),
         )),
+        # --- Syrup room (target="syrup"): press Reset + Start with `tests/hmi.py --syrup ...` ----------
+        Scenario("low_syrup", "syrup tank too low for the next batch: Starved + Alm_LowSyrup, continues after the refill", (
+            Step(plc_running()),
+            Step(0, _c("drain_syrup", 450.0)),  # 150 L left: batch 1 takes 90, batch 2 finds 60 < 90
+            Step(in_step(S_TRANSFER)),
+            Step(in_step(S_WAIT_DEMAND)),
+            Step(0, _c("draw_buffer", 400.0)),  # buffer below BufferLow: a new batch is needed
+            Step(alarm("Alm_LowSyrup")),
+            Step(5, _c("deliver_syrup", 500.0), "syrup delivered: the PLC continues by itself, no Reset needed"),
+        ), target="syrup"),
+        Scenario("cooling_failure", "chiller dead in COOL: Alm_CoolTimeout after 60 s, FAULT", (
+            Step(plc_running()),
+            Step(in_step(S_COOL), _c("chiller_failed", True)),
+            Step(alarm("Alm_CoolTimeout")),
+            Step(2, _c("chiller_failed", False), RESET_START + "; the batch resumes at MIX"),
+        ), target="syrup"),
+        Scenario("over_pressure", "CO2 valve stuck open in CARBONATE: Alm_OverPressure, FAULT", (
+            Step(plc_running()),
+            Step(in_step(S_CARBONATE), _c("co2_valve_stuck", True)),
+            Step(alarm("Alm_OverPressure")),
+            Step(2, _c("co2_valve_stuck", False)),
+            Step(0, _c("vent_tank", True), RESET_START + "; valve repaired and tank vented"),
+        ), target="syrup"),
+        Scenario("pump_failure", "water pump dead in DOSE_WATER: Alm_DoseTimeout after 60 s, FAULT", (
+            Step(plc_running()),
+            Step(in_step(S_DOSE_WATER), _c("water_pump_failed", True)),
+            Step(alarm("Alm_DoseTimeout")),
+            Step(2, _c("water_pump_failed", False), RESET_START + "; the dose continues from the level"),
+        ), target="syrup"),
+        Scenario("level_sensor_stuck", "mixing level sensor stuck low: MixHighHigh -> Alm_Overflow, pumps off, FAULT", (
+            Step(plc_running()),
+            Step(in_step(S_DOSE_WATER), _c("mix_level_stuck", True)),
+            Step(alarm("Alm_Overflow")),
+            Step(2, _c("mix_level_stuck", False)),
+            Step(0, _c("drain_mix_tank", True), RESET_START + "; sensor repaired, tank drained to waste"),
+        ), target="syrup"),
+        Scenario("buffer_full", "buffer has no room for the batch: WAIT_BUFFER (Blocked), continues when product is used", (
+            Step(plc_running()),
+            # Top the buffer up TO 1900 L (a level, not an amount: the level at MIX depends on the filler).
+            # - not above BufferMax 1950: BufferLevel > BufferMax is Alm_Overflow -> FAULT (live 2026-11-13
+            #   with "+1500 L": 2000 L, FAULT instead of Blocked);
+            # - Blocked for sure: the PLC checks Buffer_Room ~80 s later (end of CARBONATE); even a filler
+            #   drawing 3 L/s leaves >= 1660 L, and 1660 + 590 > 1950. ("+1000 L" only blocked when MIX
+            #   began above ~535 L.)
+            # - draw_buffer 700 then leaves <= 1200 L: 1200 + 590 <= 1950, TRANSFER runs.
+            Step(in_step(S_MIX), _c("fill_buffer_to", 1900.0)),
+            Step(in_state(BLOCKED)),
+            Step(3, _c("draw_buffer", 700.0)),
+        ), target="syrup"),
+        Scenario("buffer_starved", "filler draws faster than the syrup room delivers: buffer empty, filler Starved, recovers", (
+            Step(plc_running()),
+            Step(10, _c("buffer_draw_scale", 100.0)),
+            Step(no_product()),
+            Step(0, _c("buffer_draw_scale", config.BUFFER_DRAW_SCALE)),
+            Step(product_available()),
+        ), target="syrup"),
     )
 }

@@ -77,6 +77,7 @@ ROOM_TAU_S = 600.0  # heat leaks in slowly: 0.5 degC take about 19 s at 4 degC, 
 WATER_TEMP_C = 15.0  # mains water
 SYRUP_TEMP_C = 20.0  # syrup tank, room temperature
 COOLANT_C = 0.0  # chiller; "chiller failed" (stage 6) raises it
+COOLANT_FAILED_C = 20.0  # failed chiller: the jacket only has room temperature, cooling does nothing
 COOL_TAU_S = 20.0  # jacket: 15.8 -> 4.0 degC in about 29 s, well below CoolTimeout (60 s)
 
 # --- Syrup room: CO2 pressure (PLC: PressSetpoint 3.50 bar, PressHyst 0.20 bar, CarbTime 10 s, PressMax 6 bar)

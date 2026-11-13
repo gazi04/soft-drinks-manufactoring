@@ -87,12 +87,18 @@ class SyrupRoom:
         self.pressure_bar = pressure_bar  # headspace of the mixing tank
         self.dissolved_bar = dissolved_bar  # CO2 in the liquid, as the pressure it would balance with
         self.coolant_c = config.COOLANT_C  # chiller temperature; "chiller failed" raises it
+        # Injected faults (commands.py / scenarios.py). The PLC is never told: it can only see the effect.
+        self.water_pump_failed = False  # pump output ON, no flow
+        self.syrup_pump_failed = False
+        self.co2_valve_stuck = False  # the gas valve stays open whatever the PLC says
+        self.mix_level_frozen: int | None = None  # the level sensor reports this instead of the true level
         # Ledger: every litre that enters or leaves the room, so volume conservation can be checked
         self.start_l = syrup_l + mix_l + buffer_l
         self.water_in_l = 0.0  # from the mains
         self.delivered_l = 0.0  # syrup deliveries
         self.drawn_l = 0.0  # taken from the buffer (the filler)
         self.spilled_l = 0.0  # lost over the brim
+        self.manual_l = 0.0  # net litres put in (+) or taken out (-) by hand: fill_buffer, drain_syrup, drain_mix_tank
         self._now = 0.0
         self._events: list[Event] = []
         self._active: set[str] = set()  # warnings already given for the current period
@@ -106,11 +112,12 @@ class SyrupRoom:
         self._mix_spilled = self._buffer_spilled = False  # set below when a tank runs over this step
 
         # 1. Dosing: water from the mains, syrup from its tank
-        if out.water_pump:
+        if out.water_pump and not self.water_pump_failed:
             self._into_mix(config.WATER_FLOW_L_S * dt, config.WATER_TEMP_C, from_mains=True)
-        dry = out.syrup_pump and self.syrup_l <= _EPSILON
+        syrup_running = out.syrup_pump and not self.syrup_pump_failed  # a failed pump moves nothing, no audit
+        dry = syrup_running and self.syrup_l <= _EPSILON
         self._warn("syrup_dry", dry, "syrup pump runs dry: syrup tank is empty")
-        if out.syrup_pump and not dry:
+        if syrup_running and not dry:
             moved = min(config.SYRUP_FLOW_L_S * dt, self.syrup_l)
             self.syrup_l -= moved
             self._into_mix(moved, config.SYRUP_TEMP_C, from_mains=False)
@@ -187,7 +194,7 @@ class SyrupRoom:
             taken = k * (self.pressure_bar - self.dissolved_bar) * dt  # < 0: CO2 leaves the liquid
             self.dissolved_bar += taken
             self.pressure_bar -= config.HEADSPACE_GAIN * taken
-        if out.co2_valve:
+        if out.co2_valve or self.co2_valve_stuck:
             self.pressure_bar += config.CO2_FILL_BAR_S * dt
         if out.transfer_pump or empty:  # emptied against the unpressurised buffer / nothing in the tank
             self.pressure_bar -= self.pressure_bar * min(1.0, dt / config.VENT_TAU_S)
@@ -220,12 +227,52 @@ class SyrupRoom:
         self.drawn_l += taken
         return taken
 
+    # --- Hand actions (scenarios / maintenance): every litre goes into the ledger -----
+    def fill_buffer(self, litres: float) -> float:
+        """Product added to the buffer tank by hand. Returns the litres that fitted."""
+        if litres < 0:
+            raise ValueError(f"litres must be >= 0, got {litres}")
+        put = min(litres, config.BUFFER_TANK_L - self.buffer_l)
+        self.buffer_l += put
+        self.manual_l += put
+        return put
+
+    def fill_buffer_to(self, level_l: float) -> float:
+        """Product added by hand until the buffer holds `level_l` litres (never drains). Returns the litres added."""
+        if level_l < 0:
+            raise ValueError(f"level must be >= 0, got {level_l}")
+        return self.fill_buffer(max(0.0, level_l - self.buffer_l))
+
+    def drain_syrup(self, litres: float) -> float:
+        """Syrup taken out of the tank (leak, used elsewhere). Returns the litres that were there."""
+        if litres < 0:
+            raise ValueError(f"litres must be >= 0, got {litres}")
+        taken = min(litres, self.syrup_l)
+        self.syrup_l -= taken
+        self.manual_l -= taken
+        return taken
+
+    def drain_mix_tank(self) -> float:
+        """The drain valve to waste empties the mixing tank (not into the buffer: it would dilute the product)."""
+        taken = self.mix_l
+        self.mix_l = 0.0
+        self.manual_l -= taken
+        return taken
+
+    def vent_headspace(self) -> None:
+        """Maintenance purges the headspace to the atmosphere. The CO2 already dissolved stays in the liquid."""
+        self.pressure_bar = 0.0
+
+    def freeze_mix_level(self, frozen: bool) -> None:
+        """Mixing tank level sensor stuck at its current reading (True) or working again (False)."""
+        self.mix_level_frozen = round(self.mix_l) if frozen else None
+
     # --- Sensors --------------------------------------------------------------------
     def sensors(self) -> SyrupSensors:
         """The only place where the true state becomes reported values (a stuck sensor goes here)."""
         return SyrupSensors(
             syrup_level=round(self.syrup_l),
-            mix_level=round(self.mix_l),
+            mix_level=round(self.mix_l) if self.mix_level_frozen is None else self.mix_level_frozen,
             buffer_level=round(self.buffer_l),
             product_temp=round(self.temp_c * 10),
             co2_pressure=round(self.pressure_bar * 100),

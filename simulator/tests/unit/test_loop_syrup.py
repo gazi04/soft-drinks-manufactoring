@@ -370,3 +370,22 @@ def test_a_silent_filler_does_not_starve_the_syrup_plc_of_heartbeat_toggles():
         await ss.shutdown()
 
     asyncio.run(scenario())
+
+
+def test_a_syrup_scenario_in_the_loop_reacts_to_the_syrup_status_and_changes_the_room():
+    from simulator.scenarios import SCENARIOS, ScenarioRunner
+
+    async def scenario() -> None:
+        fp, sp = free_port(), free_port()
+        fs, ss = await start_fake_plc(fp), await start_fake_plc(sp)
+        s = await client(sp)
+        await s.write_registers(sm.STATUS_START, [1, 40, 0, 0])  # the syrup PLC sits in COOL
+        plant, log = Plant(with_syrup=True), EventLog()
+        runner = ScenarioRunner(SCENARIOS["cooling_failure"])
+        await loop.run(FillerPlc(port=fp), plant, log, seconds=1.5, scenario=runner, syrup_plc=SyrupPlc(port=sp))
+        assert plant.syrup.coolant_c == config.COOLANT_FAILED_C  # COOL seen in the syrup status -> fault applied
+        assert "command: chiller_failed = True" in sim_texts(log)
+        s.close()
+        await fs.shutdown(), await ss.shutdown()
+
+    asyncio.run(scenario())
