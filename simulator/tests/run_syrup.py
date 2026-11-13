@@ -16,6 +16,7 @@ from suite import Script, main
 SCRIPTS = [
     Script("test_syrup_stage0.py", "own Modbus port, filler memory separate", needs=(502,)),
     Script("test_syrup_stage1.py", "defaults, Cmd clear, heartbeat watchdog"),
+    Script("test_link_syrup.py", "simulator's SyrupPlc client: heartbeat, write + read back, PLC reads the registers"),
     Script("test_syrup_stage2.py", "ratio math, division-by-zero guard"),
     Script("test_syrup_hysteresis.py", "Temp_OK / CO2_Demand / Product_Available"),
     Script("test_syrup_sequencer.py", "one batch through all steps, resume, abort"),

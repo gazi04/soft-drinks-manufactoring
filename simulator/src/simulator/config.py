@@ -12,6 +12,7 @@ file never changes while the simulator runs.
 # --- Connection -------------------------------------------------------------------
 PLC_HOST = "127.0.0.1"  # later "plc-filler" inside the Docker network
 PLC_PORT = 502  # later 5023 from the host (report section 6.1)
+SYRUP_PORT = 5022  # the syrup room's own runtime (plc-syrup-carb), same host
 
 # --- Tick loop --------------------------------------------------------------------
 TICK_S = 0.1  # one simulator cycle; the PLC scans every 20 ms, so ~5 scans per tick

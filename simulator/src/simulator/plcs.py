@@ -1,4 +1,9 @@
-"""Modbus link to the filler PLC. The ONLY file of the simulator that knows Modbus.
+"""Modbus links to the PLCs. The ONLY file of the simulator that knows Modbus.
+
+    PlcLink     connection handling shared by every PLC (connect, reconnect, guarded requests)
+    FillerPlc   the filler (port 502), described below
+    SyrupPlc    the syrup room (port 5022): same pattern, own addresses (address_map_syrup.py);
+                its reads and writes are documented at the class
 
     PLC (OpenPLC runtime, Modbus TCP server)
       coils 0-5            ── read_outputs() ──►  FillerOutputs   ──► plant.step()
@@ -69,8 +74,10 @@ from simulator.address_map import (
     STATUS_START,
     UNUSED_MX0_7,
 )
+from simulator import address_map_syrup as sm
 from simulator.machines.filler import FillerOutputs
-from simulator.plant import SimWrites
+from simulator.machines.syrup import SyrupOutputs
+from simulator.plant import SimWrites, SyrupSignals, SyrupWrites
 
 RECONNECT_S = 2.0  # default: at most one connection attempt every 2 s while the PLC is away
 TIMEOUT_S = 1.0  # one request may take at most 1 s (a tick is 0.1 s; pymodbus default is 3 s)
@@ -189,22 +196,112 @@ def decode_status(regs: list[int], alarm_bits: list[bool], setpoints: list[int],
     return PlcStatus(state, step, good_count, jam, fill_timeout, blocked, comm_lost, fill, rinse, cap, mode)
 
 
+# === Syrup room: pure mapping ==========================================================
+SYRUP_STEP_NAMES = {0: "IDLE", 5: "WAIT_DEMAND", 10: "DOSE_WATER", 20: "DOSE_SYRUP", 30: "MIX", 40: "COOL",
+                    50: "CARBONATE", 55: "WAIT_BUFFER", 60: "TRANSFER", 900: "FAULT"}
+SYRUP_STATE_NAMES = {0: "Stopped", 1: "Running", 2: "Starved", 3: "Blocked", 9: "Fault"}
+SYRUP_ALARM_NAMES = ("Alm_Overflow", "Alm_OverPressure", "Alm_CoolTimeout", "Alm_CommLost", "Alm_LowSyrup",
+                     "Alm_DoseTimeout")  # address order %MX5.0 .. %MX5.5
+
+# The three digital signals the simulator really writes; every other coil of the block (the spare
+# bits %MX0.1-0.7 and the unused %MX1.0) is sent FALSE. Looked up BY ADDRESS, so the order of the
+# block can never put a value on the wrong coil.
+SYRUP_COIL_FIELDS = {
+    sm.MIX_HIGH_HIGH: ("mix_high_high", lambda w: w.sensors.mix_high_high),
+    sm.E_STOP_OK: ("e_stop_ok", lambda w: w.e_stop_ok),
+    sm.HEARTBEAT: ("heartbeat", lambda w: w.heartbeat),
+}
+# The five analog sensors in register order %MW12..16 (the order of the bulk write)
+SYRUP_ANALOG_FIELDS = ("syrup_level", "mix_level", "product_temp", "co2_pressure", "buffer_level")
+INT_MIN = -32768  # %MW is a signed 16-bit INT in the PLC, a Modbus register is unsigned
+
+assert set(SYRUP_COIL_FIELDS) <= set(sm.SENSOR_BLOCK) <= sm.SIM_WRITE_COILS
+assert len(SYRUP_ANALOG_FIELDS) == sm.ANALOG_COUNT
+assert sm.SYRUP_LEVEL + 4 == sm.BUFFER_LEVEL  # one contiguous block
+
+
+def decode_syrup_outputs(bits: list[bool]) -> SyrupOutputs:
+    """Coils 0-5 (%QX0.0-0.5) -> SyrupOutputs. pymodbus pads bits to 8, so slice."""
+    return SyrupOutputs(*bits[: sm.OUTPUTS_COUNT])
+
+
+def encode_syrup_sensor_block(w: SyrupWrites) -> list[bool]:
+    """SyrupWrites -> the 11 coil values of the bulk write, in sm.SENSOR_BLOCK order."""
+    return [bool(SYRUP_COIL_FIELDS[a][1](w)) if a in SYRUP_COIL_FIELDS else False for a in sm.SENSOR_BLOCK]
+
+
+def to_register(value: int) -> int:
+    """Signed INT -> the unsigned 16-bit register value (two's complement), clamped to the INT range."""
+    return max(INT_MIN, min(INT_MAX, int(value))) & 0xFFFF
+
+
+def from_register(raw: int) -> int:
+    """Unsigned register value -> the signed INT the PLC sees."""
+    return raw - 0x10000 if raw >= 0x8000 else raw
+
+
+def encode_analog_block(w: SyrupWrites) -> list[int]:
+    """SyrupWrites -> the 5 analog registers %MW12..16 (levels L, 0.1 degC, 0.01 bar)."""
+    return [to_register(getattr(w.sensors, name)) for name in SYRUP_ANALOG_FIELDS]
+
+
+def foreign_syrup_writes(w: SyrupWrites, coils: list[bool], registers: list[int]) -> list[str]:
+    """Signals whose read-back value differs from what the simulator wrote (see foreign_writes)."""
+    wrong = []
+    for address, expected, actual in zip(sm.SENSOR_BLOCK, encode_syrup_sensor_block(w), coils):
+        if expected != actual:
+            wrong.append(SYRUP_COIL_FIELDS[address][0] if address in SYRUP_COIL_FIELDS else f"coil {address}")
+    for name, expected, raw in zip(SYRUP_ANALOG_FIELDS, encode_analog_block(w), registers):
+        if expected != raw:
+            wrong.append(name)
+    return wrong
+
+
+@dataclass(frozen=True)
+class SyrupStatus:
+    """What the syrup PLC reports about itself (event log, panel)."""
+
+    state: int  # 0 Stopped, 1 Running, 2 Starved, 3 Blocked, 9 Fault
+    step: int  # 0 IDLE, 5 WAIT_DEMAND ... 60 TRANSFER, 900 FAULT
+    batch_count: int
+    alm_overflow: bool
+    alm_over_pressure: bool
+    alm_cool_timeout: bool
+    alm_comm_lost: bool
+    alm_low_syrup: bool  # a warning, not latched
+    alm_dose_timeout: bool
+    mode: int = 1  # ModeReq as the HMI set it: 0 Stop, 1 Auto, 2 Manual (default only for tests)
+
+    @property
+    def alarms(self) -> dict[str, bool]:
+        flags = (self.alm_overflow, self.alm_over_pressure, self.alm_cool_timeout, self.alm_comm_lost,
+                 self.alm_low_syrup, self.alm_dose_timeout)
+        return dict(zip(SYRUP_ALARM_NAMES, flags))
+
+
+def decode_syrup_status(regs: list[int], alarm_bits: list[bool], mode: int) -> SyrupStatus:
+    """regs = %MW50..%MW53 (State, Step, unused, BatchCount), alarm_bits = %MX5.0..5.5, mode = %MW1."""
+    state, step, _unused, batch_count = regs[: sm.STATUS_COUNT]
+    return SyrupStatus(state, step, batch_count, *alarm_bits[: sm.ALARMS_COUNT], mode)
+
+
 # --- Async client ------------------------------------------------------------------
-class FillerPlc:
-    """Async Modbus client of the filler PLC.
+class PlcLink:
+    """Everything a Modbus link to ONE OpenPLC runtime needs, whatever the machine.
 
     Can be created anywhere (also outside asyncio): the pymodbus client is only made in
     ensure_connected(), which runs inside the loop, and a new one is made for every
     connection. "No client" simply means "not connected".
+
+    A subclass names the machine: it sets `write_coils` / `write_registers` (the only
+    addresses the simulator may write in THAT PLC, the one-writer rule), gives the default
+    host and port, and adds its own reads and writes (read_outputs / write / read_status ...).
     """
 
-    def __init__(
-        self,
-        host: str = config.PLC_HOST,
-        port: int = config.PLC_PORT,
-        reconnect_s: float = RECONNECT_S,
-        timeout_s: float = TIMEOUT_S,
-    ) -> None:
+    write_coils: frozenset[int] = frozenset()  # set by the subclass
+    write_registers: frozenset[int] = frozenset()  # set by the subclass
+
+    def __init__(self, host: str, port: int, reconnect_s: float, timeout_s: float) -> None:
         self.host = host
         self.port = port
         self.reconnect_s = reconnect_s
@@ -278,6 +375,47 @@ class FillerPlc:
             raise PlcReplyError(f"{what}: PLC replied {result} (check mx_bits in the runtime / the address map)")
         return result
 
+    # --- Writes, guarded by the one-writer rule -------------------------------------
+    # The guard runs BEFORE the link check, so it also fires without a connection.
+    async def _write_coils(self, start: int, values: list[bool]) -> None:
+        addresses = set(range(start, start + len(values)))
+        if not addresses <= self.write_coils:
+            raise ValueError(f"simulator may not write coils {sorted(addresses - self.write_coils)}")
+        what = f"write coils {start}"
+        client = self._live_client(what)
+        await self._finish(what, client.write_coils(start, values))
+
+    async def _write_registers(self, start: int, values: list[int]) -> None:
+        addresses = set(range(start, start + len(values)))
+        if not addresses <= self.write_registers:
+            raise ValueError(f"simulator may not write registers {sorted(addresses - self.write_registers)}")
+        what = f"write registers {start}"
+        client = self._live_client(what)
+        await self._finish(what, client.write_registers(start, values))
+
+    async def _write_register(self, address: int, value: int) -> None:
+        if address not in self.write_registers:
+            raise ValueError(f"simulator may not write register {address}")
+        what = f"write register {address}"
+        client = self._live_client(what)
+        await self._finish(what, client.write_register(address, value))
+
+
+class FillerPlc(PlcLink):
+    """Async Modbus client of the filler PLC (port 502)."""
+
+    write_coils = SIM_WRITE_COILS
+    write_registers = SIM_WRITE_REGISTERS
+
+    def __init__(
+        self,
+        host: str = config.PLC_HOST,
+        port: int = config.PLC_PORT,
+        reconnect_s: float = RECONNECT_S,
+        timeout_s: float = TIMEOUT_S,
+    ) -> None:
+        super().__init__(host, port, reconnect_s, timeout_s)
+
     async def read_outputs(self) -> FillerOutputs:
         client = self._live_client("read outputs")
         result = await self._finish("read outputs", client.read_coils(OUTPUTS_START, count=OUTPUTS_COUNT))
@@ -321,27 +459,68 @@ class FillerPlc:
         level = await self._finish("read back FillLevel", client.read_holding_registers(FILL_LEVEL, count=1))
         return foreign_writes(w, coils.bits[: len(SENSOR_BLOCK)], level.registers[0])
 
-    # --- Writes, guarded by the one-writer rule -------------------------------------
-    # The guard runs BEFORE the link check, so it also fires without a connection.
-    async def _write_coils(self, start: int, values: list[bool]) -> None:
-        addresses = set(range(start, start + len(values)))
-        if not addresses <= SIM_WRITE_COILS:
-            raise ValueError(f"simulator may not write coils {sorted(addresses - SIM_WRITE_COILS)}")
-        what = f"write coils {start}"
-        client = self._live_client(what)
-        await self._finish(what, client.write_coils(start, values))
 
-    async def _write_registers(self, start: int, values: list[int]) -> None:
-        addresses = set(range(start, start + len(values)))
-        if not addresses <= SIM_WRITE_REGISTERS:
-            raise ValueError(f"simulator may not write registers {sorted(addresses - SIM_WRITE_REGISTERS)}")
-        what = f"write registers {start}"
-        client = self._live_client(what)
-        await self._finish(what, client.write_registers(start, values))
+class SyrupPlc(PlcLink):
+    """Async Modbus client of the syrup room PLC (port 5022).
 
-    async def _write_register(self, address: int, value: int) -> None:
-        if address not in SIM_WRITE_REGISTERS:
-            raise ValueError(f"simulator may not write register {address}")
-        what = f"write register {address}"
-        client = self._live_client(what)
-        await self._finish(what, client.write_register(address, value))
+        coils 0-5, 8240                ── read_signals() ──►  SyrupSignals (plant.step)
+        coils 8192-8202, HR 1036-1040  ◄── write() ────────   SyrupWrites  (plant.syrup_writes)
+        HR 1074-1077, coils 8232-8237, HR 1025 ── read_status() ──► SyrupStatus
+
+    The same pattern as FillerPlc; only the addresses (address_map_syrup.py) differ.
+    """
+
+    write_coils = sm.SIM_WRITE_COILS
+    write_registers = sm.SIM_WRITE_REGISTERS
+
+    def __init__(
+        self,
+        host: str = config.PLC_HOST,
+        port: int = config.SYRUP_PORT,
+        reconnect_s: float = RECONNECT_S,
+        timeout_s: float = TIMEOUT_S,
+    ) -> None:
+        super().__init__(host, port, reconnect_s, timeout_s)
+
+    async def read_signals(self) -> SyrupSignals:
+        """The outputs (one request) and Product_Available (a second one: it sits 8000 addresses away).
+
+        Product_Available may be one PLC scan (20 ms) newer than the outputs. It follows a
+        hysteresis on the buffer level, so that makes no difference.
+        """
+        client = self._live_client("read outputs")
+        outputs = await self._finish("read outputs", client.read_coils(sm.OUTPUTS_START, count=sm.OUTPUTS_COUNT))
+        client = self._live_client("read Product_Available")
+        available = await self._finish("read Product_Available", client.read_coils(sm.PRODUCT_AVAILABLE_OUT, count=1))
+        return SyrupSignals(decode_syrup_outputs(outputs.bits), bool(available.bits[0]))
+
+    async def write(self, w: SyrupWrites) -> None:
+        """One bulk write of the sensor block and one of the five analog registers."""
+        await self._write_coils(sm.SENSOR_BLOCK_START, encode_syrup_sensor_block(w))
+        await self._write_registers(sm.ANALOG_START, encode_analog_block(w))
+
+    async def write_heartbeat(self, value: bool) -> None:
+        """Only the heartbeat coil (first contact)."""
+        await self._write_coils(sm.HEARTBEAT, [value])
+
+    async def read_status(self) -> SyrupStatus:
+        client = self._live_client("read status")
+        regs = await self._finish("read status", client.read_holding_registers(sm.STATUS_START, count=sm.STATUS_COUNT))
+        client = self._live_client("read alarms")
+        alarms = await self._finish("read alarms", client.read_coils(sm.ALARMS_START, count=sm.ALARMS_COUNT))
+        client = self._live_client("read mode")
+        mode = await self._finish("read mode", client.read_holding_registers(sm.MODE_REQ, count=1))  # read only
+        return decode_syrup_status(regs.registers, alarms.bits, mode.registers[0])
+
+    async def verify_writes(self, w: SyrupWrites) -> list[str]:
+        """Read the sensor block and the analog registers back; names of the signals that differ.
+
+        Pass the values written LAST tick and call it before the next write (see FillerPlc).
+        """
+        client = self._live_client("read back sensors")
+        coils = await self._finish(
+            "read back sensors", client.read_coils(sm.SENSOR_BLOCK_START, count=len(sm.SENSOR_BLOCK))
+        )
+        client = self._live_client("read back analog")
+        analog = await self._finish("read back analog", client.read_holding_registers(sm.ANALOG_START, count=sm.ANALOG_COUNT))
+        return foreign_syrup_writes(w, coils.bits[: len(sm.SENSOR_BLOCK)], analog.registers[: sm.ANALOG_COUNT])
