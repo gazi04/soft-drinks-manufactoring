@@ -88,3 +88,59 @@ def test_header_shows_the_mode_and_warns_when_start_would_be_ignored():
     assert "mode Stop" in text and "Start is ignored" in text and "hmi.py auto reset start" in text
     stats.status = status(mode=1)
     assert "mode Auto" in view.header_text(stats, FillerPlc()).plain
+
+
+# --- Syrup room tab --------------------------------------------------------------------------
+def test_level_bar_is_rounded_and_clamped():
+    assert view.level_bar(0, 1000) == "▕" + "░" * 10 + "▏"
+    assert view.level_bar(500, 1000) == "▕" + "█" * 5 + "░" * 5 + "▏"
+    assert view.level_bar(1000, 1000) == "▕" + "█" * 10 + "▏"
+    assert view.level_bar(1500, 1000) == view.level_bar(1000, 1000)  # never longer than the tank
+    assert view.level_bar(-5, 1000) == view.level_bar(0, 1000)
+    assert len(view.level_bar(333, 2000, width=4)) == 6
+
+
+def _syrup_plant():
+    from simulator.machines.filler import FillerOutputs
+    from simulator.machines.syrup import SyrupOutputs
+    from simulator.plant import SyrupSignals
+
+    plant = Plant(with_syrup=True)
+    room = plant.syrup
+    room.mix_l, room.temp_c, room.pressure_bar, room.dissolved_bar = 590.0, 4.1, 3.48, 3.2
+    plant.step(FillerOutputs(), 0.0, SyrupSignals(SyrupOutputs(agitator=True, co2_valve=True), True))
+    return plant
+
+
+def test_syrup_world_shows_sensor_values_and_output_lamps():
+    plant = _syrup_plant()
+    text = view.syrup_world_text(plant).plain
+    assert "Syrup tank    600 L" in text and "Mixing tank   590 L" in text and "Buffer tank   500 L" in text
+    assert "4.1 °C" in text and "3.48 bar" in text and "dissolved 3.20 bar" in text
+    assert "Agitator ●" in text and "CO2Valve ●" in text and "WaterPump ○" in text and "TransferPump ○" in text
+    assert "syrup PLC ●" in text and "to filler ●" in text
+    assert "not answering" not in text
+    for marker in ("FAILED", "STUCK", "FROZEN"):
+        assert marker not in text
+    assert max(len(line) for line in text.splitlines()) <= 86  # fits the world column at 140 columns
+
+
+def test_syrup_world_marks_every_injected_fault():
+    plant = _syrup_plant()
+    room = plant.syrup
+    room.water_pump_failed = room.syrup_pump_failed = room.co2_valve_stuck = True
+    room.coolant_c = 20.0
+    room.mix_level_frozen = 5
+    plant.syrup_heartbeat.enabled = False
+    text = view.syrup_world_text(plant).plain
+    assert "SyrupPump ○  FAILED" in text and "WaterPump ○  FAILED" in text
+    assert "Mixing tank     5 L" in text and "SENSOR STUCK (true 590 L)" in text  # what the PLC sees + the truth
+    assert "CHILLER FAILED" in text and "STUCK OPEN" in text and "FROZEN" in text
+    assert max(len(line) for line in text.splitlines()) <= 86
+
+
+def test_syrup_world_without_an_answer_and_without_a_syrup_room():
+    plant = Plant(with_syrup=True)  # no step yet: the PLC never answered
+    text = view.syrup_world_text(plant).plain
+    assert "syrup PLC not answering" in text and "Agitator ○" in text
+    assert "--filler-only" in view.syrup_world_text(Plant()).plain

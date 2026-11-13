@@ -7,11 +7,11 @@ on the queue and that the loop applies it.
 
 import asyncio
 
-from textual.widgets import Input, Select, Switch
+from textual.widgets import Input, Select, Switch, TabbedContent
 
 from simulator.plant import Plant
 from simulator.plcs import FillerPlc
-from simulator.ui.app import SimulatorApp
+from simulator.ui.app import SimulatorApp, scenario_options
 
 from test_plcs_link import free_port
 
@@ -100,5 +100,21 @@ def test_log_filter_and_clean_quit(tmp_path):
         assert app.return_value is not None and app.return_value.ticks > 0  # stats of the stopped loop
         assert app.events._file is None  # log file closed
         assert (tmp_path / "panel.log").read_text().count("not reachable") == 1
+
+    run(test)
+
+
+def test_filler_only_has_no_syrup_tab_and_no_syrup_scenarios(tmp_path):
+    async def test():
+        app = make_app(tmp_path)
+        async with app.run_test(size=SIZE) as pilot:
+            assert not app.query("#tab-syrup") and not app.query("#sw-chiller")
+            values = [value for _, value in scenario_options(app.has_syrup)]
+            assert "gaps" in values and "low_syrup" not in values
+            assert ("low_syrup [syrup]", "low_syrup") in scenario_options(True)
+            await pilot.press("2")  # only a notice, the filler tab stays
+            await pilot.pause(0.1)
+            assert app.query_one("#tabs", TabbedContent).active == "tab-filler"
+            await pilot.press("q")
 
     run(test)

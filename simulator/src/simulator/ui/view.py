@@ -5,6 +5,7 @@ rich Text, so they can be tested without a terminal (tests/unit/test_view.py)
 and the screen code in app.py stays small.
 
     world_text(plant)            the physical truth: bottles, pockets, sensor lamps
+    syrup_world_text(plant)      the syrup room's truth: tanks, temperature, pressure, outputs, faults
     header_text(stats, plc)      what the PLC reports: link, step, state, alarms
     scenario_text(slot)          which scenario runs and how far it is
     event_style(event)           colour of one log line
@@ -13,11 +14,13 @@ and the screen code in app.py stays small.
 
 from rich.text import Text
 
+from simulator import config
 from simulator.bottle import Bottle
 from simulator.conveyor import Conveyor
 from simulator.events import Event, Source
 from simulator.loop import LoopStats
 from simulator.machines.filler import CAP, ENTRY, FILL, RINSE
+from simulator.machines.syrup import SyrupOutputs
 from simulator.plant import Plant
 from simulator.plcs import (
     MODE_NAMES,
@@ -97,6 +100,87 @@ def world_text(plant: Plant) -> Text:
     t.append_text(lamp("Heartbeat", s.heartbeat))
     if not plant.heartbeat.enabled:
         t.append("  FROZEN", style="bold red")
+    return t
+
+
+def level_bar(litres: float, capacity: float, width: int = 10) -> str:
+    """'▕██████░░░░▏': the tank level as a bar of `width` cells (rounded, clamped to empty..full)."""
+    full = max(0, min(width, round(litres / capacity * width))) if capacity > 0 else 0
+    return "▕" + "█" * full + "░" * (width - full) + "▏"
+
+
+def _fault(t: Text, active: bool, text: str) -> None:
+    """A red marker after a lamp when a fault is injected (nothing when it is not)."""
+    if active:
+        t.append(f"  {text}", style="bold red")
+
+
+LAMP_COL = 43  # column where the lamps start in the syrup world text
+
+
+def syrup_world_text(plant: Plant) -> Text:
+    """The syrup room's physical truth: tanks, temperature, pressure, PLC outputs, injected faults.
+
+    Numbers are the SENSOR values as written to the PLC (like world_text), so a stuck sensor shows
+    what the PLC sees; the true level is added next to it. Lamps = the syrup PLC's outputs last tick.
+    """
+    room = plant.syrup
+    t = Text()
+    if room is None:
+        return Text("no syrup room (started with --filler-only)", style="dim")
+    w = plant.syrup_writes()
+    s = w.sensors
+    signals = plant.syrup_signals
+    out = signals.outputs if signals is not None else SyrupOutputs()  # no answer: outputs taken as OFF
+
+    def left(text: str) -> None:  # left part of a line; the lamps start in the same column on every line
+        t.append(text.ljust(LAMP_COL))
+
+    def tank(name: str, level: int, capacity: float) -> None:
+        left(f"{name:<12}{level:>5} L {level_bar(level, capacity)} {capacity:>5.0f} L")
+
+    tank("Syrup tank", s.syrup_level, config.SYRUP_TANK_L)
+    t.append_text(lamp("SyrupPump", out.syrup_pump))
+    _fault(t, room.syrup_pump_failed, "FAILED")
+    t.append("\n")
+    left("Mains water")
+    t.append_text(lamp("WaterPump", out.water_pump))
+    _fault(t, room.water_pump_failed, "FAILED")
+    t.append("\n")
+
+    tank("Mixing tank", s.mix_level, config.MIX_TANK_L)
+    t.append_text(lamp("MixHighHigh", s.mix_high_high))
+    _fault(t, room.mix_level_frozen is not None, f"SENSOR STUCK (true {room.mix_l:.0f} L)")
+    t.append("\n")
+    left(f"   product {s.product_temp / 10:>5.1f} °C   chiller {room.coolant_c:.0f} °C")
+    t.append_text(lamp("Agitator", out.agitator))
+    t.append("  ")
+    t.append_text(lamp("CoolingValve", out.cooling_valve))
+    _fault(t, room.coolant_c != config.COOLANT_C, "CHILLER FAILED")
+    t.append("\n")
+    left(f"   CO2     {s.co2_pressure / 100:>5.2f} bar  dissolved {room.dissolved_bar:.2f} bar")
+    t.append_text(lamp("CO2Valve", out.co2_valve))
+    _fault(t, room.co2_valve_stuck, "STUCK OPEN")
+    t.append("\n")
+
+    tank("Buffer tank", s.buffer_level, config.BUFFER_TANK_L)
+    t.append_text(lamp("TransferPump", out.transfer_pump))
+    t.append("\n\n")
+
+    t.append("Wires    Product_Available: ")
+    t.append_text(lamp("syrup PLC", signals is not None and signals.product_available))
+    t.append("  ")
+    t.append_text(lamp("to filler", plant.filler_product_available))
+    t.append("\n         ")
+    t.append_text(lamp("E_Stop_OK", w.e_stop_ok))
+    t.append("   ")
+    t.append_text(lamp("Heartbeat", w.heartbeat))
+    _fault(t, not plant.syrup_heartbeat.enabled, "FROZEN")
+    t.append(f"\nLedger   water {room.water_in_l:.0f} L  delivered {room.delivered_l:.0f} L  "
+             f"drawn {room.drawn_l:.0f} L  spilled {room.spilled_l:.0f} L  hand {room.manual_l:+.0f} L  "
+             f"draw scale x{plant.buffer_draw_scale:g}")
+    if signals is None:
+        t.append("\nsyrup PLC not answering: outputs taken as OFF, no Product_Available", style="bold red")
     return t
 
 

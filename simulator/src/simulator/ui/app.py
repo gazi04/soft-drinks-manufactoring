@@ -1,10 +1,11 @@
 """The control panel: the engineer's test bench (report section 7.5).
 
-    ┌ header: PLC link, step, state, alarms, GoodCount, dt ─────────────────┐
-    │ world: C1, belt pockets, C2, sensor lamps  │ controls: supply, faults,│
-    │ (the physical truth)                       │ stand-in signals, scenario│
-    ├ event log (filter with l) ─────────────────────────────────────────────┤
-    └ footer: q quit, l log filter ──────────────────────────────────────────┘
+    ┌ header: filler PLC line, syrup PLC line (link, step, state, alarms, counter, dt) ─┐
+    │ [1 Filler] [2 Syrup room]   one tab per machine, same layout in each:             │
+    │   world: the physical truth                 │ controls: values, faults, switches  │
+    ├ scenario: [select] Run  status   (one row for every machine) ──────────────────────┤
+    ├ event log (filter with l) ───────────────────────────────────────────────────────┤
+    └ footer: q quit, l log filter, 1 / 2 tabs ──────────────────────────────────────────┘
 
 How it runs:
 - The tick loop (loop.run) is a Textual worker. Textual and the loop share one
@@ -12,9 +13,10 @@ How it runs:
   applies the command at the start of its next tick.
 - The screen is redrawn by a timer 4 times per second, not on every tick:
   drawing 10 times per second would steal time from the loop (late ticks).
-- The panel only CHANGES THE WORLD (supply, faults, stand-in signals). It never
-  writes Cmd, mode or setpoints: Start / Stop / Reset belong to the HMI
-  (tests/hmi.py until FUXA exists).
+- The panel only CHANGES THE WORLD (supply, faults, stand-in signals, tank
+  actions). It never writes Cmd, mode or setpoints: Start / Stop / Reset belong
+  to the HMI (tests/hmi.py until FUXA exists).
+- The syrup room tab exists only when the plant has a syrup room (not --filler-only).
 """
 
 import asyncio
@@ -24,7 +26,18 @@ from pathlib import Path
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.containers import Horizontal, VerticalScroll
-from textual.widgets import Button, Footer, Input, Label, RichLog, Select, Static, Switch
+from textual.widgets import (
+    Button,
+    Footer,
+    Input,
+    Label,
+    RichLog,
+    Select,
+    Static,
+    Switch,
+    TabbedContent,
+    TabPane,
+)
 
 from simulator import config, loop
 from simulator.commands import CommandQueue
@@ -35,7 +48,8 @@ from simulator.scenarios import SCENARIOS, ScenarioSlot
 from simulator.ui import view
 
 # switch id -> (command, the plant value the switch shows, label)
-SWITCHES: dict[str, tuple[str, Callable[[Plant], bool], str]] = {
+Switches = dict[str, tuple[str, Callable[[Plant], bool], str]]
+SWITCHES: Switches = {
     "sw-paused": ("supply_paused", lambda p: p.supply.paused, "Pause supply"),
     "sw-product": ("product_available", lambda p: p.product_available, "Product available"),
     "sw-estop": ("e_stop", lambda p: not p.e_stop_ok, "E-stop pressed"),
@@ -43,32 +57,62 @@ SWITCHES: dict[str, tuple[str, Callable[[Plant], bool], str]] = {
     "sw-labeler": ("labeler_running", lambda p: p.labeler.running, "Labeler running"),
     "sw-heartbeat": ("heartbeat", lambda p: p.heartbeat.enabled, "Heartbeat"),
 }
+# Syrup room tab: only used when plant.syrup exists (the lambdas read plant.syrup)
+SYRUP_SWITCHES: Switches = {
+    "sw-chiller": ("chiller_failed", lambda p: p.syrup.coolant_c != config.COOLANT_C, "Chiller failed"),
+    "sw-water-pump": ("water_pump_failed", lambda p: p.syrup.water_pump_failed, "Water pump failed"),
+    "sw-syrup-pump": ("syrup_pump_failed", lambda p: p.syrup.syrup_pump_failed, "Syrup pump failed"),
+    "sw-co2": ("co2_valve_stuck", lambda p: p.syrup.co2_valve_stuck, "CO2 valve stuck"),
+    "sw-level": ("mix_level_stuck", lambda p: p.syrup.mix_level_frozen is not None, "Level sensor stuck"),
+    "sw-syrup-hb": ("syrup_heartbeat", lambda p: p.syrup_heartbeat.enabled, "Heartbeat"),
+}
 
 # button id -> (input id, command, type of the value)
 VALUE_BUTTONS: dict[str, tuple[str, str, type]] = {
     "bt-rate": ("in-rate", "supply_rate", float),
     "bt-add": ("in-add", "add_bottles", int),
     "bt-flow": ("in-flow", "fill_flow", float),
+    # syrup room
+    "bt-deliver": ("in-deliver", "deliver_syrup", float),
+    "bt-drain-syrup": ("in-drain-syrup", "drain_syrup", float),
+    "bt-draw": ("in-draw", "draw_buffer", float),
+    "bt-fill": ("in-fill", "fill_buffer", float),
+    "bt-scale": ("in-scale", "buffer_draw_scale", float),
+}
+
+# button id -> command sent with True: one-off hand actions, not states (nothing to show on a switch)
+ACTION_BUTTONS: dict[str, str] = {
+    "bt-vent": "vent_tank",
+    "bt-drain-mix": "drain_mix_tank",
 }
 
 REFRESH_S = 0.25
+
+
+def scenario_options(with_syrup: bool) -> list[tuple[str, str]]:
+    """(label, name) for the scenario select; without a syrup room its scenarios are not offered."""
+    return [(f"{s.name} [{s.target}]", s.name) for s in SCENARIOS.values() if s.target == "filler" or with_syrup]
 
 
 class SimulatorApp(App):
     TITLE = "Soft drink line simulator"
     CSS = """
     #header { height: auto; padding: 0 1; background: $boost; }
-    #main { height: 24; }
-    #world { width: 1fr; border: round $primary; padding: 0 1; }
-    #controls { width: 50; border: round $primary; padding: 0 1; }
+    #tabs { height: auto; }
+    .main { height: 22; }
+    .world { width: 1fr; border: round $primary; padding: 0 1; }
+    .controls { width: 50; border: round $primary; padding: 0 1; }
+    TabPane { padding: 0; }
     .row { height: 1; }
     .switch-row { margin-bottom: 1; }  /* one-line switches stacked without a gap read as one block */
     .row Label { width: 20; }
     .row Input { width: 10; }
     .row Button { min-width: 8; margin-left: 1; }
     Switch { height: 1; border: none; padding: 0; width: 6; }
-    #in-scenario { width: 18; }
-    #scenario-status { height: 1; color: $text-muted; }
+    #scenario-row { height: 1; padding: 0 1; }
+    #scenario-row Label { width: 10; }
+    #in-scenario { width: 30; }
+    #scenario-status { width: 1fr; margin-left: 2; color: $text-muted; }
     #log-title { height: 1; padding: 0 1; background: $boost; }
     #log { height: 1fr; }
     """
@@ -76,6 +120,8 @@ class SimulatorApp(App):
         ("q", "quit_panel", "Quit"),
         ("ctrl+q", "quit_panel", "Quit"),
         ("l", "next_filter", "Log filter"),
+        ("1", "tab('tab-filler')", "Filler"),
+        ("2", "tab('tab-syrup')", "Syrup room"),
     ]
 
     def __init__(
@@ -98,25 +144,54 @@ class SimulatorApp(App):
         self._worker = None
         self._log_widget: RichLog | None = None
 
+    @property
+    def has_syrup(self) -> bool:
+        return self.plant.syrup is not None
+
+    def _switches(self) -> Switches:
+        """The switches that exist on this panel (the syrup ones only with a syrup room)."""
+        return {**SWITCHES, **SYRUP_SWITCHES} if self.has_syrup else SWITCHES
+
     # --- Layout ----------------------------------------------------------------------
     def compose(self) -> ComposeResult:
         yield Static(id="header")
-        with Horizontal(id="main"):
-            yield Static(id="world")
-            with VerticalScroll(id="controls"):
-                yield self._value_row("Supply /min", "in-rate", f"{self.plant.supply.per_min:g}", "number", "bt-rate", "Set")
-                yield self._value_row("Add bottles", "in-add", "5", "integer", "bt-add", "Add")
-                yield self._value_row("Fill flow ml/s", "in-flow", f"{config.FILL_FLOW_ML_S:g}", "number", "bt-flow", "Set")
-                for switch_id, (_, value, label) in SWITCHES.items():
-                    yield Horizontal(Label(label), Switch(value=value(self.plant), id=switch_id), classes="row switch-row")
-                options = [(name, name) for name in SCENARIOS]
-                yield Horizontal(
-                    Label("Scenario"),
-                    Select(options, id="in-scenario", compact=True, prompt="choose"),
-                    Button("Run", id="bt-scenario", compact=True),
-                    classes="row",
-                )
-                yield Static(id="scenario-status")
+        with TabbedContent(id="tabs"):
+            with TabPane("1 Filler", id="tab-filler"):
+                with Horizontal(classes="main"):
+                    yield Static(id="world", classes="world")
+                    with VerticalScroll(classes="controls"):
+                        yield self._value_row("Supply /min", "in-rate", f"{self.plant.supply.per_min:g}", "number",
+                                              "bt-rate", "Set")
+                        yield self._value_row("Add bottles", "in-add", "5", "integer", "bt-add", "Add")
+                        yield self._value_row("Fill flow ml/s", "in-flow", f"{config.FILL_FLOW_ML_S:g}", "number",
+                                              "bt-flow", "Set")
+                        yield from self._switch_rows(SWITCHES)
+            if self.has_syrup:
+                with TabPane("2 Syrup room", id="tab-syrup"):
+                    with Horizontal(classes="main"):
+                        yield Static(id="syrup-world", classes="world")
+                        with VerticalScroll(classes="controls"):
+                            yield self._value_row("Deliver syrup L", "in-deliver", "500", "number", "bt-deliver", "Add")
+                            yield self._value_row("Drain syrup L", "in-drain-syrup", "100", "number",
+                                                  "bt-drain-syrup", "Drain")
+                            yield self._value_row("Draw buffer L", "in-draw", "400", "number", "bt-draw", "Take")
+                            yield self._value_row("Fill buffer L", "in-fill", "500", "number", "bt-fill", "Fill")
+                            yield self._value_row("Draw scale L/L", "in-scale", f"{config.BUFFER_DRAW_SCALE:g}",
+                                                  "number", "bt-scale", "Set")
+                            yield Horizontal(
+                                Button("Vent tank", id="bt-vent", compact=True),
+                                Button("Drain mix tank", id="bt-drain-mix", compact=True),
+                                classes="row switch-row",
+                            )
+                            yield from self._switch_rows(SYRUP_SWITCHES)
+        # One scenario row for every machine
+        yield Horizontal(
+            Label("Scenario"),
+            Select(scenario_options(self.has_syrup), id="in-scenario", compact=True, prompt="choose"),
+            Button("Run", id="bt-scenario", compact=True),
+            Static(id="scenario-status"),
+            id="scenario-row",
+        )
         yield Static(id="log-title")
         yield RichLog(id="log", max_lines=1000, markup=False)
         yield Footer()
@@ -129,6 +204,10 @@ class SimulatorApp(App):
             Button(text, id=button_id, compact=True),
             classes="row",
         )
+
+    def _switch_rows(self, switches: Switches):
+        for switch_id, (_, value, label) in switches.items():
+            yield Horizontal(Label(label), Switch(value=value(self.plant), id=switch_id), classes="row switch-row")
 
     # --- Start: the loop as a worker, the redraw timer -------------------------------
     def on_mount(self) -> None:
@@ -152,6 +231,8 @@ class SimulatorApp(App):
     def refresh_view(self) -> None:
         self.query_one("#header", Static).update(view.header_text(self.stats, self.plc, self.syrup_plc))
         self.query_one("#world", Static).update(view.world_text(self.plant))
+        if self.has_syrup:
+            self.query_one("#syrup-world", Static).update(view.syrup_world_text(self.plant))
         self.query_one("#scenario-status", Static).update(view.scenario_text(self.slot))
         # A queued command is applied at the next tick: until then the plant still has the
         # old value, and syncing now would flip the switch back for a moment.
@@ -160,8 +241,8 @@ class SimulatorApp(App):
 
     def _sync_switches(self) -> None:
         """Show the plant's values (a scenario may have changed them) without sending commands."""
-        for switch_id, (_, value, _) in SWITCHES.items():
-            switch = self.query_one(f"#{switch_id}", Switch)
+        for switch_id, (_, value, _) in self._switches().items():
+            switch = self.query_one(f"#{switch_id}", Switch)  # also works on the hidden tab
             wanted = value(self.plant)
             if switch.value != wanted:
                 with switch.prevent(Switch.Changed):  # a sync is not an operator action
@@ -169,19 +250,29 @@ class SimulatorApp(App):
 
     # --- Controls: every control only puts a command on the queue --------------------
     def on_switch_changed(self, message: Switch.Changed) -> None:
-        command, _, _ = SWITCHES[message.switch.id]
+        command, _, _ = self._switches()[message.switch.id]
         self._put(command, message.value)
 
     def on_button_pressed(self, message: Button.Pressed) -> None:
-        if message.button.id == "bt-scenario":
-            name = self.query_one("#in-scenario", Select).value
-            if name in SCENARIOS:
-                self.slot.start(SCENARIOS[name])
-                self.notify(f"scenario {name} started")
-            else:
-                self.notify("choose a scenario first", severity="warning")
-            return
-        input_id, command, kind = VALUE_BUTTONS[message.button.id]
+        button = message.button.id
+        if button == "bt-scenario":
+            self._start_scenario()
+        elif button in ACTION_BUTTONS:
+            self._put(ACTION_BUTTONS[button], True)
+        else:
+            self._put_value(*VALUE_BUTTONS[button])
+
+    def _start_scenario(self) -> None:
+        name = self.query_one("#in-scenario", Select).value
+        if name in SCENARIOS and SCENARIOS[name].target == "syrup" and not self.has_syrup:
+            self.notify(f"{name} needs the syrup room (started with --filler-only)", severity="warning")
+        elif name in SCENARIOS:
+            self.slot.start(SCENARIOS[name])
+            self.notify(f"scenario {name} started")
+        else:
+            self.notify("choose a scenario first", severity="warning")
+
+    def _put_value(self, input_id: str, command: str, kind: type) -> None:
         text = self.query_one(f"#{input_id}", Input).value
         try:
             value = kind(text)
@@ -195,6 +286,14 @@ class SimulatorApp(App):
             self.queue.put(command, value)
         except ValueError as error:  # checked by commands.check(): nothing is queued
             self.notify(str(error), severity="error")
+
+    # --- Tabs ------------------------------------------------------------------------
+    def action_tab(self, tab_id: str) -> None:
+        """Keys 1 / 2: show a machine's tab (the syrup tab only exists with a syrup room)."""
+        if tab_id == "tab-syrup" and not self.has_syrup:
+            self.notify("no syrup room tab (started with --filler-only)", severity="warning")
+            return
+        self.query_one("#tabs", TabbedContent).active = tab_id
 
     # --- Event log -------------------------------------------------------------------
     def _show_event(self, event: Event) -> None:
