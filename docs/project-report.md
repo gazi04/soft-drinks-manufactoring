@@ -164,7 +164,7 @@ The five PLCs never read each other's memory. They coordinate through **conveyor
 - **Bottle flow (conveyors C1–C3):** no handshake is needed. Each conveyor's full sensor is wired directly to the upstream machine, which stops by itself when the conveyor is full (section 5.3).
 - **Liquid flow (syrup room → filler):** the filler cannot see the syrup room's tank, so one handshake is used: `Product_Available`, sent by the syrup room = buffer tank level above minimum (with hysteresis). The buffer has no pressure sensor; only finished, carbonated product is ever transferred into it.
 
-Until the syrup room exists, the simulator holds `Product_Available` TRUE.
+The simulator copies the syrup room PLC's `Product_Available` (%MX6.0) to the filler PLC's input (%MX1.0) every tick, like a wire. Only when the simulator runs with `--filler-only` (no syrup room PLC) does a stand-in hold it TRUE.
 
 Each machine reacts to these signals with two extra states:
 
@@ -304,7 +304,9 @@ The simulator replaces the physical factory. It is **one Python program with one
 
 It has an optional **control panel** in the terminal (section 7.5) for the engineer who tests the line. FUXA remains the only operator screen. With `--headless` the simulator runs without the panel, for example inside Docker.
 
-**Status (2026-11-03):** built for the filler with stand-ins for its neighbours: physics, Modbus link, tick loop, command queue with fault scenarios, and the Textual control panel (`uv run simulator`, `--headless` without panel); 20 bottles run through the real filler PLC with 0 audit warnings, and 9 fault scenarios (gaps, no product, labeler stopped, index jam, slow fill, E-stop, heartbeat lost, Stop during WORK, Manual) pass against it. It writes the HMI animation data (%MW70–75) and shows the PLC's mode in the panel. The simulator is complete for the filler (`docs/simulator/roadmap.md`, stages 0–9); the structure below is the full-line target, the filler version is marked.
+**Status (2026-11-03):** built for the filler with stand-ins for its neighbours: physics, Modbus link, tick loop, command queue with fault scenarios, and the Textual control panel (`uv run simulator`, `--headless` without panel); 20 bottles run through the real filler PLC with 0 audit warnings, and 9 fault scenarios (gaps, no product, labeler stopped, index jam, slow fill, E-stop, heartbeat lost, Stop during WORK, Manual) pass against it. It writes the HMI animation data (%MW70–75) and shows the PLC's mode in the panel. The simulator is complete for the filler (`docs/simulator/roadmap.md`, stages 0–9); the structure below is the full-line target, the built version is marked.
+
+**Status (2026-11-13), syrup room:** built (roadmap section "Syrup room simulator", stages 0–8). One simulator process drives **both real PLCs** (filler on port 502, syrup room on 5022): tank volumes, temperature and CO2 pressure of the mixing tank, the `Product_Available` wire to the filler and a buffer tank emptied by the filler's fill valve. The buffer loses 30 times what the filler fills (a 500 ml bottle takes 15 L): a time compression, because a real 590 L batch would last about 1180 bottles, i.e. hours, and the syrup room would never start a batch during a demo; the PLCs never see the factor, and the *Syrup room* screen states it under the buffer tank (`config.BUFFER_DRAW_SCALE`, design note in `docs/simulator/design-notes.md`). One real batch on the syrup PLC takes about 151 s (dose water 25 s, syrup 18 s, mix 20 s, cool 29 s, carbonate 32 s, transfer 23 s); 20 bottles were filled from the real `Product_Available` without the signal ever being lost, and 6 syrup fault scenarios (low syrup, chiller failed, CO2 valve stuck, pump failed, level sensor stuck, buffer full) plus `buffer_starved` (both PLCs) pass against the real PLCs. `uv run simulator --filler-only` keeps the filler-alone behaviour.
 
 ### 7.1 What it does
 
@@ -325,8 +327,10 @@ simulator/src/simulator/
 ├── loop.py            ← tick loop                                       (built)
 ├── plant.py           ← composes conveyors, machines and stand-ins: one step() for the whole world   (built)
 ├── standins.py        ← neighbours that do not exist yet (bottle supply, labeler, heartbeat)          (built)
-├── plcs.py            ← one Modbus client per PLC (5 connections), the only file that knows Modbus     (built: filler)
+├── plcs.py            ← one Modbus client per PLC (5 connections), the only file that knows Modbus     (built: PlcLink base, FillerPlc, SyrupPlc)
 ├── address_map.py     ← standard machine interface (section 6.2)                                      (built: filler)
+├── address_map_syrup.py ← the same layout for the syrup room PLC                                     (built)
+├── plant_lock.py      ← one sensor writer per PLC (OS file lock per host:port)                         (built)
 ├── wiring.py          ← handshake and E-stop wiring table                                             (later: the plant holds the wires)
 ├── conveyor.py        ← Conveyor class: slots, belt motion, full sensor                               (built)
 ├── bottle.py          ← Bottle objects carrying their state                                           (built)
@@ -337,7 +341,7 @@ simulator/src/simulator/
 ├── ui/                ← Textual control panel (section 7.5): view.py text, app.py screen              (built)
 └── machines/
     ├── blow_molder.py                                                                                 (later)
-    ├── syrup_carb.py                                                                                  (later)
+    ├── syrup.py       ← syrup room + carbonator: tanks, temperature, CO2 pressure                      (built)
     ├── filler.py                                                                                      (built)
     ├── labeler.py                                                                                     (later)
     └── packer.py                                                                                      (later)
@@ -368,13 +372,23 @@ The real tick is never exactly 100 ms, which the first version of the physics di
 - A tick longer than 0.3 s is logged as "slow tick", so a warning caused by the simulator is never blamed on the PLC program.
 - If the PLC cannot be reached, the physics continues with all outputs OFF, like a stopped PLC, and the link reconnects by itself. Every 10 ticks the simulator reads its sensor values back to detect a debugger force or a second writer.
 
+With two PLCs (filler + syrup room, as built) every PLC has its own link and its own error handling inside the same tick, so one PLC being down never stops the other. A PLC that accepts the TCP connection but never answers is retried after 2, 4, 8, 16 s instead of every tick, otherwise its 1 s timeout would delay the other PLC's heartbeat. Step 4 (the wiring) as built: the syrup room's `Product_Available` goes to the filler, the E-stop chain is shared, and each PLC gets its own heartbeat bit.
+
 ### 7.4 Physics models
 
 The models are simple first-order behaviour, enough to make the control logic meaningful:
 
 - **Levels:** level changes by inflow minus outflow each tick.
 - **Temperatures:** move toward the cooling or heating target with a time constant, with slow drift back to ambient when off.
-- **Pressure:** rises while the CO2 valve is open, falls slowly when bottles are being filled.
+- **Pressure:** rises while the CO2 valve is open; falls while the liquid takes CO2 up and when the tank is vented.
+
+As built for the syrup room (`machines/syrup.py`; every parameter in `config.py` with the PLC value it must fit):
+
+- **Tanks:** syrup tank, mixing tank and buffer tank as volumes in litres. Water 20 L/s, syrup 5 L/s, transfer 25 L/s. The PLC doses by absolute level and sees one level per tick, so a pump runs up to one tick too long; the small flows keep this overshoot at 2 L water and 0.5 L syrup, so the 5.5:1 ratio holds. Each dose (25 s, 18 s) stays far below the PLC's 60 s `DoseTimeout`. The high-high switch `MixHighHigh` (980 L) always sees the true level, also when a fault freezes the level sensor.
+- **Temperature:** first-order lag, solved exactly for each step. The cooling jacket pulls the tank toward the chiller (0 °C, time constant 20 s), the room always pulls it slowly toward 20 °C (600 s), and water (15 °C) and syrup (20 °C) mix in by volume. COOL takes about 29 s against the PLC's 60 s `CoolTimeout`.
+- **CO2 pressure:** the valve raises the headspace pressure by 0.5 bar/s. The liquid takes CO2 up (fast with the agitator, ten times slower without), and the headspace loses pressure for what the liquid gains. The pressure therefore falls quickly while the liquid is not saturated and holds when it is, which is exactly what the PLC's `Carb_Timer` measures: CARBONATE needs about three valve openings and 30 s. The transfer pump vents the headspace into the buffer (time constant 5 s); a relief valve at 8 bar limits a stuck valve, long after the PLC's 6 bar over-pressure alarm.
+- **Buffer and filler:** the filler's fill valve empties the buffer, scaled 30 L per litre filled so that one batch of about 590 L lasts a few minutes of filling instead of hours. When the buffer is empty, no product flows into the bottles, whatever the PLC says.
+- **Faults** change the world, never the PLC program: chiller failed, water or syrup pump failed (output ON, no flow), CO2 valve stuck open, level sensor frozen.
 - **Conveyors:** a list of slots. While the motor is ON, bottles shift one slot per step, and they stop and accumulate at the end when the next machine does not take them. A full sensor sees one slot, so it flickers naturally while bottles pass and stays ON when they stand still.
 - **Indexing belt (filler):** a continuous position that grows while the motor is ON. Crossing a station pitch moves every bottle one pocket forward. The index sensor S8 is a cam that is ON in a small window after each pitch (15 %), so it stays ON when the belt stops and absorbs the overrun. The station sensors see their bottle in a wider window (40 %) and are OFF while the belt moves between stations.
 - **Door (filler):** a bottle needs a fixed pass time to go through the open door. The queue behind it stands still, so the next bottle starts from rest and needs a full slot step to reach the door. A correct door pulse admits exactly one bottle; a door held open too long lets the next one in as well, which the audit reports.
@@ -396,7 +410,7 @@ It has three areas:
 - **Controls:** supply rate (bottles/min), "add N bottles", pause supply, fill flow rate, and switches for every fault and stand-in signal (product available, E-stop, belt jam, labeler stopped, heartbeat off).
 - **Event log:** one line per event, e.g. `Bottle 192: entered filler`, `Bottle 191: filled 500 ml`, `PLC: step 10 → 20`, audit warnings in red. It can be filtered by bottle, PLC or warnings, and it is also written to a file as evidence for the tests.
 
-Panel buttons put commands on a queue; the tick loop applies them at the start of the next tick (section 7.3), so the world changes in one place only. Each machine later gets its own tab with the same layout.
+Panel buttons put commands on a queue; the tick loop applies them at the start of the next tick (section 7.3), so the world changes in one place only. Each machine gets its own tab with the same layout (keys `1` filler, `2` syrup room). The syrup room tab shows the tank levels as bars, temperature, CO2 pressure, the syrup PLC's output lamps and a red marker for every injected fault; its controls are switches for the faults and the syrup heartbeat, value rows (deliver or drain syrup, draw or fill the buffer, buffer draw scale) and the buttons "Vent tank" and "Drain mix tank". The scenario row under the tabs serves both machines, because a scenario such as `buffer_starved` involves both.
 
 ## 8. HMI / SCADA in FUXA
 

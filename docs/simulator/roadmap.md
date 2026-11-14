@@ -2,7 +2,9 @@
 
 How to build the Python simulator in small stages. Each stage builds on the one before. Design: `docs/project-report.md` section 7. Filler addresses: `docs/filler/io-list.md`. Filler behaviour: `docs/filler/state-diagram.md`. Checklist and decisions: `docs/filler/progress.md` (section 2).
 
-The roadmap starts with the filler, the only machine that exists so far. The structure is made so that the other four machines can be added later with the same pattern (see the end of this file).
+The roadmap starts with the filler. The structure is made so that the other machines can be added later with the same pattern (see the end of this file).
+
+**Status (2026-11-13):** filler stages 0–9 done; syrup room stages 0–8 done (section "Syrup room simulator"). Labeler, packer and blow moulder stay stand-ins (stretch goals, `docs/scope-options.md`).
 
 ## Working rule for every stage
 
@@ -285,7 +287,7 @@ Each new machine follows the same pattern:
 
 1. A machine class in `machines/` + unit tests.
 2. An entry in `Plant`; a stand-in is replaced by the real machine.
-3. A wiring table entry (`wiring.py`, e.g. `Product_Available` from the syrup room's %MX6.0 to the filler's %MX1.0).
+3. A wiring table entry (`wiring.py`, e.g. `Product_Available` from the syrup room's %MX6.0 to the filler's %MX1.0). *Built differently for the syrup room: the one wire is a single AND inside `Plant` (syrup stage 3), no table needed yet.*
 4. One more client in `plcs.py`.
 5. One tab in the panel.
 
@@ -309,7 +311,7 @@ Second machine, same pattern as above. The filler classes and `address_map.py` d
 | 7 | Panel | syrup rows, new switches | pilot test + one scenario |
 | 8 | Wrap-up | design-notes, README, `demo_check.py`, report section 7 | – |
 
-Open decisions for stages 1–3 (proposed): buffer draw scaled ×50 per simulated bottle so a batch lasts about 2 min; passive vent to 0 bar when the mixing tank is empty; `--filler-only` keeps the old stand-in behaviour.
+Decisions for stages 1–3 (proposed first, as built in brackets): buffer draw scaled ×50 per simulated bottle (built ×30, stage 3); passive vent to 0 bar when the mixing tank is empty (built: the transfer pump vents, stage 2); `--filler-only` keeps the old stand-in behaviour (built).
 
 **Stage 0 as built (2026-11-12):** `address_map_syrup.py` defines outputs (coils 0–5), the 11-coil sensor block 8192–8202 (`MixHighHigh`, spares and the unused %MX1.0 written FALSE, `E_Stop_OK`, `Heartbeat`), the 5-register analog block HR 1036–1040, status HR 1074–1077, 6 alarms 8232–8237, `PRODUCT_AVAILABLE_OUT` 8240, conditioned bits, setpoints HR 1054–1063 and manual buttons, plus `SIM_WRITE_COILS` / `SIM_WRITE_REGISTERS`. `tests/unit/test_address_map_syrup.py` (9 tests) parses the tables of `io-list.md`, so a typo in code or doc fails. Differences to the filler map: 6 alarms, 5 analog sensors, `Product_Available` is an output here. Unit suite 161 passed.
 
@@ -323,3 +325,71 @@ Open decisions for stages 1–3 (proposed): buffer draw scaled ×50 per simulate
 | Start levels | syrup 600, buffer 500 L | buffer < `BufferLow` 800 (first batch at once), > `BufferMin` + 20 (`Product_Available` TRUE) |
 
 Tests: `tests/unit/test_syrup.py` (20): flows, empty / full tanks, rounding, `MixHighHigh`, PLC timeout fit, dose precision with the real loop order, one scripted batch, and a 5 000-tick conservation test. Unit suite 182 passed.
+
+**Stage 2 as built (2026-11-12):** `SyrupRoom` now also moves the mixing tank's temperature and CO2 pressure (same `step()` and `SyrupSensors`; new public state `temp_c`, `pressure_bar`, `dissolved_bar`, `coolant_c`).
+- **Temperature:** first-order lag, solved exactly. Cooling valve pulls toward the chiller (0 degC, tau 20 s), the room always pulls toward 20 degC (tau 600 s). Water (15 degC) and syrup (20 degC) mix in by volume.
+- **Pressure:** CO2 valve +0.5 bar/s. The liquid takes CO2 up (`dissolved_bar`, k 0.1 /s with the agitator, 0.01 /s without) and the headspace loses 0.286 x what the liquid gains, so the pressure falls fast while unsaturated and holds when saturated: exactly what the PLC's `Carb_Timer` measures. The transfer pump vents the headspace (tau 5 s). Relief valve at 8 bar.
+
+| Parameter | Value | Must fit with (PLC) |
+| --- | --- | --- |
+| Chiller / jacket tau | 0 degC / 20 s | COOL 15.8 -> 4.0 degC in about 29 s vs `CoolTimeout` 60 s |
+| Room tau | 600 s | 0.5 degC take about 19 s: `TempHyst` 0.5 degC is a real band |
+| CO2 fill, dissolve k, headspace gain | 0.5 bar/s, 0.1 /s, 0.286 | CARBONATE about 30 s with 3 valve openings vs `CarbTime` 10 s |
+| Vent tau | 5 s while TRANSFER runs | tank below 0.1 bar when the next batch starts |
+
+Tests: 20 more in `tests/unit/test_syrup.py` (40 in total, suite 202). A small port of the PLC's latches and `Carb_Timer` drives the physics in tests. Five deliberate breakages (no vent, agitator without effect, no dissolving, slow cooling, fast room heat) each make a test fail.
+
+**Stage 3 as built (2026-11-12):** `Plant(with_syrup=True)` holds a `SyrupRoom`; `Plant()` is unchanged (stand-in `Product_Available` = TRUE), so the filler's code, tests and loop are untouched.
+- `Plant.step(out, dt, syrup: SyrupSignals | None = None)`: `SyrupSignals` = the syrup PLC's outputs + its `Product_Available` (%MX6.0). `None` = the PLC does not answer: pumps off and no wire driven.
+- **The wire:** the filler sees `plant.product_available` (the pipe, FALSE = cut by command) AND the syrup PLC's signal; the same value goes to `SimWrites.product_available` (filler %MX1.0). `plant.syrup_writes()` gives `SyrupWrites` (sensors, shared `e_stop_ok`, own `syrup_heartbeat`).
+- **The buffer is drained by the filler:** `Filler.dispensed_ml` counts every ml through the fill valve (also a spill); after each sub-step the plant takes `ml / 1000 x buffer_draw_scale` litres from the buffer. Empty buffer: one SIM warning, level never negative, and the valve gives no more product (`Plant.product_flows` = pipe AND buffer not empty; the PLC signal only goes to the filler PLC – fixed 2026-11-13).
+
+| Parameter | Value | Why |
+| --- | --- | --- |
+| `BUFFER_DRAW_SCALE` | 30 L per litre filled (500 ml bottle = 15 L) | whole-line test, 600 s: x50 starves the filler after 114 s, x40 leaves 24 L of margin, x30 leaves 113 L (buffer 233..1049 L) |
+
+Tests: `tests/unit/test_plant_syrup.py` (13) and one in `test_filler.py` (suite 215). The whole-line test runs the filler's test controller and a syrup test controller (the PLC's steps 5-60 and the `Product_Available` hysteresis) for 10 minutes: 3 batches, 89 bottles, no warnings. Three deliberate breakages (wire ignores the syrup PLC, ignores the cut pipe, filler draws nothing) each make a test fail.
+
+**Stage 4 as built (2026-11-12):** `plcs.py` now has a base class `PlcLink` (connect, reconnect, `link_ok`, guarded requests, one-writer sets as class attributes `write_coils` / `write_registers`) and two machines on it: `FillerPlc` (unchanged API, port 502) and `SyrupPlc` (port `config.SYRUP_PORT` 5022).
+- `SyrupPlc.read_signals()` -> `SyrupSignals` (coils 0-5 and coil 8240, two requests), `write(SyrupWrites)` (sensor block 8192-8202 + analog HR 1036-1040), `write_heartbeat()`, `read_status()` -> `SyrupStatus` (state, step, batch count, 6 alarms, mode), `verify_writes()`.
+- Pure mapping functions (`decode_syrup_outputs`, `encode_syrup_sensor_block`, `encode_analog_block`, `decode_syrup_status`, `foreign_syrup_writes`) and name tables for the log and the panel. Analog values travel as two's complement (a PLC INT is signed, a Modbus register is not).
+- The two PLCs share the sensor-coil layout 8192-8202 on purpose, so their coil ownership sets are equal; the registers differ (the filler also owns the animation words).
+
+Tests: `test_plcs_syrup_mapping.py` (11) and `test_plcs_syrup_link.py` (11, base behavior parametrised over both classes), suite 237. Live: `tests/test_link_syrup.py` (11 checks incl. `--restart`), part of `run_syrup.py`. Three deliberate breakages (analog order, no two's complement, alarm index shifted) each make a test fail.
+
+**Stage 5 as built (2026-11-12):** `loop.run(..., syrup_plc=SyrupPlc)` drives two PLCs. The filler path is unchanged (same texts, same tests); per PLC there is a `LinkTrack` (last writes, problems already reported, link state) and its own `try`, so one PLC being down never stops the other.
+- Tick: read filler outputs and `syrup_plc.read_signals()` (failed / down -> `None` = pumps off, no `Product_Available`) -> `plant.step(out, dt, signals)` -> write, read-back (every 10th tick) and status for each PLC.
+- `PlcWatcher` is configurable (names, prefix, counter): the syrup room logs `syrup: step IDLE -> DOSE_WATER` and `syrup: batch complete (BatchCount n)`. `LoopStats` has `syrup_status` and the batch count; the summary shows `BatchCount +n`.
+- CLI: `uv run simulator` drives both PLCs; `--filler-only` keeps the old behavior; `--syrup-host` / `--syrup-port`. Both ports get a plant lock. The panel passes the second link to the loop and shows a second header line (link, mode, step, state, `BatchCount`, alarms, start hint). `tests/hmi.py --syrup auto reset start` operates the syrup PLC.
+- Found live and fixed: a PLC that accepts TCP but never answers (filler runtime with the Modbus plugin disabled) cost a 1 s timeout every 2 s and made the loop miss the syrup PLC's heartbeat. `PlcLink` now backs off (2, 4, 8, 16 s); the heartbeat toggles at most once per tick and keeps its phase (see design notes).
+
+Tests: `test_loop_syrup.py` (16, two fake servers incl. a silent PLC), heartbeat tests (suite 256). Live: `tests/test_closed_loop_syrup.py` (in `run_syrup.py`, slow, needs the filler on 502). `--syrup-only` on the real syrup PLC: 5/5, BatchCount +1, dosing 500.5 / 590.0 L, step durations IDLE 3, DOSE_WATER 25, DOSE_SYRUP 18, MIX 20, COOL 29, CARBONATE 32, TRANSFER 23 s (151 s per batch), dt 98-102 ms. **Check B4 (filler fed by the real `Product_Available`) has not run yet:** the filler runtime is in the "Modbus plugin disabled" state and needs its program uploaded from the Editor.
+
+**B4 live (2026-11-13):** `test_closed_loop_syrup.py` with both PLCs 6/6: the filler made 20 bottles from the real `Product_Available`, never without it, buffer minimum 232 L, ticks 98–102 ms. The first run failed B1 only: with the filler drawing, the buffer is below `BufferLow` after TRANSFER (764 L), so the PLC starts the next batch at once (TRANSFER -> DOSE_WATER, correct). The test now ends a batch at the first step after TRANSFER (WAIT_DEMAND or DOSE_WATER) and expects `BatchCount` +1.
+
+**Stage 6 as built (2026-11-12):** faults and hand actions are attributes/methods of `SyrupRoom`, set by commands, used by scenarios.
+- **Faults (world, never the PLC):** `water_pump_failed`, `syrup_pump_failed` (output ON, no flow), `co2_valve_stuck` (valve open whatever the PLC says; pressure up to the 8 bar relief), `mix_level_frozen` (the level reading stops; `MixHighHigh` keeps the true level), `coolant_c = COOLANT_FAILED_C` (20 degC: cooling does nothing).
+- **Hand actions with ledger (`manual_l`):** `fill_buffer`, `drain_syrup`, `drain_mix_tank` (to waste), `vent_headspace`; `deliver_syrup` / `draw_buffer` as before.
+- **12 commands** (`deliver_syrup`, `drain_syrup`, `chiller_failed`, `water_pump_failed`, `syrup_pump_failed`, `co2_valve_stuck`, `vent_tank`, `mix_level_stuck`, `drain_mix_tank`, `draw_buffer`, `fill_buffer`, `buffer_draw_scale`), flagged `syrup=True` in `_Spec`; on a plant without syrup room they are ignored with a SIM warning.
+- **`Scenario.target`** ("filler" / "syrup"): conditions see the status of that PLC (`due(plant, status, syrup_status)`; the loop passes both). `--scenario` of a syrup scenario with `--filler-only` stops with a message; the panel's Run button refuses it.
+- **7 scenarios:** `low_syrup`, `cooling_failure`, `over_pressure`, `pump_failure`, `level_sensor_stuck`, `buffer_full`, `buffer_starved` (the last needs the filler PLC running and is run by hand).
+
+Tests: `test_syrup_faults.py` (12), commands, scenario steps and one loop test (suite 290). Mutation checks (frozen reading ignored, stuck valve ignored, wrong status routed) each fail a test. Live: `tests/test_syrup_scenarios.py` (6 scenarios on the real syrup PLC, in `run_syrup.py`): over_pressure (alarm at 6.05 bar), low_syrup (Starved, refill restarts alone), level_sensor_stuck (`Alm_Overflow` 49.0 s after DOSE_WATER, true level 980 L, no spill), buffer_full (WAIT_BUFFER, Blocked, continues alone), cooling_failure and pump_failure (alarm exactly 60.0 s after the step began, resume after Reset + Start). `buffer_starved` live (2026-11-13, both PLCs, headless): `Product_Available` dropped at 66 s, filler Starved, Running again at 130 s after the next TRANSFER, no empty-buffer warning. Panel switches: stage 7.
+
+**Stage 7 as built (2026-11-13):** the panel has one tab per machine (report 7.5: "each machine gets its own tab").
+- **Layout:** header (filler + syrup PLC lines) / `TabbedContent` `1 Filler`, `2 Syrup room` (keys `1` / `2`; the syrup tab only without `--filler-only`) / one shared scenario row (select shows `name [target]`, syrup scenarios hidden with `--filler-only`) / event log.
+- **Syrup world** (`view.syrup_world_text`, pure): tank levels with `level_bar`, product temperature, CO2 pressure + dissolved CO2, chiller temperature, the syrup PLC's six output lamps, `MixHighHigh`, the `Product_Available` signal and the wire to the filler, E-stop, heartbeat, ledger, draw scale. Numbers are the sensor values written to the PLC; red markers for every injected fault (`FAILED`, `SENSOR STUCK (true … L)`, `CHILLER FAILED`, `STUCK OPEN`, `FROZEN`) and a line when the syrup PLC does not answer.
+- **Syrup controls:** 6 switches (chiller failed, water pump failed, syrup pump failed, CO2 valve stuck, level sensor stuck, syrup heartbeat), 5 value rows (deliver syrup, drain syrup, draw buffer, fill buffer, draw scale), 2 action buttons (vent tank, drain mix tank). Switches follow the plant like the filler's.
+- **New commands** `syrup_heartbeat` (freezes only the syrup PLC's heartbeat) and `fill_buffer_to` (tops the buffer up to a level, for `buffer_full`): 14 syrup commands.
+- `Plant.syrup_signals` (last `SyrupSignals`, None = no answer) replaces the private `_syrup_pa`: the wire to the filler is derived from it and the panel shows its output lamps.
+
+Tests: `test_view.py` (+4: bar, sensor values and lamps, every fault marker, no answer), `test_panel_syrup.py` (4 pilot tests at 140×45, dead ports: key 2 + fault switch, value row + action button, switches follow the plant on the hidden tab, syrup scenario from the shared row), `test_panel.py` (+1 filler-only: no syrup tab, no syrup scenarios, key 2 only a notice), `test_commands.py`, `test_plant_syrup.py` (suite 302). Mutation checks (sync without the syrup switches, `syrup_signals` not stored) each fail a test. Layout at 140×45: both control columns 20/20 lines without scrolling, world column 86 characters, log 16 lines. **Live (2026-11-13), scenario `buffer_full` started from the panel** (Textual pilot against the real syrup PLC: key `2`, select, Run): DOSE_WATER → … → WAIT_BUFFER (State 3 Blocked) → TRANSFER → WAIT_DEMAND, `BatchCount` +1, no alarm; the syrup tab showed buffer 1785 L, ledger hand +1400 L / drawn 700 L. The first live run found a wrong scenario number: the review fix "+1500 L at MIX" put the buffer at 2000 L ≥ `BufferMax` → `Alm_Overflow`, FAULT. Now the new command `fill_buffer_to 1900` sets a LEVEL (not an amount); a unit test checks the numbers against `BufferMax`, `DoseTarget` and a filler drawing 3 L/s. `test_syrup_scenarios.py buffer_full` 2/2 again.
+
+
+**Stage 8 as built (2026-11-13):** wrap-up, no new simulator code.
+- `tests/demo_check.py`: the syrup runtime is required now (D1–D3 FAIL instead of WARN, `config.SYRUP_PORT` instead of a local constant); D6 checks the plant lock of each PLC (both held PASS, none WARN, only the filler's WARN "started with `--filler-only`?"); D7 runs per PLC with that PLC's address map and step / state / alarm names, the syrup room's hint points to `tests/hmi.py --syrup` (no FUXA screens yet) and "Reset twice" appears when `Alm_CommLost` comes with FAULT. D4 stays on the filler until FUXA has the syrup device.
+- `design-notes.md`: new section "Pre-demo check with two PLCs"; the syrup physics, plant, link, loop, fault and panel notes were written with their stages.
+- `README.md`: demo check text; the syrup panel and scenarios were written with stage 7.
+- Report section 7 and 5.1: syrup status, structure tree (`address_map_syrup.py`, `plant_lock.py`, `machines/syrup.py`, `SyrupPlc`), two links in the loop, the syrup physics as built, panel tabs; the old "simulator holds `Product_Available` TRUE" now only for `--filler-only`.
+
+Test: live `demo_check.py` against both runtimes, all three D6 cases (no simulator; `--filler-only`; both PLCs) seen in a run. Unit suite 304 passed.

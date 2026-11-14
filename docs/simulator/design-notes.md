@@ -123,6 +123,15 @@ The screen is drawn in the same asyncio loop, so a redraw can delay a tick a lit
 **Why no Start / Reset buttons in the panel?**
 One-writer rule: commands, modes and setpoints belong to the HMI. The header shows the `tests/hmi.py` command while the PLC is in IDLE.
 
+**Why one tab per machine and one shared scenario row?**
+Report 7.5 asks for "each machine its own tab with the same layout": world on the left, controls on the right. Both machines in one screen would not fit 140×45 next to the log. Scenarios stay in one row under the tabs because a scenario is not tied to the tab you are looking at (`buffer_starved` needs both machines), and the event log shows its steps anyway. The syrup tab and the syrup scenarios are left out with `--filler-only`, so nothing in the panel can point at a syrup room that does not exist.
+
+**Why are vent tank and drain mix tank buttons, not switches?**
+They are one-off hand actions, not states: there is nothing to show afterwards, and `False` does nothing (`commands.py`). A switch would suggest a state that the plant does not have.
+
+**Why does the plant keep `syrup_signals`?**
+The pump lamps of the syrup tab need the syrup PLC's outputs of the last tick. The plant already kept one bit of them (`_syrup_pa`, the Product_Available signal); it now keeps the whole `SyrupSignals` and derives the wire from it, so the fact is stored once. It is display and wiring state, not physics: the physics still gets the outputs as an argument of `step()`.
+
 ## HMI animation data (stage 9)
 
 **Why does the simulator write anything for the HMI at all?**
@@ -175,3 +184,104 @@ So conservation can be tested: `syrup + mix + buffer + spilled = start + water_i
 
 **When is a pump "dry"?**
 When it is on and its source is empty at the START of the step. The last partial step (0.25 L left, 0.5 L wanted) is normal operation and gives no warning.
+
+**How does `Carb_Timer` get a meaning in the simulator?**
+The PLC calls the product saturated when the pressure holds for `CarbTime` without the CO2 valve. So the physics must make the pressure fall after every fill while the liquid is not saturated, and stop falling when it is. The liquid keeps a "dissolved CO2" value (`dissolved_bar`); every second it moves toward the headspace pressure (`k`, 10x faster with the agitator), and the headspace loses a share of what the liquid gains. With the chosen numbers the valve opens 2-3 times and the timer finishes after about 30 s.
+
+**Why is the temperature solved exactly and the pressure with Euler?**
+The temperature lag has constant inputs inside one step, so the exponential is exact: it cannot overshoot the chiller temperature and a late tick equals several short ones. The gas part has two coupled terms and a valve; with `dt <= 0.1 s` (the plant's sub-step) Euler is accurate to 1e-3.
+
+**Why does the transfer pump vent the tank?**
+The tank is emptied into the unpressurised buffer and the headspace goes with it. A first idea, "vent only when the tank is empty", left 3.43 bar in the tank: the PLC leaves TRANSFER at 5 L, the next water dose lifts the level over 5 L within one tick, and the vent closed again. Venting while the pump runs gives 0.03 bar at the end. It is a simplification of a real counter-pressure line, not a PLC output.
+
+**What does the model leave out?** Headspace expansion while the tank empties, CO2 solubility depending on the temperature ("warm product gives its CO2 back"), and a cooling speed that depends on the batch volume. None of them changes how the PLC logic is exercised.
+
+## Syrup room in the plant (`plant.py`)
+
+**Where is the cable between the two PLCs?**
+In `Plant`: the filler sees `plant.product_available AND the syrup PLC's Product_Available`. The first term is the pipe itself (the panel switch and the scenario `product_available False` cut it), the second is the real signal. The simulator copies the signal because the two PLCs never talk to each other; on a real line this is one wire. Without a syrup room (`Plant()`) the second term does not exist and the pipe alone decides, which keeps the filler tests and the filler-only run as they were.
+
+**Signal and liquid are two things.** `filler_product_available` is only the SIGNAL to the filler PLC (%MX1.0). Whether product really comes out of the open fill valve is `product_flows`: the pipe is connected AND the buffer holds product. The PLC signal does not move liquid. Before (2026-11-13 review) the valve flowed whenever the signal was TRUE: with `BufferMin` 0 on the HMI the signal never drops, the buffer ran to 0 L and the filler still filled full bottles from nothing (one warning only). Now the bottle stays short and the filler PLC's own fill timeout catches it, as on a real line.
+
+**What does `syrup=None` mean in `Plant.step`?**
+The syrup PLC does not answer. Its pumps and valves are OFF (like a stopped controller's outputs) and it drives no `Product_Available` wire, so the filler starves. A PLC that was only stopped with `Cmd = 2` still answers and keeps `Product_Available` by its hysteresis.
+
+**Why does the filler drain the buffer, and why a scale?**
+The syrup room's buffer only makes sense if something uses it. The fill valve counts every ml (`dispensed_ml`, a spill too) and the plant takes `ml / 1000 x buffer_draw_scale` litres out of the buffer. A real 500 ml bottle would take 0.5 L, and a 590 L batch would last hours; the scale makes one batch last a few minutes. It is a plant attribute (a command comes in stage 6).
+
+**Why is the scale 30 and not 50?**
+My first estimate forgot that a batch arrives at the buffer only at the END of its cycle (about 145 s: dose, mix, cool, carbonate, then transfer). In between the filler lives on what is in the buffer. The whole-line test (600 s, both test controllers) showed: x50 starves the filler after 114 s, x40 leaves 24 L above the reset of `Product_Available` (100 L), x30 leaves 113 L. At x30 the buffer swings between about 230 and 1050 L and batches wait in WAIT_DEMAND now and then, as in the design.
+
+**Why two heartbeats and one E-stop?**
+One E-stop chain stops the whole line, so both PLCs see the same `E_Stop_OK`. A comm failure is a fault of one link, so each PLC has its own heartbeat and a scenario can freeze only one.
+
+## Second Modbus link (`plcs.py`)
+
+**Why a base class `PlcLink` and not a copy of `FillerPlc`?**
+Connecting, reconnecting, "link_ok means the PLC answered", and "check the link and create the request with no await in between" are the same for every PLC, and they are the parts that were hard to get right (stage 5 of the filler). The base keeps them once; a machine class only adds its addresses, its default port and its reads and writes. The one-writer rule is a pair of class attributes (`write_coils`, `write_registers`) that the guard in the base class checks, so a machine cannot forget it.
+
+**Why is `read_signals()` two requests?**
+The outputs are coils 0-5 and `Product_Available` is coil 8240. One request over that range would read 8000 coils. The two values may be one PLC scan (20 ms) apart; `Product_Available` follows a hysteresis on the buffer level, so that does not matter.
+
+**Why two's complement for the analog values?**
+A PLC `INT` is signed, a Modbus register is unsigned 16 bit. `-5` is sent as 65531 and the PLC reads it as -5. The temperature cannot be negative with a 0 degC chiller, but a fault scenario may drive any sensor anywhere, and `write_registers` raises on a negative number instead of wrapping.
+
+**Why do the two PLCs have the same coil ownership?**
+Both keep the sensors in `%MX0` and the wiring in `%MX1.1/1.2`, so the block 8192-8202 is the same. The registers differ: the filler also owns the animation words (`%MW70-75`), the syrup room only the five analog sensors. Each machine class has its own sets, and a test pins that the syrup client cannot reach the animation words.
+
+**How do I know the syrup client reads the right addresses?**
+The live script `tests/test_link_syrup.py` writes `ProductTemp`, `CO2Pressure` and `BufferLevel` through `SyrupPlc.write()` and watches the PLC's own `Temp_OK`, `CO2_Demand` and `Product_Available` follow them (including the hysteresis hold at 110 L). Those bits run without Start, so no batch is needed. The script refuses to run unless the PLC is idle.
+
+## The loop with two PLCs (`loop.py`)
+
+**How does the loop stay independent of one PLC being down?**
+Each PLC has its own link (`PlcLink`), its own bookkeeping (`LinkTrack`: last writes, which problems were already reported, whether the link was up) and its own `try` around write, read-back and status. A failure in one never skips the other. A dead filler means "all outputs OFF"; a dead syrup PLC means `syrup=None` in `Plant.step`: its pumps are off and it drives no `Product_Available`, so the filler starves. The syrup message says so and names the way out: `--filler-only`.
+
+**What does `uv run simulator` do by default now?**
+It drives both PLCs. `--filler-only` gives the old behavior (`Plant()` with the stand-in `Product_Available`); all older scripts (`test_closed_loop.py`, `test_scenarios.py`, the filler suite) use `Plant()` + `FillerPlc` and are unchanged. The syrup PLC does not have to be started for the filler to get product: `Product_Available` is a hysteresis on the buffer level that runs in IDLE, it only needs the syrup PLC powered and its sensors written. To start the syrup room: `uv run python tests/hmi.py --syrup auto reset start`.
+
+**How long does the wire take?**
+The syrup PLC's `Product_Available` is read at the start of tick n, passes through `plant.step`, and reaches the filler PLC in the write of the same tick: about one tick plus a PLC scan (roughly 120 ms). Irrelevant for a hysteresis signal.
+
+**Why are the requests not made in parallel?**
+They run one after the other. A refused connection fails at once and costs nothing. A PLC that accepts the connection and never answers costs one request timeout (1 s). Running the two links in parallel would only move that wait, because the tick has to wait for both anyway. What helps is trying that PLC less often (next question).
+
+**Found live: a "silent" PLC starved the healthy one.** The filler runtime was in the state "program RUNNING, Modbus plugin disabled": Docker's proxy accepts the connection, the runtime never answers. Every 2 s the loop reconnected and lost a full 1 s timeout, and the syrup PLC raised `Alm_CommLost` after a few seconds although the loop was running. Two causes, two fixes:
+1. **Backoff in `PlcLink`:** a connection that never got an answer doubles the wait before the next attempt (2, 4, 8, 16 s, then 16 s), and the first answer resets it. A refused port and a restarting runtime recover as fast as before.
+2. **The heartbeat could cancel itself:** it was stepped per sub-step and caught up with every missed toggle. After a stall of about 2 s it toggled twice inside one tick, so the value written was the same as the one before and the PLC saw no change for 3 s. Now each heartbeat is stepped once per tick and toggles at most once per step; it keeps its phase, so the gap between two visible changes stays below the 3 s watchdog for stalls up to about 2 s. A stall of 3 s or more is a real communication loss and the PLC is right to say so. This was also a latent weakness of the filler.
+
+**Why is the live closed-loop script able to run with the syrup PLC alone (`--syrup-only`)?**
+Because the loop copes with a dead PLC, and because the filler runtime can be in the "Modbus plugin disabled" state after a container re-creation (the program is then uploaded again from the Editor). With `--syrup-only` the script points the unused filler link at a closed port, so the filler runtime is not touched at all, and skips the check that needs it.
+
+## Syrup room faults and scenarios (stage 6)
+
+**Why are faults attributes of the room and not PLC changes?**
+A fault is a property of the world: a pump that runs without flow, a valve that stays open, a sensor that reports an old value. The PLC is never told; it can only see the effect (a timeout, a pressure, a level). So `SyrupRoom` has `water_pump_failed`, `syrup_pump_failed`, `co2_valve_stuck`, `mix_level_frozen` and `coolant_c` (failed chiller = 20 degC = room temperature, so cooling does nothing). A failed pump is not an audit warning: the fault is intended, like the injected faults of the filler.
+
+**Why does `MixHighHigh` use the true level when the level sensor is frozen?**
+It is a separate switch, the hardware backup for exactly this case (`io-list.md`). If it followed the frozen reading the scenario `level_sensor_stuck` could never show the backup working. Timing: water at 20 L/s reaches the 980 L switch in about 49 s, before the 60 s `DoseTimeout`, so `Alm_Overflow` (not `Alm_DoseTimeout`) is the alarm that appears.
+
+**Why are `vent_tank` and `drain_mix_tank` commands?**
+The PLC's Reset only works when the cause is gone. After a stuck CO2 valve the headspace holds about 7 bar (the liquid takes some CO2 up, but `pressure + 0.286 x dissolved` is conserved), and nothing in the model lowers it: a real plant vents by hand. After a stuck level sensor the mixing tank holds 980 L of plain water: the drain valve sends it to waste (into the buffer it would dilute the product). Both are maintenance actions at the end of the scenario, before the operator presses Reset + Start. `vent_tank False` and `drain_mix_tank False` do nothing: they are actions, not states.
+
+**Ledger with hand actions.** `fill_buffer`, `drain_syrup` and `drain_mix_tank` change the volumes outside the pumps, so they go into `manual_l` (net litres in minus out) and the conservation formula is `syrup + mix + buffer + spilled = start + water_in + delivered - drawn + manual`.
+
+**Why does a scenario have a `target`?**
+Its conditions (`in_step`, `alarm`, `in_state`, `plc_running`) look at one PLC's status. A syrup scenario must see the syrup PLC's step numbers and alarms, not the filler's. `SyrupStatus` and `PlcStatus` both have `.step`, `.state` and `.alarms`, so the same condition functions work; the runner just hands over the right status. A scenario checks at definition time that a filler scenario uses no syrup command. A syrup command on a plant without syrup room (`--filler-only`) is ignored with a SIM warning instead of crashing the tick.
+
+**What cannot be a scenario?** Reset and Start (the HMI writes them), and `buffer_starved` is not in the live test script because it needs the filler PLC running too; run it by hand with both PLCs.
+
+
+## Pre-demo check with two PLCs (`tests/demo_check.py`, stage 8)
+
+**Why is the syrup room now a FAIL and not a WARN?**
+Since stage 5 the default `uv run simulator` drives both PLCs, and the filler only fills while the syrup room's real `Product_Available` is TRUE. Without the syrup runtime the demo line starves, so a missing container, program or Modbus server of `plc-syrup-carb` must stop the demo like the filler's does.
+
+**Why does D4 print one line per PLC?**
+FUXA has one Modbus device per PLC, and each device has its own connection status tag (`t_<key>_connection_status`). When this check was written FUXA had no syrup device, so D4 read only the filler's link, and a FUXA that had lost the syrup PLC passed. Since the HMI wrap-up (S7, 2026-11-14, `docs/hmi/roadmap.md`) D4 reads the status tags of every runtime in one request and prints PASS / FAIL per PLC. The hint "install the Modbus plugin" comes only when every link is down: a missing plugin breaks all devices, while one link down means that PLC is down (D3). D7 points to the FUXA header for both machines.
+
+**Why is "only the filler lock held" a WARN of its own?**
+The plant lock is per PLC port. Filler lock held but syrup lock free means the simulator was started with `--filler-only`: the syrup PLC gets no heartbeat (`Alm_CommLost`) and the filler runs on the stand-in `Product_Available`, so the demo would not show the two-PLC handshake. The check says so instead of a generic "no simulator".
+
+**Why the "Reset twice" hint?**
+The syrup ladder (and the filler's) computes `Master_Enable` above the watchdog Reset rung, so with `Alm_CommLost` and FAULT both latched the first Reset clears only `Alm_CommLost` (`docs/syrup/progress.md`, open question). D7 adds "(twice ...)" exactly in that case (step 900 and `Alm_CommLost`), until the rung order is changed in the Editor.
