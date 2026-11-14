@@ -9,8 +9,8 @@ that broke during development; D2, D3, D6 and D7 run once per PLC (filler, syrup
        re-creation resets /workdir/plugins.conf (container layer, not a volume): the program
        still runs from the build volume, but modbus_slave is off until the next upload
     D3 per runtime: the PLC program answers on Modbus
-    D4 FUXA is up and connected to the filler PLC (connection status 5; no Modbus plugin = 0;
-       the syrup room has no FUXA screens yet, so it is not checked here)
+    D4 FUXA is up and connected to each PLC (one line per PLC, connection status 5). One link at 0 =
+       that PLC is down (D3); all at 0 can also be FUXA's missing Modbus plugin
     D5 FUXA has the current screens (live project = docs/hmi/fuxa-project.json)
     D6 per PLC: one simulator writes its sensors (plant lock held) - WARN if none
     D7 per PLC: ready, mode Auto, no active alarm
@@ -36,7 +36,11 @@ from simulator.plcs import (ALARM_NAMES, MODE_NAMES, STATE_NAMES, STEP_NAMES, SY
 ROOT = Path(__file__).resolve().parents[2]
 EXPORT = ROOT / "docs" / "hmi" / "fuxa-project.json"
 FUXA = "http://localhost:1881"
-STATUS_TAG = "t_filler_connection_status"
+
+def status_tag(label: str) -> str:
+    """FUXA's connection status tag of one PLC device; the runtime labels are the FUXA machine keys
+    (tests/fuxa_tags.py: Machine.status_tag_id = "t_<key>_connection_status")."""
+    return f"t_{label}_connection_status"
 
 
 class Runtime:
@@ -55,7 +59,7 @@ RUNTIMES = [
             am, STEP_NAMES, STATE_NAMES, ALARM_NAMES, "the FUXA header"),
     Runtime("plc-syrup-carb", "syrup", "127.0.0.2", "plcs/syrup", config.SYRUP_PORT,
             sm, SYRUP_STEP_NAMES, SYRUP_STATE_NAMES, SYRUP_ALARM_NAMES,
-            "`uv run python tests/hmi.py --syrup` (no FUXA screens yet)"),
+            "the FUXA header (row 2: Syrup room, e.g. on the Syrup room screen)"),
 ]
 SERVICES = {"fuxa", *(rt.service for rt in RUNTIMES)}
 COLOURS = {"PASS": "\033[32m", "WARN": "\033[33m", "FAIL": "\033[31m"}
@@ -132,16 +136,23 @@ def d3_plc(rt: Runtime) -> ModbusTcpClient | None:
 
 
 def d4_fuxa() -> bool:
+    """One line per PLC device. True when FUXA answers (then D5 runs)."""
+    ids = [status_tag(rt.label) for rt in RUNTIMES]
     try:
-        value = get_json(f"/api/getTagValue?ids={urllib.parse.quote(json.dumps([STATUS_TAG]))}")[0].get("value")
+        values = {v["id"]: v.get("value") for v in get_json(f"/api/getTagValue?ids={urllib.parse.quote(json.dumps(ids))}")}
     except OSError:
         report("FAIL", "D4 FUXA", f"FUXA does not answer on {FUXA} – `docker compose up -d fuxa`")
         return False
-    if value == 5:
-        report("PASS", "D4 FUXA", "running, connected to the filler PLC")
-    else:
-        report("FAIL", "D4 FUXA", f"not connected to the PLC (status {value}): is the PLC running (D3)? Else FUXA editor "
-               "→ Settings → Plugins → install modbus-serial; then wait a few seconds")
+    all_down = not any(values.get(i) == 5 for i in ids)
+    for rt, tag in zip(RUNTIMES, ids):
+        name, value = f"D4 FUXA -> {rt.label} PLC", values.get(tag)
+        if value == 5:
+            report("PASS", name, "connected")
+            continue
+        hint = (" If D3 passes: FUXA editor → Settings → Plugins → install modbus-serial (a missing plugin "
+                "breaks every device)" if all_down else "")
+        report("FAIL", name, f"not connected (status {value}): is the {rt.label} PLC answering (D3)? "
+               f"FUXA reconnects by itself a few seconds after the PLC is back.{hint}")
     return True
 
 

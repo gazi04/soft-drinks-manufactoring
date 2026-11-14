@@ -85,6 +85,20 @@ def test_roller_turns_only_with_a_motor_tag():
     assert static["r2"]["property"]["actions"] == []
 
 
+def test_impeller_turns_only_with_a_motor_tag_and_is_centred():
+    svg, items = fs.impeller("i1", 100, 50, 16, "t_agitator")
+    acts = items["i1"]["property"]["actions"]
+    assert {(a["type"], a["range"]["min"], a["range"]["max"], a["variableId"]) for a in acts} == {
+        ("clockwise", 1, 1, "t_agitator"), ("stop", 0, 0, "t_agitator")}
+    assert svg.count(" Z") == 4  # four blades
+    # every blade tip lies on the circle r around the centre: FUXA turns around the bounding-box centre
+    import re
+    points = [(float(x), float(y)) for x, y in re.findall(r"L([-\d.]+),([-\d.]+)", svg)]
+    assert all(abs(((x - 100) ** 2 + (y - 50) ** 2) ** 0.5 - 16) < 0.1 for x, y in points)
+    _, static = fs.impeller("i2", 0, 0, 10, None)
+    assert static["i2"]["property"]["actions"] == []
+
+
 def test_alarm_enables_exactly_one_priority_active_at_1():
     a = fs.alarm("filler_X", "t_x", "high", "text", "Filler")
     on = [p for p in fs.PRIORITIES if a[p]["enabled"]]
@@ -121,3 +135,26 @@ def test_chart_line_binds_the_tag_by_id_and_holds_values():
     line = fs.chart_line("t_filler_State", "Filler PLC", "State", "#000000", yaxis=2)
     assert (line["id"], line["device"], line["label"], line["yaxis"]) == ("t_filler_State", "Filler PLC", "State", 2)
     assert line["lineInterpolation"] == fs.STEP_AFTER == 1
+
+
+def test_number_input_step_only_when_asked():
+    whole, _ = fs.number_input("in_a", "t", 0, 0, 80, 30, 1, 10)
+    decimal, _ = fs.number_input("in_b", "t", 0, 0, 80, 30, 0.2, 2, step="any")
+    assert "step=" not in whole  # unchanged markup for the filler's whole-number inputs
+    assert 'id="I-HXI_in_b" type="number" step="any"' in decimal
+
+
+@pytest.mark.parametrize("value,factor,raw", [(0.29, 100, 29), (0.57, 100, 57), (4.5, 10, 45), (3.5, 100, 350)])
+def test_scale_writes_rounded_fixed_point(value, factor, raw):
+    """fuxa_tags.scale: FUXA evaluates the expressions with `this` = the value (JavaScript). The
+    same arithmetic in Python: 0.29 * 100 is 28.999..., cut off it would be 28 (FUXA's divisor)."""
+    import math
+
+    import fuxa_tags as ft
+
+    s = ft.scale(factor)
+    assert s["scale"]["writeExpression"] == f"Math.round(this * {factor})"
+    assert s["scale"]["readExpression"] == f"this / {factor}"
+    assert s["format"] == len(str(factor)) - 1
+    assert math.floor(value * factor + 0.5) == raw  # Math.round
+    assert int(value * factor) in (raw, raw - 1)  # truncation is off by one for some values

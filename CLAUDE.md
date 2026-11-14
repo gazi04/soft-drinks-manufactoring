@@ -11,7 +11,7 @@ Read before proposing structure or code:
 - `docs/<machine>/progress.md` — per-machine checklist, decisions, open questions and log (`docs/filler/` complete, `docs/syrup/` in progress: paper and ladder (stages 0–7) done, simulator next). Check the current step there before starting work on a machine, and update it as steps complete.
 - `docs/simulator/roadmap.md` — staged build plan for the Python simulator (stages 0–9, test per stage); progress is ticked in `docs/filler/progress.md` section 2.
 - `docs/simulator/design-notes.md` — short answers to the simulator's non-obvious decisions (timing, windows, Modbus link); keep it updated when such a decision changes.
-- `docs/hmi/roadmap.md` — staged build plan for the FUXA HMI (stages 0–7, test per stage, open issues I1–I11); progress is ticked there and in `docs/filler/progress.md` section 3.
+- `docs/hmi/roadmap.md` — staged build plan for the FUXA HMI (filler stages 0–7, syrup room stages S0–S7, test per stage, issues I1–I16); progress is ticked there and in section 3 of `docs/filler/progress.md` / `docs/syrup/progress.md`.
 - `docs/scope-options.md` — scope decision (2026-11-09): option B, filler + syrup room committed; labeler, packer, blow moulder are stretch goals (report section 11).
 - `docs/project-context.md` — course requirements, syllabus topics the project must visibly demonstrate, tool-stack decisions and rejected alternatives.
 
@@ -27,7 +27,7 @@ docker compose logs -f openplc
 # keep everything. A container RE-CREATION (compose change, down/up, new image) keeps the program but resets /workdir/plugins.conf
 # (container layer): the program runs, the Modbus server is OFF, port drops every connection -> upload once more from the Editor.
 # A deliberate runtime update (new image digest) also needs `docker volume rm <project>_openplc-build` + upload.
-(cd simulator && uv run python tests/demo_check.py)  # before every demo: containers, per PLC program present + Modbus server enabled + answering, FUXA linked + current screens, simulator, mode/alarms (read only, prints the fix)
+(cd simulator && uv run python tests/demo_check.py)  # before every demo: containers, per PLC (filler + syrup room): program present + Modbus server enabled + answering, FUXA linked, simulator lock, mode/alarms; FUXA current screens (read only, prints the fix)
 
 # Simulator (uv project, Python 3.13, pymodbus)
 cd simulator
@@ -63,8 +63,8 @@ uv run simulator --headless --scenario index_jam  # one fault scenario by hand (
 # FUXA project, run from the repo root (editor http://localhost:1881/editor): export after every change; import replaces the whole project
 curl -s http://localhost:1881/api/project | python3 -m json.tool --sort-keys > docs/hmi/fuxa-project.json
 curl -X POST -H 'Content-Type: application/json' --data @docs/hmi/fuxa-project.json http://localhost:1881/api/project
-(cd simulator && uv run python tests/fuxa_tags.py)      # regenerate device + 44 tags (address_map.py; one `Machine` per PLC) + views Line (start)/Filler/Alarms/Trends/Tags with header + 4 alarm definitions + 3 trend charts (DAQ on 4 tags) + side menu (fuxa_views.py, fuxa_shapes.py) into the export (export first, import after)
-(cd simulator && uv run python tests/test_hmi_tags.py)  # FUXA: tags = address_map (H1) + header/Filler/Line/Alarms/Trends (H5-H9) offline (--offline); FUXA value = PLC value, write path, connected, DAQ history (H2-H4, H10)
+(cd simulator && uv run python tests/fuxa_tags.py)      # regenerate devices + tags (filler 44 from address_map.py, syrup room 48 from address_map_syrup.py; one `Machine` per PLC) + views Line (start)/Filler/Alarms/Trends/Tags/Syrup tags + Syrup room screen (+ its block on Line) + Line/Alarms/Trends once more for the syrup room, header for both machines (row 2 = the machine of the view); syrup °C / bar tags scaled in FUXA (expression scale, rounded on write) + 10 alarm definitions (filler 4, syrup room 6; one alarm list with a Machine column) + 7 trend charts (filler 3, syrup room 4; DAQ on 4 + 7 tags, syrup history in °C / bar) + side menu (fuxa_views.py, fuxa_shapes.py) into the export (export first, import after)
+(cd simulator && uv run python tests/test_hmi_tags.py)  # FUXA: tags = address maps of both PLCs (H1) + header/Filler/Line/Alarms/Trends (H5-H9) offline (--offline); FUXA value = PLC value, write path, connected, DAQ history (H2-H4, H10; H2-H4 + H10 also for the syrup PLC)
 ```
 
 The test scripts are plain Modbus scripts against the PLC in the runtime (not collected by pytest; `test_outputs.py` also holds the shared helpers the later filler scripts import). `run_filler.py` / `run_syrup.py` run one machine's scripts in order, each in its own process with stdin closed (interactive debugger steps skipped), and print a summary (shared code `tests/suite.py`); every script exits 0/1. Add a new test script to the `SCRIPTS` list of its machine. Release all debugger forces first. No linter or formatter is configured yet.

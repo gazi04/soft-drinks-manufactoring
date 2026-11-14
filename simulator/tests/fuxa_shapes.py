@@ -22,6 +22,8 @@ Ids are fixed strings so a second generator run gives the same file (screens and
 tests refer to them).
 """
 
+import math
+
 INT16_MIN, INT16_MAX = -32768, 32767
 FONT = 'font-family="sans-serif"'
 
@@ -96,13 +98,35 @@ def roller(element_id: str, cx: float, cy: float, r: float, motor_tag: str | Non
     d = (f"M{cx - r},{cy} a{r},{r} 0 1,0 {2 * r},0 a{r},{r} 0 1,0 {-2 * r},0 "
          f"M{cx - r},{cy} L{cx + r},{cy} M{cx},{cy - r} L{cx},{cy + r}")
     svg = f'<path id="{element_id}" d="{d}" fill="#9e9e9e" stroke="#3a3a3a" stroke-width="1.5"/>'
+    return svg, {element_id: spinning_path_item(element_id, motor_tag)}
+
+
+def spinning_path_item(element_id: str, motor_tag: str | None) -> dict:
+    """FUXA path item that turns while motor_tag is 1 (action clockwise) and stops at 0; static without a tag.
+    FUXA rotates the element around the centre of its bounding box, so the drawing must be symmetric
+    around its axis."""
     actions = []
     if motor_tag:
         actions = [{"variableId": motor_tag, "type": "clockwise", "range": {"min": 1, "max": 1}, "options": {}},
                    {"variableId": motor_tag, "type": "stop", "range": {"min": 0, "max": 0}, "options": {}}]
-    item = {"id": element_id, "type": "svg-ext-shapes-path", "name": element_id, "label": "Shapes",
+    return {"id": element_id, "type": "svg-ext-shapes-path", "name": element_id, "label": "Shapes",
             "property": {"events": [], "actions": actions}}
-    return svg, {element_id: item}
+
+
+def impeller(element_id: str, cx: float, cy: float, r: float, motor_tag: str | None, blades: int = 4) -> Shape:
+    """Agitator impeller seen from above: a hub and `blades` blades, each a triangle that leans the same
+    way (a symmetric cross would look the same at every angle, so the turning would hardly show).
+    The tips lie on the circle r, so the bounding box is centred on (cx, cy) and FUXA turns it in place."""
+    parts = []
+    for k in range(blades):
+        a = 2 * math.pi * k / blades
+        tip = (cx + r * math.cos(a), cy + r * math.sin(a))
+        back = (cx + r * math.cos(a + 0.6), cy + r * math.sin(a + 0.6))
+        parts.append(f"M{cx},{cy} L{tip[0]:.1f},{tip[1]:.1f} L{back[0]:.1f},{back[1]:.1f} Z")
+    h = r / 5  # hub
+    parts.append(f"M{cx - h},{cy} a{h},{h} 0 1,0 {2 * h},0 a{h},{h} 0 1,0 {-2 * h},0")
+    svg = f'<path id="{element_id}" d="{" ".join(parts)}" fill="#9e9e9e" stroke="#3a3a3a" stroke-width="1.5"/>'
+    return svg, {element_id: spinning_path_item(element_id, motor_tag)}
 
 
 def show_hide_actions(tag_id: str, lo: int, hi: int) -> list[dict]:
@@ -209,9 +233,12 @@ def progress(element_id: str, tag_id: str, x: float, y: float, w: float, h: floa
     return svg, {element_id: item}
 
 
-def number_input(element_id: str, tag_id: str, x: float, y: float, w: float, h: float, lo: int, hi: int) -> Shape:
+def number_input(element_id: str, tag_id: str, x: float, y: float, w: float, h: float, lo: float, hi: float,
+                 step: str | None = None) -> Shape:
     """Number field (FUXA html_input). FUXA writes the tag on Enter, only if lo <= value <= hi
     (otherwise it shows a message); while the field is not focused it shows the tag value.
+    step: the HTML step; "any" lets the browser accept decimals (a degC / bar setpoint), the
+    default (none) allows whole numbers only.
 
     FUXA finds the <INPUT> by the prefix "I-HXI_"; the group id gets "HXI_"."""
     element_id = element_id if element_id.startswith("HXI_") else f"HXI_{element_id}"
@@ -222,7 +249,8 @@ def number_input(element_id: str, tag_id: str, x: float, y: float, w: float, h: 
            f'<rect id="{element_id}_r" x="{x}" y="{y}" width="{w}" height="{h}" fill="#ffffff" stroke="#7a7a7a" '
            f'stroke-width="1"/>'
            f'<foreignObject id="H-{element_id}" x="{x}" y="{y}" width="{w}" height="{h}">'
-           f'<INPUT id="I-{element_id}" type="number" style="{style}"/></foreignObject></g>')
+           f'<INPUT id="I-{element_id}" type="number"{f' step="{step}"' if step else ''} style="{style}"/>'
+           f'</foreignObject></g>')
     item = {"id": element_id, "type": "svg-ext-html_input", "name": element_id, "label": "HtmlInput",
             "property": {"variableId": tag_id, "events": [], "actions": [], "ranges": [],
                          "options": {"type": "number", "numeric": True, "min": lo, "max": hi, "updated": True}}}

@@ -1,40 +1,60 @@
-"""FUXA stage 1: the FUXA tags of the filler PLC show the right PLC addresses.
+"""The FUXA project (docs/hmi/fuxa-project.json) matches the PLCs: tags, screens, alarms, trends.
 
     uv run python tests/test_hmi_tags.py --offline   # H1 only: the export file, no PLC, no FUXA
-    uv run python tests/test_hmi_tags.py             # H1-H10: FUXA and the PLC must be running
+    uv run python tests/test_hmi_tags.py             # H1-H10: FUXA and both PLCs must be running
 
 Checks:
-    H1 export: every address_map signal has exactly one tag in docs/hmi/fuxa-project.json,
+    H1 export (per device, filler + syrup room): every signal of its address map has exactly one tag,
        with FUXA address = Modbus number + 1, the right area and type (catches an edit in
-       the editor that moved a tag)
+       the editor that moved a tag); the degC / bar tags of the syrup room have FUXA's
+       expression scale (read this / f, write Math.round(this * f)), no other tag has a scale
     H2 read path: for every tag, the value FUXA reads (GET /api/getTagValue) equals the
-       value read directly from the PLC over Modbus
+       value read directly from the PLC over Modbus (a scaled tag: FUXA value x factor)
     H3 write path: FillSetpoint written THROUGH FUXA (POST /api/setTagValue) arrives in
        the PLC; the old value is written back afterwards
     H4 FUXA reports the PLC device as connected (connection status tag = 5)
-    H5 header (export, stage 2): on every generated view; Start/Stop/Reset write Cmd 1/2/3,
-       Auto/Manual/Stop write ModeReq 1/2/0; one show-text per state, step and mode value;
-       a chip per alarm bit; the navigation buttons open existing views; every button has
-       at most one event per kind (several writes per click dropped FUXA's PLC link)
+    H2 + H4 also run for the syrup room PLC (port 5022), and H3 there writes PressHyst 0.29 bar
+       through FUXA: the PLC must get 29 (rounded, not cut off to 28), then the old value
+    H5 header (export, stages 2 and S2), on every generated view:
+       row 1 = both machines: a chip per machine on its State that opens its screen, with one
+       show-text per state, step and mode value; the E-stop chip on both PLCs (drawing order:
+       OK texts, red covers, PRESSED texts); a link chip per PLC; Line/Alarms/Trends open the
+       view of the same machine. Row 2 = the machine of the view (fv.CONTEXT): Start/Stop/Reset
+       write its Cmd 1/2/3, Auto/Manual/Stop its ModeReq 1/2/0, a chip per alarm bit; on shared
+       views the picker opens the same view for the other machine. Every button has at most one
+       event per kind (several writes per click dropped FUXA's PLC link). Layout: header boxes
+       inside 1280 x 96, none overlapping in a row
     H6 Filler screen (export, stage 3): a hold-to-run button per Man_* (1 on press, 0 on
        release and on mouseout, visible only in Manual); setpoint inputs with the right
        tag and min < max; a lamp per sensor/output; pocket + state words per Anim_* tag;
        fill level and setpoint bars
-    H7 Line overview (export, stage 4): 8 slot shapes per conveyor, each bound to its own bit
+    H7 Line overview (export, stage 4; both Line views): 8 slot shapes per conveyor, each bound to its own bit
        (bitmask 1, 2, 4 ... 128) of Anim_C1 / Anim_C2; C1 and index rollers turn with
        ConveyorMotor1 / IndexMotor, C2 rollers static; the filler block opens the Filler view;
-       product pipe on Product_Available
-    H8 Alarms (export, stage 5): one FUXA alarm per PLC alarm bit with exactly one priority
-       enabled, active at value 1, checked (checkdelay > 0), ackmode ackactive; the Alarms view
-       has an active-alarms table with an Ack column and a Reset button (Cmd = 3); every alarm
-       chip opens the Alarms view; the side menu opens FUXA's alarm panel (history)
-    H9 Trends (export, stage 6): FUXA's DAQ (history) is on for exactly the trend tags (every
-       change); every chart line is bound to an existing tag of the device, stepAfter; the
-       Trends view has one realtime chart widget per chart (loading the history when it
-       opens), and the header and side menu open it
+       S4: the syrup room block on the syrup State (one colour per state) opens the Syrup room
+       view, its state / step texts and buffer level (syrup BufferLevel) let clicks through; the
+       product pipe and "no product" on the syrup PLC's Product_Available (the source), the
+       "filler input" lamp on the filler's; syrup block above the pipe above the filler block
+    H8 Alarms (export, stages 5 and S5): one FUXA alarm per PLC alarm bit of EVERY machine
+       (names <machine>_<bit>, unique) with exactly one priority enabled (the one of
+       fv.ALARM_TEXTS), group = the machine's title, active at value 1, checked (checkdelay > 0),
+       ackmode ackactive; each Alarms view has one unfiltered active-alarms table (the whole
+       line) with Ack and Machine (group) columns and a Reset button (Cmd = 3 of the machine of
+       that Alarms view); every alarm chip opens its machine's Alarms view; the side menu opens FUXA's alarm panel (history)
+    H9 Trends (export, stages 6 and S6), per machine: FUXA's DAQ (history) is on for exactly its
+       trend tags (every change); every line of its charts is bound to an existing, logged tag of
+       its device, stepAfter; its Trends view has one realtime chart widget per chart of that
+       machine (loading the history when it opens); the side menu opens Trends
+    H11 Syrup room screen (export, S3): a hold-to-run button per syrup Man_* (visible only in
+       the syrup room's Manual mode), the 10 recipe inputs with the screen's limits (decimal step
+       for degC / bar), a lamp per output and signal, 3 tank bars on the level tags with the tank
+       sizes, the values, a step text per step, every pipe on its output; the note under the buffer
+       tank names the simulator's buffer draw factor with the numbers of simulator.config; the
+       agitator impeller in the mixing tank turns with the Agitator output
     H10 DAQ (live, stage 6): FUXA's history (GET /api/daq) has values of every trend tag from
        the last 10 min (also when idle: one value a minute at least), and no stored fill level
-       is above the fill setpoint + 20 ml
+       is above the fill setpoint + 20 ml. Syrup room: every syrup trend tag has points too, and
+       the stored setpoints are in degC / bar (CoolSetpoint <= 10, PressSetpoint <= 5), not raw INTs
 
 Run H2 with the simulator idle (no bottles moving), so the values do not change between
 the two reads; each tag still gets 3 tries. H3 writes only FillSetpoint (FUXA owns it);
@@ -42,6 +62,7 @@ Cmd and Man_* are never written here, they would start or move the machine.
 """
 
 import json
+import re
 import sys
 import time
 import urllib.error
@@ -52,11 +73,13 @@ from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from simulator import address_map as am
+from simulator import address_map_syrup as sm
 from simulator import config
 
 import fuxa_tags as ft
+from fuxa_shapes import esc as fs_esc
 import fuxa_views as fv
-from simulator.plcs import ALARM_NAMES, MODE_NAMES, STATE_NAMES, STEP_NAMES
+from simulator.plcs import STATE_NAMES, SYRUP_STEP_NAMES
 
 CONNECTED = 5  # FUXA 1.3.5 runtime/devices/device.js ConnectionStatusEnum.ON
 
@@ -88,11 +111,29 @@ def expected_addresses() -> set[tuple[str, int]]:
     return wanted
 
 
-def h1_export() -> bool:
+SYRUP_NOT_SIGNALS = {"OUTPUTS_START", "OUTPUTS_COUNT", "SENSOR_BLOCK_START", "ANALOG_START", "ANALOG_COUNT",
+                     "STATUS_START", "STATUS_COUNT", "ALARMS_START", "ALARMS_COUNT", "SETPOINTS_START",
+                     "SETPOINTS_COUNT", "UNUSED_MX1_0"}
+
+
+def expected_syrup_addresses() -> set[tuple[str, int]]:
+    """Every signal address in address_map_syrup. The area follows from the number: holding registers
+    are 1024-2047 (%MW), everything else is a coil (%QX from 0, %MX from 8192)."""
+    names = [n for n in dir(sm) if n.isupper() and isinstance(getattr(sm, n), int) and n not in SYRUP_NOT_SIGNALS]
+    return {(ft.HOLDING if 1024 <= getattr(sm, n) < 2048 else ft.COIL, getattr(sm, n)) for n in names}
+
+
+def h1_export() -> list[bool]:
+    return [h1_machine(ft.FILLER, expected_addresses(), fv.TAGS_ID),
+            h1_machine(ft.SYRUP, expected_syrup_addresses(), fv.SYRUP_TAGS_ID)]
+
+
+def h1_machine(m: ft.Machine, expected: set[tuple[str, int]], page_id: str) -> bool:
+    name_ = f"H1 export {m.key}"
     project = json.loads(ft.EXPORT.read_text())
-    dev = project["devices"].get(ft.DEVICE_ID)
+    dev = project["devices"].get(m.device_id)
     if dev is None:
-        return check("H1 export", False, f"no device {ft.DEVICE_ID} in {ft.EXPORT.name}")
+        return check(name_, False, f"no device {m.device_id} in {ft.EXPORT.name}")
     tags = list(dev["tags"].values())
     problems = []
     names = [t["name"] for t in tags]
@@ -104,36 +145,89 @@ def h1_export() -> bool:
         if key in have:
             problems.append(f"{t['name']} and {have[key]} on the same address")
         have[key] = t["name"]
-    for name, area, number, kind, _ in ft.TAGS:
-        t = dev["tags"].get(ft.tag_id(name))
+    for name, area, number, kind, _ in m.tags:
+        t = dev["tags"].get(m.tag_id(name))
         if t is None:
             problems.append(f"{name} missing")
         elif (t["memaddress"], t["address"], t["type"]) != (area, ft.fuxa_address(number), kind):
             problems.append(f"{name} is {t['memaddress']}/{t['address']}/{t['type']}, "
                             f"expected {area}/{ft.fuxa_address(number)}/{kind}")
-    missing = expected_addresses() - set(have)
+        elif m.factor(name) != 1 and (t.get("scale"), t.get("format")) != tuple(ft.scale(m.factor(name)).values()):
+            problems.append(f"{name}: scale {t.get('scale')} / format {t.get('format')}, expected / {m.factor(name)}")
+        elif m.factor(name) == 1 and (t.get("scale") or t.get("format")):
+            problems.append(f"{name} is scaled but should show the PLC value")
+    missing = expected - set(have)
     if missing:
-        problems.append(f"address_map signals without a tag: {sorted(missing)}")
-    status = project["devices"]["0"].get("tags", {}).get(ft.STATUS_TAG_ID)
-    if not status or status.get("memaddress") != ft.DEVICE_ID:
+        problems.append(f"address map signals without a tag: {sorted(missing)}")
+    status = project["devices"]["0"].get("tags", {}).get(m.status_tag_id)
+    if not status or status.get("memaddress") != m.device_id:
         problems.append("connection status tag missing")
     # test page: one Value shape per tag, present in the SVG and bound to that tag
-    page = next((v for v in project["hmi"]["views"] if v["id"] == fv.TAGS_ID), None)
+    page = next((v for v in project["hmi"]["views"] if v["id"] == page_id), None)
     if page is None:
-        problems.append("view Tags missing")
+        problems.append(f"view {page_id} missing")
     else:
-        for name, *_ in ft.TAGS:
-            item = page["items"].get(fv.value_id(name))
-            if item is None or item["property"].get("variableId") != ft.tag_id(name):
-                problems.append(f"Tags page: {name} not bound")
-            elif f'id="{fv.value_id(name)}"' not in page["svgcontent"]:
-                problems.append(f"Tags page: {name} not drawn")
-    return check("H1 export", not problems,
+        for name, *_ in m.tags:
+            item = page["items"].get(fv.value_id(name, m))
+            if item is None or item["property"].get("variableId") != m.tag_id(name):
+                problems.append(f"tags page: {name} not bound")
+            elif f'id="{fv.value_id(name, m)}"' not in page["svgcontent"]:
+                problems.append(f"tags page: {name} not drawn")
+    return check(name_, not problems,
                  f"{len(tags)} tags, polling {dev['polling']} ms, {dev['property']['address']}"
                  + (f"; {problems[:4]}" if problems else ""))
 
 
+def prop(items: dict, item_id: str) -> dict:
+    return items.get(item_id, {}).get("property", {})
+
+
+def goes_to(items: dict, item_id: str) -> str | None:
+    """The view a click on the item opens (None: no onpage event)."""
+    ev = [e for e in prop(items, item_id).get("events", []) if e.get("action") == "onpage"]
+    return ev[0]["actparam"] if ev else None
+
+
+def shows_at(items: dict, item_id: str, tag: str, number: int) -> bool:
+    """A text shown exactly while `tag` == number."""
+    shows = [a for a in prop(items, item_id).get("actions", []) if a["type"] == "show"]
+    return bool(shows) and shows[0]["variableId"] == tag and shows[0]["range"] == {"min": number, "max": number}
+
+
+BOX_ATTR = re.compile(r'(?<![\w-])(x|y|width|height)="([-\d.]+)"')  # not rx= / stroke-width=
+
+
+def header_boxes(svg: str, key: str) -> dict[str, tuple[float, float, float, float]]:
+    """id -> (x, y, w, h) of every header rectangle of one view (chips; a button's rect is <id>_r)."""
+    boxes = {}
+    for tag in re.findall(r"<rect [^>]*>", svg):
+        ident = re.search(r'id="([^"]+)"', tag)
+        if ident and (ident[1].startswith(f"hdr_{key}_") or ident[1].startswith(f"HXB_hdr_{key}_")):
+            a = {k: float(v) for k, v in BOX_ATTR.findall(tag)}
+            boxes[ident[1]] = (a["x"], a["y"], a["width"], a["height"])
+    return boxes
+
+
+def layout_problems(svg: str, key: str) -> list[str]:
+    """Header boxes inside 1280 x 96 and no two of the same row overlapping (the E-stop overlay
+    lies on the E-stop chip on purpose)."""
+    boxes, problems = header_boxes(svg, key), []
+    covers = [f"hdr_{key}_estop"] + [f"hdr_{key}_estop_{ui.m.key}" for ui in fv.UIS]
+    allowed = {frozenset((a, b)) for a in covers for b in covers if a != b}  # E-stop chip + its red covers
+    for ident, (x, y, w, h) in boxes.items():
+        if x < 0 or y < 0 or x + w > fv.W or y + h > fv.HEADER_H:
+            problems.append(f"{ident} outside the header")
+    names = sorted(boxes)
+    for i, a in enumerate(names):
+        for b in names[i + 1:]:
+            (ax, ay, aw, ah), (bx, by, bw, bh) = boxes[a], boxes[b]
+            if ax < bx + bw and bx < ax + aw and ay < by + bh and by < ay + ah and frozenset((a, b)) not in allowed:
+                problems.append(f"{a} overlaps {b}")
+    return problems
+
+
 def h5_header() -> bool:
+    """Every generated view: row 1 shows both machines, row 2 the machine of that view (fv.CONTEXT)."""
     project = json.loads(ft.EXPORT.read_text())
     views = {v["id"]: v for v in project["hmi"]["views"]}
     problems = []
@@ -142,20 +236,62 @@ def h5_header() -> bool:
         if v is None:
             problems.append(f"view {view_id} missing")
             continue
-        items = v["items"]
+        items, svg, name = v["items"], v["svgcontent"], v["name"]
         key = fv.HEADER_KEY[view_id]
+        ui = fv.CONTEXT[view_id]
         p = f"HXB_hdr_{key}"
 
         def writes(button_id: str) -> tuple | None:
-            ev = items.get(button_id, {}).get("property", {}).get("events", [])
+            ev = prop(items, button_id).get("events", [])
             return (ev[0]["actoptions"].get("variableId"), int(ev[0]["actparam"])) if ev else None
 
+        # Row 2: commands and mode go to the machine of this view
         for label, number in fv.CMD_BUTTONS:
-            if writes(f"{p}_cmd_{label.lower()}") != (ft.tag_id("Cmd"), number):
-                problems.append(f"{v['name']}: {label} does not write Cmd={number}")
+            if writes(f"{p}_cmd_{label.lower()}") != (ui.m.tag_id("Cmd"), number):
+                problems.append(f"{name}: {label} does not write {ui.m.key} Cmd={number}")
         for label, number in fv.MODE_BUTTONS:
-            if writes(f"{p}_mode_{label.lower()}") != (ft.tag_id("ModeReq"), number):
-                problems.append(f"{v['name']}: mode {label} does not write ModeReq={number}")
+            if writes(f"{p}_mode_{label.lower()}") != (ui.m.tag_id("ModeReq"), number):
+                problems.append(f"{name}: mode {label} does not write {ui.m.key} ModeReq={number}")
+        for bit in ui.alarms:
+            if prop(items, f"hdr_{key}_{bit}").get("variableId") != ui.m.tag_id(bit):
+                problems.append(f"{name}: no chip for {ui.m.key} {bit}")
+        # Row 2: picker on the shared views (opens the same kind of view for the other machine)
+        kind = fv.KIND.get(view_id)
+        if kind is None:
+            if f'id="hdr_{key}_machine"' not in svg:
+                problems.append(f"{name}: no machine label in row 2")
+        for other in fv.UIS if kind else ():
+            target = goes_to(items, f"{p}_pick_{other.m.key}")
+            if other is ui and (f"{p}_pick_{other.m.key}" not in items or target is not None):
+                problems.append(f"{name}: picker {other.m.key} should be the current machine")
+            elif other is not ui and (target not in views or fv.KIND.get(target) != kind
+                                      or fv.CONTEXT[target] is not other):
+                problems.append(f"{name}: picker {other.m.key} opens {target}")
+        # Row 1: both machines, E-stop of both PLCs, both PLC links, navigation
+        for chip in fv.UIS:
+            k = f"hdr_{key}_{chip.m.key}"
+            if prop(items, f"{k}_chip").get("variableId") != chip.m.tag_id("State") \
+                    or goes_to(items, f"{k}_chip") != chip.detail:
+                problems.append(f"{name}: {chip.m.key} chip not on State / not opening {chip.detail}")
+            for prefix, names, tag in (("state", STATE_NAMES, "State"), ("step", chip.steps, "Step"),
+                                       ("mode", fv.MODE_WORDS, "ModeReq")):
+                for number in names:
+                    if not shows_at(items, f"{k}_{prefix}_{number}", chip.m.tag_id(tag), number):
+                        problems.append(f"{name}: {chip.m.key} has no {prefix} text for {number}")
+            if prop(items, f"{k}_link").get("variableId") != chip.m.status_tag_id:
+                problems.append(f"{name}: no link chip for {chip.m.key}")
+        for chip in fv.UIS:  # E-stop: per PLC a red cover, an OK text and a PRESSED text (fv.estop_chip)
+            e, k = chip.m.tag_id("E_Stop_OK"), f"hdr_{key}_estop_{chip.m.key}"
+            if prop(items, k).get("variableId") != e or not shows_at(items, f"{k}_ok", e, 1) \
+                    or not shows_at(items, f"{k}_on", e, 0):
+                problems.append(f"{name}: E-stop chip not complete for {chip.m.key}")
+        order = [svg.find(f'id="hdr_{key}_estop_{c.m.key}{s}"') for s in ("_ok", "", "_on") for c in fv.UIS]
+        if -1 in order or order != sorted(order):
+            problems.append(f"{name}: E-stop drawing order wrong (OK texts, red covers, PRESSED texts)")
+        for nav_kind, label in fv.NAV_BUTTONS:
+            target = goes_to(items, f"{p}_nav_{nav_kind}")
+            if target not in views or fv.KIND.get(target) != nav_kind or fv.CONTEXT[target] is not ui:
+                problems.append(f"{name}: nav {label} opens {target}")
         # FUXA sends all events of one click at once; several writes per click dropped the
         # PLC link (stage 3). Every header button must do exactly one thing.
         many = []
@@ -164,23 +300,11 @@ def h5_header() -> bool:
             if len(kinds) != len(set(kinds)):
                 many.append(i["name"])
         if many:
-            problems.append(f"{v['name']}: shapes with two events of the same kind {many[:3]}")
-        for prefix, names in (("state_name", STATE_NAMES), ("step_name", STEP_NAMES), ("mode_name", MODE_NAMES)):
-            for number in names:
-                item = items.get(f"hdr_{key}_{prefix}_{number}")
-                shows = [a for a in (item or {}).get("property", {}).get("actions", []) if a["type"] == "show"]
-                if not shows or shows[0]["range"] != {"min": number, "max": number}:
-                    problems.append(f"{v['name']}: no {prefix} text for {number}")
-        for name in ALARM_NAMES:
-            if items.get(f"hdr_{key}_{name}", {}).get("property", {}).get("variableId") != ft.tag_id(name):
-                problems.append(f"{v['name']}: no chip for {name}")
-        for target, name in fv.NAV:
-            ev = items.get(f"{p}_nav_{name.lower()}", {}).get("property", {}).get("events", [])
-            if not ev or ev[0]["actparam"] not in views:
-                problems.append(f"{v['name']}: nav {name} broken")
-        missing = [i for i in items if f'id="{i}"' not in v["svgcontent"]]
+            problems.append(f"{name}: shapes with two events of the same kind {many[:3]}")
+        missing = [i for i in items if f'id="{i}"' not in svg]
         if missing:
-            problems.append(f"{v['name']}: items without SVG element {missing[:3]}")
+            problems.append(f"{name}: items without SVG element {missing[:3]}")
+        problems += [f"{name}: {x}" for x in layout_problems(svg, key)]
     return check("H5 header", not problems, f"{len(fv.GENERATED)} views, start {project['hmi']['layout'].get('start')}"
                  + (f"; {problems[:4]}" if problems else ""))
 
@@ -230,11 +354,87 @@ def h6_filler() -> bool:
     return check("H6 Filler screen", not problems, f"{len(items)} items" + (f"; {problems[:4]}" if problems else ""))
 
 
-def h7_line() -> bool:
+SYRUP_LAMPS = ("WaterPump", "SyrupPump", "TransferPump", "Product_Available", "MixHighHigh", "Agitator",
+               "CoolingValve", "CO2Valve", "Temp_OK", "CO2_Demand", "Batch_Dosed")
+SYRUP_TANKS = (("GXP_tank_syrup", "SyrupLevel", config.SYRUP_TANK_L), ("GXP_tank_mix", "MixLevel", config.MIX_TANK_L),
+               ("GXP_tank_buffer", "BufferLevel", config.BUFFER_TANK_L))
+
+
+def h11_syrup() -> bool:
+    """The syrup room screen (S3): same rules as the Filler screen, on the syrup PLC's tags."""
     project = json.loads(ft.EXPORT.read_text())
-    view = next((v for v in project["hmi"]["views"] if v["id"] == fv.LINE_ID), None)
+    view = next((v for v in project["hmi"]["views"] if v["id"] == fv.SYRUP_MAIN_ID), None)
     if view is None:
-        return check("H7 Line overview", False, "view missing")
+        return check("H11 Syrup screen", False, "view missing")
+    items, svg, problems = view["items"], view["svgcontent"], []
+    S, mode = ft.SYRUP.tag_id, ft.SYRUP.tag_id("ModeReq")
+    # the agitator impeller turns with the syrup Agitator output (clockwise at 1, stop at 0) and nothing else
+    acts = prop(items, "agitator_impeller").get("actions", [])
+    if {(a["type"], a["range"]["min"], a["variableId"]) for a in acts} != {("clockwise", 1, S("Agitator")),
+                                                                           ("stop", 0, S("Agitator"))}:
+        problems.append("agitator impeller does not turn with the syrup Agitator output")
+    # the simulator's buffer draw factor is on the screen, with the numbers of the current config
+    for k, line in enumerate(fv.buffer_scale_note()):
+        if not re.search(rf'<text id="note_buffer_scale{k}"[^>]*>{re.escape(fs_esc(line))}</text>', svg):
+            problems.append(f"buffer scale note line {k} missing or outdated")
+    if f"{config.BUFFER_DRAW_SCALE:g}" not in fv.buffer_scale_note()[1]:
+        problems.append("buffer scale note does not name the factor")
+    for label, tag in fv.SYRUP_MANUAL_BUTTONS:  # hold to run, on the SYRUP tag, only in its Manual mode
+        item = prop(items, f"HXB_syrup_{tag}")
+        ev = {(e["type"], e["actparam"], e["actoptions"]["variableId"]) for e in item.get("events", [])}
+        want = {(k, n, S(tag)) for k, n in (("mousedown", "1"), ("mouseup", "0"), ("mouseout", "0"))}
+        shows = [a for a in item.get("actions", []) if a["type"] == "show" and a["variableId"] == mode]
+        if ev != want or not shows or shows[0]["range"] != {"min": fv.MANUAL, "max": fv.MANUAL}:
+            problems.append(f"manual {label} wrong")
+    for _label, tag, _unit, lo, hi in fv.SYRUP_SETPOINTS:  # recipe inputs with the screen's limits
+        p = prop(items, f"HXI_in_{tag}")
+        opts = p.get("options", {})
+        if p.get("variableId") != S(tag) or not lo < hi or (opts.get("min"), opts.get("max")) != (lo, hi):
+            problems.append(f"setpoint {tag} wrong")
+        decimal = ft.SYRUP.factor(tag) != 1  # degC / bar: the browser must accept decimals
+        if (f'id="I-HXI_in_{tag}" type="number" step="any"' in svg) != decimal:
+            problems.append(f"setpoint {tag}: step attribute")
+    for tag in SYRUP_LAMPS:
+        if prop(items, f"lamp_{tag}").get("variableId") != S(tag):
+            problems.append(f"no lamp {tag}")
+    for bar, tag, capacity in SYRUP_TANKS:
+        p = prop(items, bar)
+        if p.get("variableId") != S(tag) or (p.get("ranges") or [{}])[0].get("max") != capacity:
+            problems.append(f"tank bar {tag} wrong")
+    for tag in ("ProductTemp", "CO2Pressure", "BatchCount", "SyrupTarget", "DoseTarget"):
+        if prop(items, f"val_{tag}").get("variableId") != S(tag):
+            problems.append(f"no value {tag}")
+    for pipe_id, tag, *_ in fv.SYRUP_PIPES:
+        if prop(items, pipe_id).get("variableId") != S(tag):
+            problems.append(f"pipe {pipe_id} not on {tag}")
+    for number in SYRUP_STEP_NAMES:
+        if not shows_at(items, f"syrup_step_{number}", S("Step"), number):
+            problems.append(f"no step text {number}")
+    if not shows_at(items, "syrup_manual_blocked", S("Jog_Block"), 1):
+        problems.append("no 'manual blocked' text on Jog_Block")
+    missing = [i for i in items if f'id="{i}"' not in svg]
+    if missing:
+        problems.append(f"items without SVG element {missing[:3]}")
+    return check("H11 Syrup screen", not problems, f"{len(items)} items" + (f"; {problems[:4]}" if problems else ""))
+
+
+def h7_line() -> bool:
+    """Both Line views (filler and syrup room in header row 2) have the same body."""
+    project = json.loads(ft.EXPORT.read_text())
+    problems, counts = [], []
+    for view_id in (fv.LINE_ID, fv.SYRUP_LINE_ID):
+        view = next((v for v in project["hmi"]["views"] if v["id"] == view_id), None)
+        if view is None:
+            problems.append(f"view {view_id} missing")
+            continue
+        counts.append(len(view["items"]))
+        problems += [f"{view['name']}: {x}" for x in h7_body(view)]
+    if project["hmi"]["layout"].get("start") != fv.LINE_ID:
+        problems.append("start page is not Line")
+    return check("H7 Line overview", not problems, f"items {counts}" + (f"; {problems[:4]}" if problems else ""))
+
+
+def h7_body(view: dict) -> list[str]:
     items, problems = view["items"], []
     for key, anim in (("c1", "Anim_C1"), ("c2", "Anim_C2")):
         for i in range(8):
@@ -259,48 +459,105 @@ def h7_line() -> bool:
     ev = items.get("filler_block", {}).get("property", {}).get("events", [])
     if not ev or ev[0]["action"] != "onpage" or ev[0]["actparam"] != fv.MAIN_ID:
         problems.append("filler block does not open the Filler view")
-    if items.get("product_pipe", {}).get("property", {}).get("variableId") != ft.tag_id("Product_Available"):
-        problems.append("product pipe")
-    if project["hmi"]["layout"].get("start") != fv.LINE_ID:
-        problems.append("start page is not Line")
+    problems += h7_syrup(view)
     missing = [i for i in items if f'id="{i}"' not in view["svgcontent"]]
     if missing:
         problems.append(f"items without SVG element {missing[:3]}")
-    return check("H7 Line overview", not problems, f"{len(items)} items" + (f"; {problems[:4]}" if problems else ""))
+    return problems
+
+
+def h7_syrup(view: dict) -> list[str]:
+    """S4: the syrup room block (State colour, click -> its screen, state / step / buffer drawn
+    click-through on top), the product pipe from the syrup PLC's output, the filler's input lamp."""
+    items, svg, problems = view["items"], view["svgcontent"], []
+    S = ft.SYRUP.tag_id
+    block = prop(items, "syrup_block")
+    colours = {(r["min"], r["max"]) for r in block.get("ranges", [])}
+    if block.get("variableId") != S("State") or colours != {(v, v) for v in fv.STATE_COLOURS}:
+        problems.append("syrup block not coloured by the syrup State")
+    if goes_to(items, "syrup_block") != fv.SYRUP_MAIN_ID:
+        problems.append("syrup block does not open the Syrup room view")
+    on_top = []
+    for prefix, tag, names in (("syrup_state", "State", STATE_NAMES), ("syrup_step_line", "Step", SYRUP_STEP_NAMES)):
+        bad = [n for n in names if not shows_at(items, f"{prefix}_{n}", S(tag), n)]
+        if bad:
+            problems.append(f"syrup {tag} texts {bad[:3]}")
+        on_top += [f"{prefix}_{n}" for n in names]
+    if prop(items, "line_buffer").get("variableId") != S("BufferLevel"):
+        problems.append("buffer value not on the syrup BufferLevel")
+    on_top.append("line_buffer")
+    for element_id in on_top:  # drawn over the block: must let the click through to it
+        element = re.search(rf'<\w+ [^>]*id="{element_id}"[^>]*>', svg)
+        if element is None or 'pointer-events="none"' not in element.group(0):
+            problems.append(f"{element_id} catches the block's click")
+            break
+    for item_id in ("product_pipe", "no_product"):
+        p = prop(items, item_id)
+        tags = {p.get("variableId")} | {a["variableId"] for a in p.get("actions", [])}
+        if tags - {None} != {S("Product_Available")}:
+            problems.append(f"{item_id} not on the syrup PLC's Product_Available")
+    if prop(items, "lamp_Product_Available").get("variableId") != ft.tag_id("Product_Available"):
+        problems.append("filler input lamp not on the filler's Product_Available")
+    # geometry: header < syrup block < pipe < filler block
+    def box(element_id: str) -> tuple[float, float] | None:
+        element = re.search(rf'<rect [^>]*id="{element_id}"[^>]*>', svg)
+        if element is None:
+            return None
+        attrs = dict(BOX_ATTR.findall(element.group(0)))
+        return float(attrs["y"]), float(attrs["y"]) + float(attrs["height"])
+    syrup, pipe, filler = box("syrup_block"), box("product_pipe"), box("filler_block")
+    if None in (syrup, pipe, filler) or not (fv.HEADER_H <= syrup[0] and syrup[1] <= pipe[0] and pipe[1] <= filler[0]):
+        problems.append(f"layout syrup {syrup} pipe {pipe} filler {filler}")
+    return problems
 
 
 def h8_alarms() -> bool:
     project = json.loads(ft.EXPORT.read_text())
     problems = []
-    defs = {a["name"]: a for a in project.get("alarms", [])}
-    for bit in ALARM_NAMES:
-        a = defs.get(fv.alarm_name(bit))
-        if a is None or a["property"].get("variableId") != ft.tag_id(bit):
-            problems.append(f"no alarm for {bit}")
+    alarms = project.get("alarms", [])
+    defs = {a["name"]: a for a in alarms}
+    if len(defs) != len(alarms):
+        problems.append("two alarm definitions with the same name")
+    for ui in fv.UIS:  # every machine: one definition per alarm bit, group = the machine (column Machine)
+        texts = fv.ALARM_TEXTS.get(ui.m.key, {})
+        if set(texts) != set(ui.alarms):
+            problems.append(f"{ui.title}: alarm texts {sorted(texts)} != alarm bits {sorted(ui.alarms)}")
+        for bit in ui.alarms:
+            a = defs.get(fv.alarm_name(bit, ui.m))
+            if a is None or a["property"].get("variableId") != ui.m.tag_id(bit):
+                problems.append(f"no {ui.title} alarm for {bit}")
+                continue
+            on = [p for p in ("highhigh", "high", "low", "info") if a[p]["enabled"]]
+            lvl = a[on[0]] if len(on) == 1 else {}
+            if (len(on) != 1 or (lvl["min"], lvl["max"]) != (1, 1) or lvl["checkdelay"] <= 0
+                    or lvl["ackmode"] != "ackactive"):
+                problems.append(f"{ui.title} {bit}: levels {on}")
+            elif on[0] != texts.get(bit, ("",))[0] or lvl["group"] != ui.title or not lvl["text"]:
+                problems.append(f"{ui.title} {bit}: priority {on[0]} / group {lvl['group']!r}")
+    for view_id in (fv.ALARMS_ID, fv.SYRUP_ALARMS_ID):  # one Alarms view per machine (header row 2)
+        view = next((v for v in project["hmi"]["views"] if v["id"] == view_id), None)
+        if view is None:
+            problems.append(f"view {view_id} missing")
             continue
-        on = [p for p in ("highhigh", "high", "low", "info") if a[p]["enabled"]]
-        lvl = a[on[0]] if len(on) == 1 else {}
-        if len(on) != 1 or (lvl["min"], lvl["max"]) != (1, 1) or lvl["checkdelay"] <= 0 or lvl["ackmode"] != "ackactive":
-            problems.append(f"{bit}: levels {on}")
-    view = next((v for v in project["hmi"]["views"] if v["id"] == fv.ALARMS_ID), None)
-    if view is None:
-        problems.append("Alarms view missing")
-    else:
         tables = [i for i in view["items"].values() if i["type"] == "svg-ext-own_ctrl-table"]
         active = [i for i in tables if i["property"]["type"] == "alarms"]
-        if len(active) != 1 or "ack" not in {c["id"] for c in active[0]["property"]["options"]["alarmsColumns"]}:
-            problems.append("no active alarms table with Ack column")
+        options = active[0]["property"]["options"] if len(active) == 1 else {}
+        if not {"ack", "group"} <= {c["id"] for c in options.get("alarmsColumns", [])}:
+            problems.append(f"{view['name']}: no active alarms table with Ack and Machine columns")
+        elif any(options.get("alarmFilter", {}).values()):  # one list for the whole line (report 8.1)
+            problems.append(f"{view['name']}: alarm table filtered {options['alarmFilter']}")
+        cmd = fv.CONTEXT[view_id].m.tag_id("Cmd")
         ev = view["items"].get("HXB_alarms_reset", {}).get("property", {}).get("events", [])
-        if not ev or (ev[0]["actoptions"].get("variableId"), ev[0]["actparam"]) != (ft.tag_id("Cmd"), "3"):
-            problems.append("Reset button does not write Cmd = 3")
+        if not ev or (ev[0]["actoptions"].get("variableId"), ev[0]["actparam"]) != (cmd, "3"):
+            problems.append(f"{view['name']}: Reset button does not write {cmd} = 3")
     for v in project["hmi"]["views"]:
         if v["id"] not in fv.GENERATED:
             continue
-        key = fv.HEADER_KEY[v["id"]]
-        for bit in ALARM_NAMES:
+        key, ui = fv.HEADER_KEY[v["id"]], fv.CONTEXT[v["id"]]
+        for bit in ui.alarms:  # the chips of the machine in row 2 open that machine's Alarms view
             ev = v["items"].get(f"hdr_{key}_{bit}", {}).get("property", {}).get("events", [])
-            if not ev or ev[0]["actparam"] != fv.ALARMS_ID:
-                problems.append(f"{v['name']}: chip {bit} does not open Alarms")
+            if not ev or ev[0]["actparam"] != fv.shared_view("alarms", ui):
+                problems.append(f"{v['name']}: chip {bit} does not open its Alarms view")
     menu = project["hmi"]["layout"].get("navigation", {}).get("items", [])
     if fv.ALARM_PANEL not in {m.get("view") for m in menu}:
         problems.append("side menu has no alarm panel entry")
@@ -309,33 +566,41 @@ def h8_alarms() -> bool:
 
 
 def h9_trends() -> bool:
+    """Per machine: DAQ on exactly its trend tags, its charts bound to its device, its Trends view."""
     project = json.loads(ft.EXPORT.read_text())
-    problems = []
-    tags = project["devices"][ft.DEVICE_ID]["tags"]
-    logged = {t["name"] for t in tags.values() if t["daq"]["enabled"]}
-    if logged != set(ft.TREND_TAGS):
-        problems.append(f"DAQ on for {sorted(logged)}, expected {sorted(ft.TREND_TAGS)}")
-    if not all(tags[ft.tag_id(n)]["daq"]["changed"] for n in ft.TREND_TAGS if ft.tag_id(n) in tags):
-        problems.append("a trend tag does not store every change")
+    problems, logged_total = [], 0
     charts = {c["id"]: c for c in project.get("charts", [])}
-    for chart_id, _title, _window, lines in fv.CHARTS:
-        chart = charts.get(chart_id)
-        if chart is None:
-            problems.append(f"chart {chart_id} missing")
+    for ui in fv.UIS:
+        m = ui.m
+        tags = project["devices"].get(m.device_id, {}).get("tags", {})
+        logged = {t["name"] for t in tags.values() if t["daq"]["enabled"]}
+        logged_total += len(logged)
+        if logged != set(m.trend_tags):
+            problems.append(f"{m.key}: DAQ on for {sorted(logged)}, expected {sorted(m.trend_tags)}")
+        if not all(tags[m.tag_id(n)]["daq"]["changed"] for n in m.trend_tags if m.tag_id(n) in tags):
+            problems.append(f"{m.key}: a trend tag does not store every change")
+        mine = fv.MACHINE_CHARTS[m.key]
+        for chart_id, _title, _window, lines in mine:
+            chart = charts.get(chart_id)
+            if chart is None:
+                problems.append(f"chart {chart_id} missing")
+                continue
+            if [ln["id"] for ln in chart["lines"]] != [m.tag_id(tag) for tag, *_ in lines]:
+                problems.append(f"{chart_id}: lines {[ln['id'] for ln in chart['lines']]}")
+            for ln in chart["lines"]:
+                if ln["id"] not in tags or ln["device"] != m.name or ln["lineInterpolation"] != 1:
+                    problems.append(f"{chart_id}: line {ln['id']} not bound / not stepAfter")
+                elif not tags[ln["id"]]["daq"]["enabled"]:  # the chart loads its history from the DAQ
+                    problems.append(f"{chart_id}: line {ln['id']} has no DAQ history")
+        view_id = fv.shared_view("trends", ui)
+        view = next((v for v in project["hmi"]["views"] if v["id"] == view_id), None)
+        if view is None:
+            problems.append(f"view {view_id} missing")
             continue
-        if [ln["id"] for ln in chart["lines"]] != [ft.tag_id(tag) for tag, *_ in lines]:
-            problems.append(f"{chart_id}: lines {[ln['id'] for ln in chart['lines']]}")
-        for ln in chart["lines"]:
-            if ln["id"] not in tags or ln["device"] != ft.DEVICE_NAME or ln["lineInterpolation"] != 1:
-                problems.append(f"{chart_id}: line {ln['id']} not bound / not stepAfter")
-    view = next((v for v in project["hmi"]["views"] if v["id"] == fv.TRENDS_ID), None)
-    if view is None:
-        problems.append("Trends view missing")
-    else:
         widgets = [i for i in view["items"].values() if i["type"] == "svg-ext-html_chart"]
         shown = sorted(i["property"]["id"] for i in widgets)
-        if shown != sorted(c[0] for c in fv.CHARTS):
-            problems.append(f"chart widgets show {shown}")
+        if shown != sorted(c[0] for c in mine):
+            problems.append(f"{view['name']}: chart widgets show {shown}")
         for i in widgets:
             prop = i["property"]
             if prop["type"] != "realtime1" or not prop["options"].get("loadOldValues"):
@@ -348,14 +613,14 @@ def h9_trends() -> bool:
     menu = project["hmi"]["layout"].get("navigation", {}).get("items", [])
     if fv.TRENDS_ID not in {m.get("view") for m in menu}:
         problems.append("side menu has no Trends entry")
-    return check("H9 Trends", not problems, f"DAQ on {len(logged)} tags, {len(charts)} charts"
+    return check("H9 Trends", not problems, f"DAQ on {logged_total} tags, {len(charts)} charts"
                  + (f"; {problems[:4]}" if problems else ""))
 
 
-def fuxa_history(tag: str, minutes: int) -> list[tuple[int, float]]:
+def fuxa_history(tag: str, minutes: int, m: ft.Machine = ft.FILLER) -> list[tuple[int, float]]:
     """(ms, value) pairs FUXA's DAQ stored for a tag in the last minutes."""
     now = int(time.time() * 1000)
-    query = urllib.parse.quote(json.dumps({"sids": [ft.tag_id(tag)], "from": now - minutes * 60_000, "to": now}))
+    query = urllib.parse.quote(json.dumps({"sids": [m.tag_id(tag)], "from": now - minutes * 60_000, "to": now}))
     with urllib.request.urlopen(f"{ft.FUXA_URL}/api/daq?query={query}", timeout=10) as r:
         return [(d["dt"], float(d["value"])) for d in json.load(r)[0]]
 
@@ -372,6 +637,22 @@ def h10_daq() -> bool:
     if over:
         problems.append(f"{len(over)} fill values above setpoint {top:.0f} + 20 ml (max {max(over):.0f})")
     return check("H10 DAQ", not problems, f"points in 10 min: {counts}" + (f"; {problems[:4]}" if problems else ""))
+
+
+def h10_daq_syrup() -> bool:
+    """The syrup room's history: every trend tag has points from the last 10 min (once a minute
+    even when idle), stored in degC / bar as shown (FUXA scales before it stores). Checked on the
+    two setpoints, whose range is known: raw INTs would be 20-100 (0.1 degC) and 200-500 (0.01 bar)."""
+    problems, counts = [], {}
+    for tag in ft.SYRUP.trend_tags:
+        counts[tag] = len(fuxa_history(tag, 10, ft.SYRUP))
+        if not counts[tag]:
+            problems.append(f"no {tag} history in the last 10 min")
+    for tag, top in (("CoolSetpoint", 10), ("PressSetpoint", 5)):
+        raw = [v for _, v in fuxa_history(tag, 10, ft.SYRUP) if v > top]
+        if raw:
+            problems.append(f"{tag} stored as {max(raw):g} (> {top}: not scaled)")
+    return check("H10 DAQ syrup", not problems, f"points in 10 min: {counts}" + (f"; {problems[:4]}" if problems else ""))
 
 
 def fuxa_values(ids: list[str]) -> dict[str, object]:
@@ -414,16 +695,23 @@ def as_int(value) -> int | None:
     return int(value)
 
 
+def as_plc(value, factor: int) -> int | None:
+    """FUXA's value back in PLC units: a scaled tag (degC, bar) times its factor, rounded."""
+    if factor == 1 or value is None or value == "":
+        return as_int(value)
+    return round(float(value) * factor)
+
+
 def to_signed(word: int) -> int:
     return word - 0x10000 if word >= 0x8000 else word
 
 
-def h2_read(plc: ModbusTcpClient) -> bool:
-    ids = [ft.tag_id(name) for name, *_ in ft.TAGS]
+def h2_read(plc: ModbusTcpClient, m: ft.Machine = ft.FILLER) -> bool:
+    ids = [m.tag_id(name) for name, *_ in m.tags]
     bad = {}
-    for name, area, number, _kind, _ in ft.TAGS:
+    for name, area, number, _kind, _ in m.tags:
         for _ in range(3):
-            fuxa = as_int(fuxa_values([ft.tag_id(name)])[ft.tag_id(name)])
+            fuxa = as_plc(fuxa_values([m.tag_id(name)])[m.tag_id(name)], m.factor(name))
             plc_v = plc_value(plc, area, number)
             plc_v = to_signed(plc_v) if area == ft.HOLDING else plc_v
             if fuxa == plc_v:
@@ -431,7 +719,7 @@ def h2_read(plc: ModbusTcpClient) -> bool:
                 break
             bad[name] = f"FUXA {fuxa} / PLC {plc_v}"
             time.sleep(0.3)
-    return check("H2 read path", not bad, f"{len(ids) - len(bad)}/{len(ids)} tags equal"
+    return check(f"H2 read path {m.key}", not bad, f"{len(ids) - len(bad)}/{len(ids)} tags equal"
                  + (f"; {dict(list(bad.items())[:5])}" if bad else ""))
 
 
@@ -448,31 +736,63 @@ def h3_write(plc: ModbusTcpClient) -> bool:
                  f"FillSetpoint via FUXA {probe} -> PLC {seen}, restored {back} (was {old})")
 
 
-def h4_connected() -> bool:
+def h4_connected(m: ft.Machine = ft.FILLER) -> bool:
     # right after an import FUXA reconnects the device: the status is 0 for a few seconds
     for _ in range(20):
-        value = as_int(fuxa_values([ft.STATUS_TAG_ID])[ft.STATUS_TAG_ID])
+        value = as_int(fuxa_values([m.status_tag_id])[m.status_tag_id])
         if value == CONNECTED:
             break
         time.sleep(0.5)
-    return check("H4 connection", value == CONNECTED, f"status tag {value} (5 = connected)")
+    return check(f"H4 connection {m.key}", value == CONNECTED, f"status tag {value} (5 = connected)")
+
+
+def h3_syrup(plc: ModbusTcpClient) -> bool:
+    """A scaled setpoint written through FUXA arrives rounded: PressHyst 0.29 bar -> 29 (FUXA's
+    Modbus divisor would write 28, fuxa_tags.scale). The old value is written back."""
+    old = plc_value(plc, ft.HOLDING, sm.PRESS_HYST)
+    fuxa_set(ft.SYRUP.tag_id("PressHyst"), 0.29)
+    time.sleep(0.5)
+    seen = plc_value(plc, ft.HOLDING, sm.PRESS_HYST)
+    fuxa_set(ft.SYRUP.tag_id("PressHyst"), old / 100)
+    time.sleep(0.5)
+    back = plc_value(plc, ft.HOLDING, sm.PRESS_HYST)
+    return check("H3 write path syrup", seen == 29 and back == old,
+                 f"PressHyst via FUXA 0.29 bar -> PLC {seen} (29 expected), restored {back} (was {old})")
+
+
+def syrup_live() -> list[bool]:
+    """H4 + H2 + H3 + H10 for the syrup room PLC (port 5022). H3 writes one setpoint FUXA owns and restores it."""
+    plc = ModbusTcpClient(config.PLC_HOST, port=config.SYRUP_PORT, timeout=2)
+    try:
+        if not plc.connect():
+            return [check("H2 read path syrup", False, f"no connection to {config.PLC_HOST}:{config.SYRUP_PORT}")]
+        plc.read_holding_registers(sm.STATE, count=1)
+        return [h4_connected(ft.SYRUP), h2_read(plc, ft.SYRUP), h3_syrup(plc), h10_daq_syrup()]
+    except (ModbusException, OSError):
+        return [check("H2 read path syrup", False, "the syrup PLC does not answer on Modbus (upload the program)")]
+    finally:
+        plc.close()
+
+
+def filler_live() -> list[bool]:
+    """H4, H2, H3, H10 for the filler PLC (port 502). A filler that does not answer is one FAIL, so
+    the syrup room's checks still run."""
+    plc = ModbusTcpClient(config.PLC_HOST, port=config.PLC_PORT, timeout=2)
+    try:
+        if not plc.connect():
+            return [check("H2 read path filler", False, f"no connection to {config.PLC_HOST}:{config.PLC_PORT}")]
+        plc.read_holding_registers(am.STATE, count=1)  # the runtime accepts TCP even when the program is stopped
+        return [h4_connected(), h2_read(plc), h3_write(plc), h10_daq()]
+    except (ModbusException, OSError):
+        return [check("H2 read path filler", False, "the filler PLC does not answer on Modbus (upload the program)")]
+    finally:
+        plc.close()
 
 
 def main() -> None:
-    results = [h1_export(), h5_header(), h6_filler(), h7_line(), h8_alarms(), h9_trends()]
+    results = [*h1_export(), h5_header(), h6_filler(), h7_line(), h8_alarms(), h9_trends(), h11_syrup()]
     if "--offline" not in sys.argv:
-        plc = ModbusTcpClient(config.PLC_HOST, port=config.PLC_PORT, timeout=2)
-        if not plc.connect():
-            raise SystemExit(f"no connection to the PLC at {config.PLC_HOST}:{config.PLC_PORT} (is the program started?)")
-        try:
-            plc.read_holding_registers(am.STATE, count=1)  # the runtime accepts TCP even when the program is stopped
-        except (ModbusException, OSError):
-            plc.close()
-            raise SystemExit("the PLC does not answer on Modbus: start the program in the OpenPLC Editor (port 8443)")
-        try:
-            results += [h4_connected(), h2_read(plc), h3_write(plc), h10_daq()]
-        finally:
-            plc.close()
+        results += filler_live() + syrup_live()
     print(f"\n{sum(results)}/{len(results)} checks passed")
     sys.exit(0 if all(results) else 1)
 

@@ -1,20 +1,29 @@
-"""The filler's FUXA views: header (on every view), Filler main view, Tags test page.
+"""The FUXA views: header (on every view), Line, Filler, Alarms, Trends, and a Tags test page per PLC
+(filler, syrup room). Functions that can draw any machine take `m: ft.Machine` (default: the filler).
 
 Built from fuxa_shapes.py (the FUXA shape formats) and fuxa_tags.py (the tag
 table). Run through `uv run python tests/fuxa_tags.py`, which writes the export
 that is then imported into FUXA.
 
-Header (report 8.1/8.2, roadmap stage 2), 1280 x 96 at the top of every view:
-  row 1: machine name | State block (colour + name) | Step | Mode | mode hint | E-stop | PLC link
-  row 2: Start Stop Reset | Auto Manual Stop (active mode highlighted) | 4 alarm chips | navigation
+Header for two machines (report 8.1/8.2, roadmap stages 2 and S2), 1280 x 96 at the top of every view:
+  row 1 (the same on every view): Filler chip | Syrup room chip | E-stop | Filler PLC link |
+         Syrup PLC link | Line Alarms Trends
+         A machine chip is coloured by that machine's State and shows state, step and mode
+         ("Stop – press Auto" after a PLC restart, issue I10); a click opens its screen.
+  row 2 (the machine of this view): machine box | Start Stop Reset | Auto Manual Stop | its alarm chips
+         On Line, Alarms and Trends the machine box is a picker: these views exist once per
+         machine (v_filler_line / v_syrup_line ...), same body, and the picker opens the other one.
 Colours (ISA-101): grey is normal, colour only for states and problems. State colours
 follow report 8.2. The header only WRITES Cmd (1 Start, 2 Stop, 3 Reset; the PLC sets
-it back to 0) and ModeReq (0 Stop, 1 Auto, 2 Manual).
+it back to 0) and ModeReq (0 Stop, 1 Auto, 2 Manual) of the machine in row 2.
 """
+
+from dataclasses import dataclass
 
 from simulator import address_map as am
 from simulator import config
-from simulator.plcs import ALARM_NAMES, MODE_NAMES, STATE_NAMES, STEP_NAMES
+from simulator.plcs import (ALARM_NAMES, MODE_NAMES, STATE_NAMES, STEP_NAMES, SYRUP_ALARM_NAMES,
+                            SYRUP_STEP_NAMES)
 
 import fuxa_shapes as fs
 import fuxa_tags as ft
@@ -26,12 +35,53 @@ MAIN_ID, MAIN_NAME = "v_filler_main", "Filler"
 ALARMS_ID, ALARMS_NAME = "v_filler_alarms", "Alarms"
 TRENDS_ID, TRENDS_NAME = "v_filler_trends", "Trends"
 TAGS_ID, TAGS_NAME = "v_filler_tags", "Tags"
-GENERATED = (LINE_ID, MAIN_ID, ALARMS_ID, TRENDS_ID, TAGS_ID)
-NAV = ((LINE_ID, LINE_NAME), (MAIN_ID, MAIN_NAME), (ALARMS_ID, ALARMS_NAME), (TRENDS_ID, TRENDS_NAME),
-       (TAGS_ID, TAGS_NAME))
+SYRUP_TAGS_ID, SYRUP_TAGS_NAME = "v_syrup_tags", "Syrup tags"  # side menu only (test page)
+SYRUP_MAIN_ID, SYRUP_MAIN_NAME = "v_syrup_main", "Syrup room"  # the syrup room's screen (S3)
+# Line, Alarms and Trends once more with the syrup room in header row 2 (the row-2 picker opens them)
+SYRUP_LINE_ID, SYRUP_LINE_NAME = "v_syrup_line", "Line (syrup room)"
+SYRUP_ALARMS_ID, SYRUP_ALARMS_NAME = "v_syrup_alarms", "Alarms (syrup room)"
+SYRUP_TRENDS_ID, SYRUP_TRENDS_NAME = "v_syrup_trends", "Trends (syrup room)"
+GENERATED = (LINE_ID, MAIN_ID, ALARMS_ID, TRENDS_ID, TAGS_ID, SYRUP_TAGS_ID,
+             SYRUP_LINE_ID, SYRUP_ALARMS_ID, SYRUP_TRENDS_ID, SYRUP_MAIN_ID)
+NAV = ((LINE_ID, LINE_NAME), (MAIN_ID, MAIN_NAME), (SYRUP_MAIN_ID, SYRUP_MAIN_NAME), (ALARMS_ID, ALARMS_NAME),
+       (TRENDS_ID, TRENDS_NAME), (TAGS_ID, TAGS_NAME))  # side menu
 HEADER_KEY = {LINE_ID: "line", MAIN_ID: "main", ALARMS_ID: "alarms", TRENDS_ID: "trends",
-              TAGS_ID: "tags"}  # header id prefix per view
+              TAGS_ID: "tags", SYRUP_TAGS_ID: "syrup_tags", SYRUP_LINE_ID: "syrup_line",
+              SYRUP_ALARMS_ID: "syrup_alarms", SYRUP_TRENDS_ID: "syrup_trends",
+              SYRUP_MAIN_ID: "syrup_main"}  # header id prefix per view
 ALARM_PANEL = "[alarms]"  # side-menu target that opens FUXA's own alarm panel (active + history)
+
+
+@dataclass(frozen=True)
+class MachineUi:
+    """What the header needs to draw one machine (its tags are in m, issue I11)."""
+    m: ft.Machine
+    title: str
+    plc_label: str  # text of its PLC link chip
+    steps: dict[int, str]
+    alarms: tuple[str, ...]  # alarm bits in address order
+    detail: str  # view the machine chip opens
+
+
+FILLER_UI = MachineUi(ft.FILLER, "Filler", "Filler PLC", STEP_NAMES, ALARM_NAMES, MAIN_ID)
+SYRUP_UI = MachineUi(ft.SYRUP, "Syrup room", "Syrup PLC", SYRUP_STEP_NAMES, SYRUP_ALARM_NAMES, SYRUP_MAIN_ID)
+UIS = (FILLER_UI, SYRUP_UI)
+
+# The views shown once per machine: kind -> machine key -> view id (header nav and row-2 picker)
+SHARED = {"line": {"filler": LINE_ID, "syrup": SYRUP_LINE_ID},
+          "alarms": {"filler": ALARMS_ID, "syrup": SYRUP_ALARMS_ID},
+          "trends": {"filler": TRENDS_ID, "syrup": SYRUP_TRENDS_ID}}
+KIND = {view_id: kind for kind, views in SHARED.items() for view_id in views.values()}
+# The machine in header row 2 of every view
+CONTEXT = {MAIN_ID: FILLER_UI, TAGS_ID: FILLER_UI, SYRUP_TAGS_ID: SYRUP_UI, SYRUP_MAIN_ID: SYRUP_UI}
+CONTEXT |= {view_id: ui for views in SHARED.values() for ui in UIS for key, view_id in views.items()
+            if key == ui.m.key}
+VIEW_NAMES = {LINE_ID: LINE_NAME, SYRUP_LINE_ID: SYRUP_LINE_NAME, ALARMS_ID: ALARMS_NAME,
+              SYRUP_ALARMS_ID: SYRUP_ALARMS_NAME, TRENDS_ID: TRENDS_NAME, SYRUP_TRENDS_ID: SYRUP_TRENDS_NAME}
+
+
+def shared_view(kind: str, ui: MachineUi) -> str:
+    return SHARED[kind][ui.m.key]
 
 # colours
 HEADER_BG = "#d4d4d4"
@@ -40,9 +90,12 @@ TEXT = "#1d1d1d"
 MUTED = "#555555"
 RED, GREEN, YELLOW, ORANGE, GREY = "#d64545", "#3fa34d", "#e6c229", "#e8812f", "#9e9e9e"
 ACTIVE = "#1f4e9a"  # selected mode / current view
+PRODUCT = "#7b4a22"  # finished product (Line pipe, filled bottles, syrup room)
 STATE_COLOURS = {0: GREY, 1: GREEN, 2: YELLOW, 3: ORANGE, 9: RED}  # report 8.2
 ALARM_LABELS = {"Alm_IndexJam": "Index jam", "Alm_FillTimeout": "Fill timeout",
-                "Alm_OutfeedBlocked": "Outfeed blocked", "Alm_CommLost": "Comm lost"}
+                "Alm_OutfeedBlocked": "Outfeed blocked", "Alm_CommLost": "Comm lost",
+                "Alm_Overflow": "Overflow", "Alm_OverPressure": "Over-pressure", "Alm_CoolTimeout": "Cool timeout",
+                "Alm_LowSyrup": "Low syrup", "Alm_DoseTimeout": "Dose timeout"}
 LINK_OK = 5  # FUXA connection status: 0 off, 3 warning, 5 connected
 
 CMD_BUTTONS = (("Start", 1), ("Stop", 2), ("Reset", 3))
@@ -51,8 +104,23 @@ MANUAL = 2  # ModeReq value of Manual
 MANUAL_BUTTONS = (("C1", "Man_C1"), ("Door", "Man_Door"), ("Rinse", "Man_Rinse"),
                   ("Fill", "Man_Fill"), ("Cap", "Man_Cap"), ("Index", "Man_Index"))
 MODE_BUTTONS = (("Auto", 1), ("Manual", 2), ("Stop", 0))
+# Mode as shown in a machine chip: Stop mode carries the hint (after a PLC restart Start is ignored, I10)
+MODE_WORDS = {0: "Stop – press Auto", 1: "Auto", 2: "Manual (paused)"}
+NAV_BUTTONS = (("line", "Line"), ("alarms", "Alarms"), ("trends", "Trends"))
 
-T = ft.tag_id  # tag name -> FUXA tag id
+# Header geometry (x from the left edge, see the module docstring)
+ROW1_Y, ROW1_H = 10, 36  # chips and buttons of row 1 (the machine chips are 4 px taller)
+ROW2_Y, ROW2_H = 54, 32
+CHIP_X, CHIP_W, CHIP_GAP = 16, 260, 8  # machine chips
+ESTOP_X, ESTOP_W = 556, 140
+LINK_X, LINK_W, LINK_GAP = 704, 140, 8
+NAV_X, NAV_W, NAV_GAP = 1004, 84, 4
+PICK_X, PICK_W, PICK_GAP = 16, 98, 4  # row 2: machine box / picker
+CMD_X, MODE_X, BTN_W, BTN_GAP = 226, 446, 66, 4
+ALARM_X, ALARM_W, ALARM_GAP = 666, 94, 4
+
+T = ft.tag_id  # tag name -> FUXA tag id of the FILLER. A function that can draw another machine takes
+#                `m: ft.Machine` and shadows it locally with `T = m.tag_id` (one device per PLC, issue I11).
 
 
 class Builder:
@@ -71,78 +139,113 @@ class Builder:
 
 
 def header(b: Builder, key: str, current: str) -> None:
-    """Draw the header into builder b. key makes the ids unique per view."""
+    """Draw the header of view `current` into builder b. key makes the ids unique per view.
+    Row 1 shows both machines; row 2 belongs to CONTEXT[current]."""
+    ui = CONTEXT[current]
     p = f"hdr_{key}"
     b.add(fs.rect(0, 0, W, HEADER_H, HEADER_BG, rx=0))
-    b.add(fs.text(16, 36, "Filler", size=20, bold=True))
+    for i, chip in enumerate(UIS):
+        machine_chip(b, p, chip, CHIP_X + i * (CHIP_W + CHIP_GAP), here=chip.detail == current)
+    estop_chip(b, p)
+    for i, chip in enumerate(UIS):
+        link_chip(b, p, chip, LINK_X + i * (LINK_W + LINK_GAP))
+    # Navigation: the shared views of this view's machine; the machine screens open from the chips
+    for i, (kind, label) in enumerate(NAV_BUTTONS):
+        here = KIND.get(current) == kind
+        b.add(fs.button(f"{p}_nav_{kind}", label, NAV_X + i * (NAV_W + NAV_GAP), ROW1_Y, NAV_W, ROW1_H,
+                        [fs.goto(shared_view(kind, ui))],
+                        background=ACTIVE if here else NEUTRAL, color="#ffffff" if here else TEXT))
+    row2(b, p, ui, current)
 
-    # State block: colour + name (report 8.2)
-    b.add(fs.rect_ranges(f"{p}_state", T("State"), 90, 8, 150, 40,
-                         [fs.colour_range(v, v, c) for v, c in STATE_COLOURS.items()], default=GREY))
-    b.add(fs.enum_texts(f"{p}_state_name", T("State"), STATE_NAMES, 165, 34, size=17, bold=True, anchor="middle"))
 
-    # Step name, with the raw number for steps the table does not know
-    b.add(fs.text(256, 22, "Step", size=11, color=MUTED))
-    b.add(fs.enum_texts(f"{p}_step_name", T("Step"), STEP_NAMES, 256, 42, size=16, bold=True))
-    b.add(fs.value(f"{p}_step_no", T("Step"), 396, 42, size=12, anchor="start", color=MUTED, bold=False))
+def machine_chip(b: Builder, p: str, ui: MachineUi, x: float, here: bool) -> None:
+    """Row 1: one machine at a glance, coloured by its State (report 8.2); click = its screen.
+    here: this view is that machine's screen (a dark blue bar under the chip)."""
+    T = ui.m.tag_id  # this machine's tags (shadows the filler helper)
+    k = f"{p}_{ui.m.key}"
+    right = x + CHIP_W - 10
+    b.add(fs.rect_ranges(f"{k}_chip", T("State"), x, ROW1_Y - 2, CHIP_W, ROW1_H + 4,
+                         [fs.colour_range(v, v, c) for v, c in STATE_COLOURS.items()], default=GREY,
+                         events=[fs.goto(ui.detail)]))
+    b.add(fs.text(x + 10, 25, ui.title, size=15, bold=True, click_through=True))
+    b.add(fs.enum_texts(f"{k}_state", T("State"), STATE_NAMES, right, 25, size=14, bold=True, anchor="end",
+                        click_through=True))
+    b.add(fs.enum_texts(f"{k}_step", T("Step"), ui.steps, x + 10, 42, size=12, click_through=True))
+    b.add(fs.enum_texts(f"{k}_mode", T("ModeReq"), MODE_WORDS, right, 42, size=12, bold=True, anchor="end",
+                        click_through=True))
+    if here:
+        b.add(fs.rect(x, ROW1_Y + ROW1_H + 3, CHIP_W, 4, ACTIVE, rx=1))
 
-    # Mode name + hint when Start would be ignored (issue I10)
-    b.add(fs.text(436, 22, "Mode", size=11, color=MUTED))
-    b.add(fs.enum_texts(f"{p}_mode_name", T("ModeReq"), MODE_NAMES, 436, 42, size=16, bold=True))
-    b.add(fs.rect_ranges(f"{p}_hint_bg", T("ModeReq"), 524, 10, 330, 36,
-                         [fs.colour_range(0, 0, "#f2d14b"), fs.colour_range(1, 1, HEADER_BG),
-                          fs.colour_range(2, 2, NEUTRAL)], default=HEADER_BG))
-    b.add(fs.conditional_text(f"{p}_hint_stop", T("ModeReq"), 0, 0, 689, 33,
-                              "Stop mode: Start is ignored – press Auto", size=13, bold=True,
-                              color="#7a0000", anchor="middle"))
-    b.add(fs.conditional_text(f"{p}_hint_manual", T("ModeReq"), 2, 2, 689, 33,
-                              "Manual: sequencer paused", size=13, bold=True, anchor="middle"))
 
-    # E-stop chip
-    b.add(fs.rect_ranges(f"{p}_estop", T("E_Stop_OK"), 868, 10, 180, 36,
-                         [fs.colour_range(0, 0, RED), fs.colour_range(1, 1, NEUTRAL)], default=NEUTRAL))
-    b.add(fs.conditional_text(f"{p}_estop_on", T("E_Stop_OK"), 0, 0, 958, 33, "E-STOP PRESSED",
-                              size=14, bold=True, color="#ffffff", anchor="middle"))
-    b.add(fs.conditional_text(f"{p}_estop_ok", T("E_Stop_OK"), 1, 1, 958, 33, "E-stop OK",
-                              size=14, anchor="middle"))
+def estop_chip(b: Builder, p: str) -> None:
+    """One E-stop chain reaches both PLCs (report 9.2); the chip is red when EITHER PLC sees it pressed.
+    Drawing order (later = on top), so every combination reads cleanly:
+      1. grey chip   2. "E-stop OK" per PLC while that PLC reads 1 (both visible = the same text twice)
+      3. one red cover per PLC, transparent ("none") while it reads 1: it hides every OK text
+      4. "E-STOP PRESSED" per PLC while that PLC reads 0.
+    A PLC whose link is lost has no value: its texts stay hidden and the other PLC still decides.
+    Only one PLC pressed (a wiring fault) also shows red."""
+    mid = ESTOP_X + ESTOP_W / 2
+    b.add(fs.rect(ESTOP_X, ROW1_Y, ESTOP_W, ROW1_H, NEUTRAL, f"{p}_estop"))
+    for ui in UIS:
+        b.add(fs.conditional_text(f"{p}_estop_{ui.m.key}_ok", ui.m.tag_id("E_Stop_OK"), 1, 1, mid, 33, "E-stop OK",
+                                  size=14, anchor="middle"))
+    for ui in UIS:
+        b.add(fs.rect_ranges(f"{p}_estop_{ui.m.key}", ui.m.tag_id("E_Stop_OK"), ESTOP_X, ROW1_Y, ESTOP_W, ROW1_H,
+                             [fs.colour_range(0, 0, RED), fs.colour_range(1, 1, "none")], default="none"))
+    for ui in UIS:
+        b.add(fs.conditional_text(f"{p}_estop_{ui.m.key}_on", ui.m.tag_id("E_Stop_OK"), 0, 0, mid, 33,
+                                  "E-STOP PRESSED", size=13, bold=True, color="#ffffff", anchor="middle"))
 
-    # PLC link chip (FUXA's own connection status of the device)
-    status = ft.STATUS_TAG_ID
-    b.add(fs.rect_ranges(f"{p}_link", status, 1060, 10, 204, 36,
+
+def link_chip(b: Builder, p: str, ui: MachineUi, x: float) -> None:
+    """FUXA's own connection status of one PLC device: grey OK, yellow slow, red LOST."""
+    status, k, mid = ui.m.status_tag_id, f"{p}_{ui.m.key}_link", x + LINK_W / 2
+    b.add(fs.rect_ranges(k, status, x, ROW1_Y, LINK_W, ROW1_H,
                          [fs.colour_range(0, 0, RED), fs.colour_range(1, LINK_OK - 1, YELLOW),
                           fs.colour_range(LINK_OK, LINK_OK, NEUTRAL)], default=NEUTRAL))
-    b.add(fs.conditional_text(f"{p}_link_lost", status, 0, 0, 1162, 33, "PLC link LOST",
-                              size=14, bold=True, color="#ffffff", anchor="middle"))
-    b.add(fs.conditional_text(f"{p}_link_slow", status, 1, LINK_OK - 1, 1162, 33, "PLC link slow",
-                              size=14, bold=True, anchor="middle"))
-    b.add(fs.conditional_text(f"{p}_link_ok", status, LINK_OK, LINK_OK, 1162, 33, "PLC link OK",
-                              size=14, anchor="middle"))
+    b.add(fs.conditional_text(f"{k}_lost", status, 0, 0, mid, 33, f"{ui.plc_label} LOST",
+                              size=13, bold=True, color="#ffffff", anchor="middle"))
+    b.add(fs.conditional_text(f"{k}_slow", status, 1, LINK_OK - 1, mid, 33, f"{ui.plc_label} slow",
+                              size=13, bold=True, anchor="middle"))
+    b.add(fs.conditional_text(f"{k}_ok", status, LINK_OK, LINK_OK, mid, 33, f"{ui.plc_label} OK",
+                              size=13, anchor="middle"))
 
-    # Row 2: commands (Cmd) and mode selector (ModeReq)
+
+def row2(b: Builder, p: str, ui: MachineUi, current: str) -> None:
+    """Row 2: the machine of this view – which one, its commands, its mode, its alarm chips."""
+    T = ui.m.tag_id  # this machine's tags
+    kind = KIND.get(current)
+    if kind is None:  # a machine's own screen: a label, nothing to choose
+        b.add(fs.rect(PICK_X, ROW2_Y, 2 * PICK_W + PICK_GAP, ROW2_H, ACTIVE, f"{p}_machine"))
+        b.add(fs.text(PICK_X + PICK_W + PICK_GAP / 2, 75, ui.title, size=14, bold=True, color="#ffffff",
+                      anchor="middle"))
+    else:  # a shared view: the picker opens the same view for the other machine
+        for i, other in enumerate(UIS):
+            here = other is ui
+            b.add(fs.button(f"{p}_pick_{other.m.key}", other.title, PICK_X + i * (PICK_W + PICK_GAP), ROW2_Y,
+                            PICK_W, ROW2_H, [] if here else [fs.goto(shared_view(kind, other))],
+                            background=ACTIVE if here else NEUTRAL, color="#ffffff" if here else TEXT))
+
+    # Commands (Cmd) and mode selector (ModeReq) of this machine
     for i, (label, number) in enumerate(CMD_BUTTONS):
-        b.add(fs.button(f"{p}_cmd_{label.lower()}", label, 16 + i * 84, 54, 80, 32,
+        b.add(fs.button(f"{p}_cmd_{label.lower()}", label, CMD_X + i * (BTN_W + BTN_GAP), ROW2_Y, BTN_W, ROW2_H,
                         [fs.set_value(T("Cmd"), number)], background=NEUTRAL))
     # One write per click: FUXA 1.3.5 sends all events of a click at the same time, and 7 writes
     # at once (ModeReq + releasing the six Man_*) timed out and dropped the PLC link (stage 3).
     for i, (label, number) in enumerate(MODE_BUTTONS):
         others = [fs.colour_range(v, v, NEUTRAL, TEXT) for v in MODE_NAMES if v != number]
-        b.add(fs.button(f"{p}_mode_{label.lower()}", label, 280 + i * 84, 54, 80, 32,
+        b.add(fs.button(f"{p}_mode_{label.lower()}", label, MODE_X + i * (BTN_W + BTN_GAP), ROW2_Y, BTN_W, ROW2_H,
                         [fs.set_value(T("ModeReq"), number)], background=NEUTRAL,
                         tag_id=T("ModeReq"), ranges=[fs.colour_range(number, number, ACTIVE, "#ffffff"), *others]))
 
-    # Alarm chips (the alarm list itself is stage 5)
-    for i, name in enumerate(ALARM_NAMES):
-        x = 540 + i * 100
-        b.add(fs.rect_ranges(f"{p}_{name}", T(name), x, 54, 96, 32,
+    # Alarm chips of this machine; a click opens its alarm list
+    for i, name in enumerate(ui.alarms):
+        x = ALARM_X + i * (ALARM_W + ALARM_GAP)
+        b.add(fs.rect_ranges(f"{p}_{name}", T(name), x, ROW2_Y, ALARM_W, ROW2_H,
                              [fs.colour_range(0, 0, NEUTRAL), fs.colour_range(1, 1, RED)], default=NEUTRAL,
-                             events=[fs.goto(ALARMS_ID)]))  # click a chip -> alarm list
-        b.add(fs.text(x + 48, 75, ALARM_LABELS[name], size=12, anchor="middle", click_through=True))
-
-    # Navigation
-    for i, (view_id, name) in enumerate(NAV):
-        here = view_id == current
-        b.add(fs.button(f"{p}_nav_{name.lower()}", name, 948 + i * 63, 54, 60, 32, [fs.goto(view_id)],
-                        background=ACTIVE if here else NEUTRAL, color="#ffffff" if here else TEXT))
+                             events=[fs.goto(shared_view("alarms", ui))]))
+        b.add(fs.text(x + ALARM_W / 2, 74, ALARM_LABELS[name], size=11, anchor="middle", click_through=True))
 
 
 # --- Filler detail screen (stage 3) ----------------------------------------------
@@ -173,8 +276,8 @@ SETPOINTS = (
 LAMP_RANGES = [fs.colour_range(0, 0, LAMP_OFF, TEXT), fs.colour_range(1, 1, LAMP_ON, TEXT)]
 
 
-def lamp(b: Builder, tag: str, x: float, y: float, label: str) -> None:
-    b.add(fs.circle_ranges(f"lamp_{tag}", T(tag), x, y, 8, LAMP_RANGES, default=LAMP_OFF))
+def lamp(b: Builder, tag: str, x: float, y: float, label: str, m: ft.Machine = ft.FILLER) -> None:
+    b.add(fs.circle_ranges(f"lamp_{tag}", m.tag_id(tag), x, y, 8, LAMP_RANGES, default=LAMP_OFF))
     b.add(fs.text(x + 14, y + 4, label, size=12))
 
 
@@ -271,7 +374,173 @@ def filler_view() -> dict:
     return fs.view(MAIN_ID, MAIN_NAME, W, H, b.parts, b.items)
 
 
-# --- Line overview (stage 4) -------------------------------------------------------
+# --- Syrup room screen (S3) ------------------------------------------------------------
+# Report 8.1: tanks with live levels, pipes with flow animation, pumps and valves, temperature and
+# CO2 pressure, recipe. Same layout as the Filler screen: process on top, setpoints bottom left,
+# manual buttons bottom right. All syrup tags: ft.SYRUP (degC / bar already scaled by FUXA, fuxa_tags.scale).
+S = ft.SYRUP.tag_id  # syrup room tag name -> FUXA tag id
+PIPE_OFF, WATER, GAS = "#b0b0b0", "#5f86b0", "#555555"
+SYRUP_DARK = "#5a3417"
+AGITATOR_Y = 336  # impeller centre, near the bottom of the mixing tank bar (190..370)
+TANK_TOP, TANK_H = 190, 180  # level bars y 190..370
+MIX_MAX, BUFFER_MAX = 950, 1950  # PLC limits (docs/syrup/state-diagram.md, "Fixed constants")
+# Recipe setpoints: (label, tag, unit, min, max). Ranges so a legal recipe never trips an alarm
+# (PLC MixMax 950 L, DoseTimeout / CoolTimeout 60 s, PressMax 6.00 bar; simulator water 20 L/s,
+# syrup 5 L/s, chiller 0 degC): the largest batch is 700 + 700 x 10 / 30 = 933 L, its syrup
+# 233 L takes 47 s; cooling 16 -> 2 degC takes about 41 s; BufferLow 1000 + 933 <= BufferMax 1950.
+# BufferMin > 0: with 0 the Product_Available signal never drops (simulator review 2026-11-13).
+SYRUP_SETPOINTS = (
+    ("Water per batch", "WaterBatch", "L", 100, 700),
+    ("Ratio water:syrup", "SyrupRatio", "x10", 30, 100),
+    ("Mix time", "MixTime", "s", 5, 120),
+    ("Cool setpoint", "CoolSetpoint", "°C", 2, 10),  # whole numbers as int: FUXA stores JSON from JavaScript
+    ("Cooling band", "TempHyst", "°C", 0.2, 2),
+    ("CO2 setpoint", "PressSetpoint", "bar", 2, 5),
+    ("CO2 band", "PressHyst", "bar", 0.05, 0.5),
+    ("New batch below", "BufferLow", "L", 200, 1000),
+    ("Product min", "BufferMin", "L", 50, 300),
+    ("Carbonation time", "CarbTime", "s", 5, 60),
+)
+SYRUP_MANUAL_BUTTONS = (("Water pump", "Man_WaterPump"), ("Syrup pump", "Man_SyrupPump"),
+                        ("Agitator", "Man_Agitator"), ("Cooling", "Man_Cooling"),
+                        ("CO2 valve", "Man_CO2"), ("Transfer", "Man_Transfer"))
+# (pipe id, output tag that makes it flow, colour when flowing, x, y, w, h)
+SYRUP_PIPES = (
+    ("pipe_water", "WaterPump", WATER, 100, 136, 248, 6), ("pipe_water_down", "WaterPump", WATER, 342, 136, 6, 54),
+    ("pipe_co2", "CO2Valve", GAS, 412, 148, 60, 6), ("pipe_co2_down", "CO2Valve", GAS, 412, 148, 6, 42),
+    ("pipe_jacket", "CoolingValve", WATER, 434, 200, 6, 160),
+    ("pipe_syrup", "SyrupPump", SYRUP_DARK, 100, 346, 230, 6),
+    ("pipe_transfer", "TransferPump", PRODUCT, 446, 346, 254, 6),
+    ("pipe_product", "Product_Available", PRODUCT, 780, 346, 110, 6),
+)
+
+
+def buffer_scale_note() -> tuple[str, str]:
+    """The simulator takes BUFFER_DRAW_SCALE times more product from the buffer than the filler puts
+    into a bottle (time compression: a real 590 L batch would last hours; docs/simulator/design-notes.md).
+    The PLCs never see the factor, so the screen must say it, or 15 L per 0.5 L bottle looks like a
+    unit error. Built from the simulator's config, so the text follows a changed factor."""
+    scale, bottle_ml = config.BUFFER_DRAW_SCALE, config.DEFAULT_FILL_SETPOINT_ML
+    return (f"Simulated: a {bottle_ml} ml bottle draws {bottle_ml / 1000 * scale:g} L from the buffer",
+            f"(x{scale:g} time compression: a batch lasts minutes, not hours)")
+
+
+def decimals(tag: str) -> int:
+    return len(str(ft.SYRUP.factor(tag))) - 1
+
+
+def pipe(b: Builder, element_id: str, tag: str, colour: str, x: float, y: float, w: float, h: float) -> None:
+    """A pipe that is grey while its pump / valve is OFF and shows the medium's colour while it flows."""
+    b.add(fs.rect_ranges(element_id, S(tag), x, y, w, h,
+                         [fs.colour_range(0, 0, PIPE_OFF), fs.colour_range(1, 1, colour)], default=PIPE_OFF))
+
+
+def tank(b: Builder, key: str, tag: str, name: str, x: float, w: float, capacity: float, colour: str,
+         limit: int | None = None) -> None:
+    """A tank as a level bar 0..capacity with its name, scale, live level and the PLC's high limit."""
+    capacity = int(capacity)  # 1000.0 -> 1000: FUXA (JavaScript) would rewrite it, the export must round-trip
+    b.add(fs.text(x + w / 2, TANK_TOP - 10, name, size=14, bold=True, anchor="middle"))
+    b.add(fs.progress(f"tank_{key}", S(tag), x, TANK_TOP, w, TANK_H, 0, capacity, colour))
+    b.add(fs.text(x - 4, TANK_TOP + 10, f"{capacity:.0f}", size=11, color=MUTED, anchor="end"))
+    b.add(fs.text(x - 4, TANK_TOP + TANK_H, "0", size=11, color=MUTED, anchor="end"))
+    b.add(fs.value(f"val_{tag}", S(tag), x + w / 2 + 12, TANK_TOP + TANK_H + 22, size=15))
+    b.add(fs.text(x + w / 2 + 16, TANK_TOP + TANK_H + 22, "L", size=13))
+    if limit is not None:  # a tick at the PLC's high limit (overflow alarm, pump interlock)
+        y = TANK_TOP + TANK_H * (1 - limit / capacity)
+        b.add(fs.rect(x - 6, y - 1, w + 12, 2, RED, rx=0))
+        b.add(fs.text(x + w + 8, y + 4, f"max {limit}", size=11, color="#a00000"))
+
+
+def syrup_process(b: Builder) -> None:
+    b.add(fs.text(16, 128, "Process", size=15, bold=True))
+    b.add(f'<circle cx="96" cy="123" r="6" fill="{LAMP_ON}" stroke="{TEXT}" stroke-width="1.5"/>')  # legend
+    b.add(fs.text(108, 127, "ON", size=12, color=MUTED))
+    b.add(fs.text(16, 143, "Mains water", size=12, color=MUTED))
+    b.add(fs.text(478, 154, "CO2 supply", size=12, color=MUTED))
+    for element_id, tag, colour, x, y, w, h in SYRUP_PIPES:
+        pipe(b, element_id, tag, colour, x, y, w, h)
+    tank(b, "syrup", "SyrupLevel", "Syrup tank", 40, 60, config.SYRUP_TANK_L, SYRUP_DARK)
+    tank(b, "mix", "MixLevel", "Mixing tank / carbonator", 330, 100, config.MIX_TANK_L, PRODUCT, MIX_MAX)
+    # agitator: a static shaft from the tank top and an impeller that turns while the Agitator output is ON
+    # (same FUXA action as the conveyor rollers on the Line view)
+    b.add(fs.rect(379, TANK_TOP, 2, AGITATOR_Y - TANK_TOP, "#3a3a3a", rx=0))
+    b.add(fs.impeller("agitator_impeller", 380, AGITATOR_Y, 16, S("Agitator")))
+    tank(b, "buffer", "BufferLevel", "Buffer tank", 700, 80, config.BUFFER_TANK_L, PRODUCT, BUFFER_MAX)
+    b.add(fs.text(895, 354, "to the filler", size=12, color=MUTED))
+    for k, line in enumerate(buffer_scale_note()):  # under the buffer tank, above the setpoint boxes
+        b.add(fs.text(700, 404 + k * 13, line, size=11, color=MUTED, element_id=f"note_buffer_scale{k}"))
+    m = ft.SYRUP
+    lamp(b, "WaterPump", 200, 125, "water pump", m)
+    lamp(b, "SyrupPump", 150, 333, "syrup pump", m)
+    lamp(b, "TransferPump", 520, 333, "transfer pump", m)
+    lamp(b, "Product_Available", 790, 333, "product available", m)
+    for k, (tag, label) in enumerate((("MixHighHigh", "high-high switch"), ("Agitator", "agitator"),
+                                      ("CoolingValve", "cooling valve"), ("CO2Valve", "CO2 valve"))):
+        lamp(b, tag, 462, 214 + k * 30, label, m)
+
+
+def syrup_values(b: Builder) -> None:
+    """The batch at a glance: step, counter, temperature and pressure with their hysteresis bits."""
+    m, x, right = ft.SYRUP, 990, 1225
+    b.add(fs.text(x, 128, "Batch", size=15, bold=True))
+    b.add(fs.text(x, 158, "Step", size=13))
+    b.add(fs.enum_texts("syrup_step", S("Step"), SYRUP_STEP_NAMES, right + 30, 158, size=15, bold=True, anchor="end"))
+    rows = (("Batches done", "BatchCount", "", 188), ("Temperature", "ProductTemp", "°C", 218),
+            ("CO2 pressure", "CO2Pressure", "bar", 278), ("Syrup per batch", "SyrupTarget", "L", 338),
+            ("Level after dosing", "DoseTarget", "L", 364))
+    for label, tag, unit, y in rows:
+        b.add(fs.text(x, y, label, size=13))
+        b.add(fs.value(f"val_{tag}", S(tag), right, y, size=15))
+        b.add(fs.text(right + 5, y, unit, size=12, color=MUTED))
+    lamp(b, "Temp_OK", x + 8, 240, "cold enough (Temp_OK)", m)
+    lamp(b, "CO2_Demand", x + 8, 300, "CO2 wanted (CO2_Demand)", m)
+    lamp(b, "Batch_Dosed", x + 8, 390, "water + syrup dosed", m)
+
+
+def syrup_setpoints(b: Builder) -> None:
+    b.add(fs.rect(16, 420, 760, 280, "#dcdcdc", rx=6))
+    b.add(fs.text(32, 450, "Recipe setpoints", size=15, bold=True))
+    for k, (label, tag, unit, lo, hi) in enumerate(SYRUP_SETPOINTS):
+        x, y = 32 + (k // 5) * 380, 485 + (k % 5) * 42
+        d = decimals(tag)
+        b.add(fs.text(x, y, label, size=13))
+        b.add(fs.number_input(f"in_{tag}", S(tag), x + 140, y - 21, 84, 30, lo, hi, step="any" if d else None))
+        b.add(fs.text(x + 232, y, unit, size=13))
+        b.add(fs.text(x + 270, y, f"{lo:.{d}f}–{hi:.{d}f}", size=11, color=MUTED))
+    b.add(fs.text(32, 684, "Type a value and press Enter; values outside the range are refused. "
+                  "Ratio 55 = 5.5 : 1 water : syrup.", size=12, color=MUTED))
+
+
+def syrup_manual(b: Builder) -> None:
+    b.add(fs.rect(792, 420, 472, 280, "#dcdcdc", rx=6))
+    b.add(fs.text(808, 450, "Manual (hold to run)", size=15, bold=True))
+    b.add(fs.conditional_text("syrup_manual_hint", S("ModeReq"), 0, MANUAL - 1, 808, 500,
+                              "The buttons appear in Manual mode (header).", size=13, color=MUTED))
+    for i, (label, tag) in enumerate(SYRUP_MANUAL_BUTTONS):
+        x, y = 808 + (i % 3) * 150, 470 + (i // 3) * 60
+        b.add(fs.hold_button(f"syrup_{tag}", label, x, y, 136, 48, S(tag), S("ModeReq"), MANUAL, MANUAL))
+    b.add(fs.conditional_text("syrup_manual_blocked", S("Jog_Block"), 1, 1, 808, 598,
+                              "Manual blocked: a button was held > 10 s. Release all.", size=13, bold=True,
+                              color="#a00000"))
+    for k, line in enumerate(("Interlocks (the PLC checks them, also in Manual):",
+                              "pumps stop at 950 L or the high-high switch; agitator from 100 L;",
+                              "CO2 only into cold product and below 6 bar;",
+                              "transfer only with product in the tank and room in the buffer.",
+                              "A button acts only while it is held.")):
+        b.add(fs.text(808, 620 + k * 17, line, size=12, color=TEXT if k == 0 else MUTED))
+
+
+def syrup_view() -> dict:
+    b = Builder()
+    header(b, HEADER_KEY[SYRUP_MAIN_ID], SYRUP_MAIN_ID)
+    syrup_process(b)
+    syrup_values(b)
+    syrup_setpoints(b)
+    syrup_manual(b)
+    return fs.view(SYRUP_MAIN_ID, SYRUP_MAIN_NAME, W, H, b.parts, b.items)
+
+
+# --- Line overview (stage 4; syrup room block S4) ---------------------------------
 # Report 8.3: FUXA polls every 200 ms, too slow for smooth motion, so a conveyor is 8 slots and
 # the simulator writes one bit per slot (Anim_C1/C2, bit 0 = entry ... bit 7 = exit). Each slot is
 # a bottle shape bound to ONE bit (FUXA bitmask), so bottles step along and visibly pile up.
@@ -279,12 +548,19 @@ def filler_view() -> dict:
 SLOT_PITCH, SLOT_W, SLOT_H = 38, 26, 46
 BELT_Y = 360  # top of the belt band
 STANDIN = "#bdbdbd"
-PRODUCT = "#7b4a22"
+# Syrup room block (S4): above the filler block (y 270), same x and width, so the product pipe
+# runs straight down between the two centres (y 226..270)
+SYRUP_BLOCK_Y, SYRUP_BLOCK_H = 108, 118
 
 
 def no_click(svg: str) -> str:
     """Let clicks pass through a drawing on top of a clickable block."""
     return svg.replace("<rect ", '<rect pointer-events="none" ', 1)
+
+
+def click_through(svg: str) -> str:
+    """The same for a group shape (e.g. fs.value); SVG children inherit pointer-events."""
+    return svg.replace("<g ", '<g pointer-events="none" ', 1)
 
 
 def conveyor(b: Builder, key: str, x: float, label: str, anim: str, motor: str | None, bottle: str) -> None:
@@ -308,8 +584,10 @@ def standin_block(b: Builder, x: float, y: float, w: float, h: float, lines: tup
                       anchor="middle", color=TEXT if k == 0 else MUTED))
 
 
-def machine_block(b: Builder, key: str, x: float, y: float, w: float, h: float, name: str, target: str) -> None:
+def machine_block(b: Builder, key: str, x: float, y: float, w: float, h: float, name: str, target: str,
+                  m: ft.Machine = ft.FILLER) -> None:
     """A real machine: coloured from its State (report 8.2), click opens its detail screen."""
+    T = m.tag_id  # this machine's tags
     b.add(fs.rect_ranges(f"{key}_block", T("State"), x, y, w, h,
                          [fs.colour_range(v, v, c) for v, c in STATE_COLOURS.items()], default=GREY,
                          events=[fs.goto(target)]))
@@ -320,9 +598,12 @@ def machine_block(b: Builder, key: str, x: float, y: float, w: float, h: float, 
                   click_through=True))
 
 
-def line_view() -> dict:
+def line_view(view_id: str = LINE_ID) -> dict:
+    """The line overview; view_id picks the machine of header row 2 (same body for every machine).
+    Real machines (filler, syrup room since S4) are blocks coloured by their State; a click opens
+    their screen. Machines not built yet are grey stand-ins."""
     b = Builder()
-    header(b, HEADER_KEY[LINE_ID], LINE_ID)
+    header(b, HEADER_KEY[view_id], view_id)
     b.add(fs.text(16, 128, "Line overview", size=15, bold=True))
     # blow moulder (stand-in) -> C1
     standin_block(b, 16, 300, 110, 100, ("Blow moulder", "simulated", "(bottle supply)"))
@@ -338,12 +619,25 @@ def line_view() -> dict:
     for k in range(2):
         svg, items = fs.roller(f"filler_roller{k}", fx + 60 + k * 116, fy + 128, 9, T("IndexMotor"))
         b.add((svg.replace("<path ", '<path pointer-events="none" ', 1), items))
-    # syrup room (stand-in) and the product pipe into the filler
-    standin_block(b, fx + 38, 128, 160, 60, ("Syrup room", "simulated"))
-    b.add(fs.rect_ranges("product_pipe", T("Product_Available"), fx + fw / 2 - 5, 188, 10, fy - 188,
+    # syrup room (S4): the real syrup PLC as a block above the filler, coloured by its State, with
+    # its step and buffer level (the buffer is why Product_Available comes and goes)
+    sy, sh = SYRUP_BLOCK_Y, SYRUP_BLOCK_H
+    machine_block(b, "syrup", fx, sy, fw, sh, "Syrup room", SYRUP_MAIN_ID, ft.SYRUP)
+    b.add(fs.enum_texts("syrup_step_line", S("Step"), SYRUP_STEP_NAMES, fx + fw / 2, sy + 66, size=13,
+                        bold=True, anchor="middle", click_through=True))
+    b.add(fs.text(fx + fw / 2 - 8, sy + 90, "Buffer", size=12, anchor="end", click_through=True))
+    svg, items = fs.value("line_buffer", S("BufferLevel"), fx + fw / 2 + 40, sy + 90, size=13)
+    b.add((click_through(svg), items))
+    b.add(fs.text(fx + fw / 2 + 44, sy + 90, "L", size=12, click_through=True))
+    # product pipe from the SOURCE: the syrup PLC's output Product_Available (%MX6.0)
+    top = sy + sh
+    b.add(fs.rect_ranges("product_pipe", S("Product_Available"), fx + fw / 2 - 5, top, 10, fy - top,
                          [fs.colour_range(0, 0, STANDIN), fs.colour_range(1, 1, PRODUCT)], default=STANDIN))
-    b.add(fs.conditional_text("no_product", T("Product_Available"), 0, 0, fx + fw / 2 + 12, 236,
+    b.add(fs.conditional_text("no_product", S("Product_Available"), 0, 0, fx + fw / 2 + 12, top + 20,
                               "no product", size=12, bold=True, color="#a00000"))
+    # the other end of the wire: the filler's input (the simulator copies the signal, emulating
+    # the hardwiring). Pipe brown + lamp off = the signal does not reach the filler.
+    lamp(b, "Product_Available", fx + 20, top + 24, "filler input")
     # C2 (driven by the labeler stand-in) -> labeler (stand-in)
     conveyor(b, "c2", 724, "C2 outfeed (driven by the labeler)", "Anim_C2", None, PRODUCT)
     lamp(b, "S7", 730, BELT_Y + 56, "S7 C2 full")
@@ -358,42 +652,64 @@ def line_view() -> dict:
     b.add(fs.text(38, 594, "a turning roller = conveyor motor ON", size=12, color=MUTED))
     b.add(fs.rect(16, 612, 14, 14, STANDIN, rx=2))
     b.add(fs.text(38, 624, "grey block = machine not built yet, simulated", size=12, color=MUTED))
-    return fs.view(LINE_ID, LINE_NAME, W, H, b.parts, b.items)
+    return fs.view(view_id, VIEW_NAMES[view_id], W, H, b.parts, b.items)
 
 
-# --- Alarms (stage 5) ---------------------------------------------------------------
-# One FUXA alarm per PLC alarm bit (report 9.3): bit -> (FUXA priority, text). The names are
-# fixed ("filler_<bit>"): FUXA keys its alarm history by name, a rename would orphan it.
+# --- Alarms (stage 5; syrup room S5) --------------------------------------------------
+# One FUXA alarm per PLC alarm bit (report 9.3): bit -> (FUXA priority, text). Priorities:
+# highhigh (red) = the bit puts the machine into FAULT, high (orange) = comm lost, low (yellow) =
+# warning. The names are fixed ("<machine key>_<bit>"): FUXA keys its alarm history by name, a
+# rename would orphan it; the prefix also keeps the two Alm_CommLost apart.
 ALARMS = {
     "Alm_IndexJam": ("highhigh", "Index belt jam: no S8 pulse within 5 s in INDEX (FAULT)"),
     "Alm_FillTimeout": ("highhigh", "Fill timeout: setpoint not reached within 10 s (FAULT)"),
     "Alm_CommLost": ("high", "Plant heartbeat lost for 3 s (simulator link)"),
     "Alm_OutfeedBlocked": ("low", "Outfeed blocked longer than 2 min (warning, no FAULT)"),
 }
-ALARM_GROUP = "Filler"
+# Causes: docs/syrup/ladder-roadmap.md stage 7 (MixMax 950 L, BufferMax 1950 L, PressMax 6.00 bar,
+# CoolTimeout / DoseTimeout 60 s). LowSyrup is not latched: it is the Starved state, not a fault.
+SYRUP_ALARMS = {
+    "Alm_Overflow": ("highhigh", "Overflow: mixing tank ≥ 950 L or high-high switch, or buffer ≥ 1950 L (FAULT)"),
+    "Alm_OverPressure": ("highhigh", "Over-pressure: CO2 ≥ 6.00 bar in the mixing tank (FAULT)"),
+    "Alm_CoolTimeout": ("highhigh", "Cooling timeout: cool setpoint not reached within 60 s in COOL (FAULT)"),
+    "Alm_DoseTimeout": ("highhigh", "Dosing timeout: water or syrup level not reached within 60 s "
+                                    "(pump failure, FAULT)"),
+    "Alm_CommLost": ("high", "Plant heartbeat lost for 3 s (simulator link)"),
+    "Alm_LowSyrup": ("low", "Low syrup: not enough for the next batch (warning, Starved; clears after refill)"),
+}
+ALARM_TEXTS = {FILLER_UI.m.key: ALARMS, SYRUP_UI.m.key: SYRUP_ALARMS}  # machine key -> its alarms
 
 
-def alarm_name(bit: str) -> str:
-    return f"filler_{bit}"
+def alarm_name(bit: str, m: ft.Machine = ft.FILLER) -> str:
+    return f"{m.key}_{bit}"
 
 
 def alarm_definitions() -> list[dict]:
-    return [fs.alarm(alarm_name(bit), T(bit), priority, text, ALARM_GROUP) for bit, (priority, text) in ALARMS.items()]
+    """All machines; group = the machine's title (the Machine column of the alarm list). Dict order,
+    not address order: it keeps the filler definitions unchanged in the export."""
+    return [fs.alarm(alarm_name(bit, ui.m), ui.m.tag_id(bit), priority, text, ui.title)
+            for ui in UIS for bit, (priority, text) in ALARM_TEXTS[ui.m.key].items()]
 
 
-def alarms_view() -> dict:
+def alarms_view(view_id: str = ALARMS_ID) -> dict:
+    """FUXA's active alarm list of the WHOLE line (report 8.1: from all PLCs; unfiltered, the column
+    Machine is the alarm's group); Reset goes to the machine of header row 2 (view_id)."""
+    ui = CONTEXT[view_id]
     b = Builder()
-    header(b, HEADER_KEY[ALARMS_ID], ALARMS_ID)
+    header(b, HEADER_KEY[view_id], view_id)
     b.add(fs.text(16, 128, "Active alarms", size=15, bold=True))
     b.add(fs.alarm_table("alarms_active", 16, 140, 1248, 230, "alarms",
-                         [("ontime", "Time", 170), ("type", "Priority", 110), ("text", "Alarm", 560),
-                          ("status", "Status", 150), ("ack", "Ack", 80)]))
-    b.add(fs.button("alarms_reset", "Reset", 16, 392, 140, 44, [fs.set_value(T("Cmd"), 3)], background=NEUTRAL))
+                         [("ontime", "Time", 170), ("group", "Machine", 120), ("type", "Priority", 100),
+                          ("text", "Alarm", 520), ("status", "Status", 140), ("ack", "Ack", 80)]))
+    b.add(fs.button("alarms_reset", "Reset", 16, 392, 140, 44, [fs.set_value(ui.m.tag_id("Cmd"), 3)],
+                    background=NEUTRAL))
     for k, line in enumerate((
         "Ack (the round button in a row) = \"I have seen this alarm\". FUXA keeps every alarm in this list until it",
         "is acknowledged, also one that came and went, so nothing is missed. Ack does not change the PLC.",
-        "Reset = the PLC clears its alarm bits, but only those whose cause is gone. After a FAULT (index jam, fill",
-        "timeout) the machine also needs Start. Colours: red = FAULT, orange = high, yellow = warning.",
+        f"Reset = the {ui.title.lower()} PLC (picked in the header) clears its alarm bits, but only those whose",
+        "cause is gone. After a FAULT the machine also needs Start. Colours: red = FAULT, orange = high, yellow = warning.",
+        f"The list shows the alarms of both machines (column Machine); Reset acts on the {ui.title.lower()} only "
+        "(other machine: picker in the header).",
     )):
         b.add(fs.text(176, 406 + k * 20, line, size=13, color=TEXT if k in (0, 2) else MUTED))
     b.add(fs.text(16, 520, "Alarm history", size=15, bold=True))
@@ -401,24 +717,26 @@ def alarms_view() -> dict:
                   "\u2192 Apply. It lists every alarm with its on, off and ack time.", size=13))
     b.add(fs.text(16, 572, "(FUXA's own alarm panel; FUXA 1.3.5 cannot show the history in a table on a view.)",
                   size=12, color=MUTED))
-    return fs.view(ALARMS_ID, ALARMS_NAME, W, H, b.parts, b.items)
+    return fs.view(view_id, VIEW_NAMES[view_id], W, H, b.parts, b.items)
 
 
 def apply_alarms(project: dict) -> list[str]:
-    """Replace the filler alarm definitions, keep alarms made in the editor."""
-    ours = {alarm_name(bit) for bit in ALARMS}
-    kept = [a for a in project.get("alarms", []) if a["name"] not in ours]
-    project["alarms"] = kept + alarm_definitions()
-    return [f"{len(ALARMS)} alarms"]
+    """Replace the generated alarm definitions (all machines), keep alarms made in the editor."""
+    ours = alarm_definitions()
+    names = {a["name"] for a in ours}
+    kept = [a for a in project.get("alarms", []) if a["name"] not in names]
+    project["alarms"] = kept + ours
+    return [f"{len(ours)} alarms"]
 
 
 def side_menu() -> list[dict]:
     """FUXA's side menu (top-left button): the views plus FUXA's alarm panel with the history."""
-    icons = {LINE_ID: "linear_scale", MAIN_ID: "local_drink", ALARMS_ID: "notifications",
+    icons = {LINE_ID: "linear_scale", MAIN_ID: "local_drink", SYRUP_MAIN_ID: "opacity", ALARMS_ID: "notifications",
              TRENDS_ID: "show_chart", TAGS_ID: "list"}
     items = [{"id": f"nav_{key}", "text": name, "view": view_id, "icon": icons[view_id]}
              for view_id, name in NAV for key in [HEADER_KEY[view_id]]]
-    return items + [{"id": "nav_alarm_panel", "text": "Alarm history", "view": ALARM_PANEL, "icon": "history"}]
+    return items + [{"id": "nav_syrup_tags", "text": SYRUP_TAGS_NAME, "view": SYRUP_TAGS_ID, "icon": "list"},
+                    {"id": "nav_alarm_panel", "text": "Alarm history", "view": ALARM_PANEL, "icon": "history"}]
 
 
 # --- Trends (stage 6) ---------------------------------------------------------------
@@ -434,15 +752,36 @@ CHARTS = (  # (id, title = FUXA chart name, window min, [(tag, label, colour)])
 )
 
 
+# Syrup room (S6): a batch is ~151 s, so 15 min show about six batches and a whole buffer cycle
+SYRUP_CHARTS = (
+    ("ch_syrup_levels", "Tank levels (L)", 15, [("MixLevel", "Mixing tank L", PRODUCT),
+                                               ("BufferLevel", "Buffer tank L", DARK_BLUE)]),
+    ("ch_syrup_temp", "Product temperature (°C)", 15, [("ProductTemp", "Temperature °C", DARK_BLUE),
+                                                       ("CoolSetpoint", "Setpoint °C", "#8a8a8a")]),
+    ("ch_syrup_press", "CO2 pressure (bar)", 15, [("CO2Pressure", "Pressure bar", DARK_BLUE),
+                                                  ("PressSetpoint", "Setpoint bar", "#8a8a8a")]),
+    ("ch_syrup_state", "Syrup room state", 30, [("State", "State", TEXT)]),
+)
+MACHINE_CHARTS = {FILLER_UI.m.key: CHARTS, SYRUP_UI.m.key: SYRUP_CHARTS}  # machine key -> its charts
+SYRUP_CHART_PLACES = {"ch_syrup_levels": (16, 106, 616, 282), "ch_syrup_temp": (648, 106, 616, 282),
+                      "ch_syrup_press": (16, 396, 616, 250), "ch_syrup_state": (648, 396, 616, 250)}
+SYRUP_CHART_DECIMALS = {"ch_syrup_temp": 1, "ch_syrup_press": 2}  # legend shows 4.5 degC / 3.25 bar
+
+
 def charts() -> list[dict]:
+    """Every machine's charts; a line names its tag by id and its device by name."""
     return [{"id": chart_id, "name": title,
-             "lines": [fs.chart_line(T(tag), ft.DEVICE_NAME, label, colour) for tag, label, colour in lines]}
-            for chart_id, title, _window, lines in CHARTS]
+             "lines": [fs.chart_line(ui.m.tag_id(tag), ui.m.name, label, colour) for tag, label, colour in lines]}
+            for ui in UIS for chart_id, title, _window, lines in MACHINE_CHARTS[ui.m.key]]
 
 
-def trends_view() -> dict:
+def trends_view(view_id: str = TRENDS_ID) -> dict:
+    """The trend charts of the machine of header row 2 (view_id)."""
     b = Builder()
-    header(b, HEADER_KEY[TRENDS_ID], TRENDS_ID)
+    header(b, HEADER_KEY[view_id], view_id)
+    if CONTEXT[view_id] is SYRUP_UI:
+        syrup_trends(b)
+        return fs.view(view_id, VIEW_NAMES[view_id], W, H, b.parts, b.items)
     # fill chart across the top, count (left) and state (right) below it
     places = {"ch_filler_fill": (16, 106, 1248, 300), "ch_filler_count": (16, 414, 616, 250),
               "ch_filler_state": (648, 414, 616, 250)}
@@ -455,15 +794,31 @@ def trends_view() -> dict:
     b.add(fs.text(64, 684, "Normal: each bottle fills up to the setpoint, back to 0 at the index.", size=13))
     b.add(fs.text(64, 706, f"Last {fill_win} min (fill) and {count_win} min (count, state). History: FUXA's DAQ "
                   "store (volume fuxa-daq), every change + once a minute, kept 1 year.", size=12, color=MUTED))
-    return fs.view(TRENDS_ID, TRENDS_NAME, W, H, b.parts, b.items)
+    return fs.view(view_id, VIEW_NAMES[view_id], W, H, b.parts, b.items)
+
+
+def syrup_trends(b: Builder) -> None:
+    """S6: levels and temperature on top, pressure and state below (2 x 2)."""
+    for chart_id, _title, window, _lines in SYRUP_CHARTS:
+        options = fs.chart_options(window, **({"decimalsPrecision": SYRUP_CHART_DECIMALS[chart_id]}
+                                              if chart_id in SYRUP_CHART_DECIMALS else {}))
+        b.add(fs.chart(chart_id.replace("ch_", "trend_"), chart_id, *SYRUP_CHART_PLACES[chart_id], options))
+    key = " \u00b7 ".join(f"{number} {name}" for number, name in STATE_NAMES.items())
+    b.add(fs.text(648, 668, f"State: {key}", size=13))
+    # x = 64: FUXA's round menu button covers the bottom-left corner; lines end before x 640
+    b.add(fs.text(64, 668, "Normal batch: the mixing tank fills (water, then syrup), cools to", size=13))
+    b.add(fs.text(64, 686, "its setpoint, gets CO2 up to its setpoint, then goes to the buffer.", size=13))
+    b.add(fs.text(64, 706, f"Last {SYRUP_CHARTS[0][2]} min, state {SYRUP_CHARTS[3][2]} min. FUXA stores °C / bar "
+                  "as shown (scaled first).", size=12, color=MUTED))
 
 
 def apply_charts(project: dict) -> list[str]:
-    """Replace the filler charts, keep charts made in the editor."""
-    ours = {chart_id for chart_id, *_ in CHARTS}
-    kept = [c for c in project.get("charts", []) if c["id"] not in ours]
-    project["charts"] = kept + charts()
-    return [f"{len(CHARTS)} charts"]
+    """Replace the charts of every machine, keep charts made in the editor."""
+    ours = charts()
+    ids = {c["id"] for c in ours}
+    kept = [c for c in project.get("charts", []) if c["id"] not in ids]
+    project["charts"] = kept + ours
+    return [f"{len(ours)} charts"]
 
 
 # --- Test page "Tags": every tag as a plain live value (stage 1) --------------------
@@ -480,26 +835,28 @@ COLUMNS = [
 COL_W, ROW_H, TOP = 180, 26, HEADER_H + 74
 
 
-def value_id(name: str) -> str:
-    return f"VAL_filler_{name}"
+def value_id(name: str, m: ft.Machine = ft.FILLER) -> str:
+    return f"VAL_{m.key}_{name}"
 
 
-def tags_view() -> dict:
+def tags_view(m: ft.Machine = ft.FILLER, view_id: str = TAGS_ID, view_name: str = TAGS_NAME,
+              header_key: str = HEADER_KEY[TAGS_ID]) -> dict:
+    """Every tag of machine m as a plain live value, one column per group (description prefix)."""
     b = Builder()
-    header(b, HEADER_KEY[TAGS_ID], TAGS_ID)
-    b.add(fs.text(20, HEADER_H + 38, "Filler PLC – all tags (test page, read only)", size=20, bold=True))
+    header(b, header_key, view_id)  # row 2 = CONTEXT[view_id], the machine of this page
+    b.add(fs.text(20, HEADER_H + 38, f"{m.name} – all tags (test page, read only)", size=20, bold=True))
     for col, (title, prefixes) in enumerate(COLUMNS):
         x = 20 + col * COL_W
         b.add(fs.text(x, TOP, title, bold=True))
         row = 0
-        for name, _area, _number, _kind, description in ft.TAGS:
+        for name, _area, _number, _kind, description in m.tags:
             if description.split(":")[0] not in prefixes:
                 continue
             y = TOP + 30 + row * ROW_H
             b.add(fs.text(x, y, name, size=13))
-            b.add(fs.value(value_id(name), T(name), x + COL_W - 20, y))
+            b.add(fs.value(value_id(name, m), m.tag_id(name), x + COL_W - 20, y))
             row += 1
-    return fs.view(TAGS_ID, TAGS_NAME, W, H, b.parts, b.items)
+    return fs.view(view_id, view_name, W, H, b.parts, b.items)
 
 
 def apply_views(project: dict) -> list[str]:
@@ -512,7 +869,10 @@ def apply_views(project: dict) -> list[str]:
             changes.append("empty MainView removed")
         else:
             kept.append(v)
-    project["hmi"]["views"] = kept + [line_view(), filler_view(), alarms_view(), trends_view(), tags_view()]
+    project["hmi"]["views"] = kept + [line_view(), filler_view(), alarms_view(), trends_view(), tags_view(),
+                                      tags_view(ft.SYRUP, SYRUP_TAGS_ID, SYRUP_TAGS_NAME, HEADER_KEY[SYRUP_TAGS_ID]),
+                                      line_view(SYRUP_LINE_ID), alarms_view(SYRUP_ALARMS_ID),
+                                      trends_view(SYRUP_TRENDS_ID), syrup_view()]
     project["hmi"]["layout"].setdefault("navigation", {})["items"] = side_menu()
     project["hmi"]["layout"]["start"] = LINE_ID  # the overview is the main screen (report 8.1)
     return changes
