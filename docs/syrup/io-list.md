@@ -16,7 +16,7 @@ Same byte group as the filler for the same job (`%MX0` sensors, `%MX1` wiring, `
 
 ## Analog sensors (written by the simulator)
 
-All values are INT (16-bit, signed) with fixed-point units (L, 0.1 °C, 0.01 bar), no REAL (decision 2026-11-09): one Modbus register per value and plain INT compares in ladder, like the scaled integers a real analog input card delivers. The HMI and the simulator do the scaling.
+All values are INT (16-bit, signed) with fixed-point units (L, 0.1 °C, 0.01 bar), no REAL (decision 2026-11-09): one Modbus register per value and plain INT compares in ladder, like the scaled integers a real analog input card delivers. The HMI and the simulator do the scaling (FUXA: the tag's expression scale, read `this / 10`, write `Math.round(this * 10)`; see `docs/hmi/roadmap.md`, S3).
 
 | Name | Type | Address | Modbus | Meaning |
 | --- | --- | --- | --- | --- |

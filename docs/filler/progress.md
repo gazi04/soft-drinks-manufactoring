@@ -8,8 +8,8 @@ Filler docs: `io-list.md`, `state-diagram.md`, `ladder-roadmap.md` (stages for t
 - **Ladder** (phase 1): functionally complete, stages 0–8, 8 test scripts / 157 checks (`ladder-roadmap.md`), cleaned up.
 - **Simulator** (phase 2): complete for the filler – physics, Modbus link, tick loop, command queue + fault scenarios, Textual control panel, HMI animation words %MW70–75, plant lock (one writer per PLC). 149 unit tests; against the real PLC `test_link.py --restart` 6/6, `test_closed_loop.py` 5/5, `test_scenarios.py --quick` 9/9.
 - **HMI** (phase 3): FUXA stages 0–6 done – Line overview (start page), Filler screen, Alarms (+ history), Trends (DAQ history, 2026-11-04), Tags, header with commands on every view (`docs/hmi/roadmap.md`). I3 jog watchdog in the ladder and uploaded (2026-11-03). Open: stage 7 wrap-up; HMI issue I16 (≈1–2 % of FUXA writes time out, older than stage 6). Pre-demo check `simulator/tests/demo_check.py`.
-- **Open decision:** scope – how many machines (`docs/scope-options.md`, recommendation: filler + syrup room).
-- **Next:** FUXA stage 7 (demo and wrap-up) (section 3, `docs/hmi/roadmap.md`); the scope decision first if new machines are planned.
+- **Scope decided** (2026-11-09, option B): filler + syrup room committed, the other machines are stretch goals (`docs/scope-options.md`). The syrup room has its own progress file, `docs/syrup/progress.md`.
+- **Next:** FUXA stage 7 (demo and wrap-up) (section 3, `docs/hmi/roadmap.md`); the open manual interlocks (`Man_Door`, `Man_Fill`, stage 7.3).
 
 ## Why the filler first
 
