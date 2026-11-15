@@ -49,7 +49,7 @@ Copy section 1 of the filler and change only the defaults:
 
 - First-scan defaults (`NOT Init_Done` → MOVE chain → `(S) Init_Done`): `WaterBatch` 500, `SyrupRatio` 55 (5.5:1), `MixTime` 20, `CoolSetpoint` 40, `TempHyst` 5, `PressSetpoint` 350, `PressHyst` 20, `BufferLow` 800, `BufferMin` 100, `CarbTime` 10 (values to tune with the simulator).
 - `ModeReq` → `Mode_Stop/Auto/Manual` (EQ); `Cmd` → `Start_Cmd/Stop_Cmd/Reset_Cmd` + MOVE 0 → `Cmd`.
-- `Master_Enable := E_Stop_OK AND NOT Alm_CommLost`; heartbeat watchdog (XOR change detect, TON 3 s).
+- `Master_Enable := E_Stop_OK AND NOT Alm_CommLost`; heartbeat watchdog (XOR change detect, TON 3 s). **Rung order:** the `Master_Enable` rung comes AFTER the watchdog's `Alm_CommLost` set / reset rungs, so a Reset that clears `Alm_CommLost` enables the sequence in the same scan (else FAULT + `Alm_CommLost` needs two Resets; fixed 2026-11-14).
 
 **Test** (`test_syrup_stage1.py`): after upload HR 1054–1063 hold the defaults; a later write is kept. `E_Stop_OK` FALSE → `Master_Enable` FALSE. Heartbeat frozen 3 s → `Alm_CommLost`.
 

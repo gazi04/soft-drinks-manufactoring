@@ -194,8 +194,7 @@ def d7_ready(rt: Runtime, client: ModbusTcpClient) -> None:
     if mode != 1:
         fixes.append(f"Auto via {rt.hmi}")
     if alarms:
-        again = " (twice when Alm_CommLost came with FAULT)" if "Alm_CommLost" in alarms and step == 900 else ""
-        fixes.append(f"alarms {', '.join(alarms)}: remove the cause, then Reset{again} via {rt.hmi}")
+        fixes.append(f"alarms {', '.join(alarms)}: remove the cause, then Reset via {rt.hmi}")
     if fixes:
         report("WARN", f"D7 {rt.label} ready", f"{where} – {'; '.join(fixes)}")
     else:

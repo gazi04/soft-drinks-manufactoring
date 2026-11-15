@@ -283,5 +283,5 @@ FUXA has one Modbus device per PLC, and each device has its own connection statu
 **Why is "only the filler lock held" a WARN of its own?**
 The plant lock is per PLC port. Filler lock held but syrup lock free means the simulator was started with `--filler-only`: the syrup PLC gets no heartbeat (`Alm_CommLost`) and the filler runs on the stand-in `Product_Available`, so the demo would not show the two-PLC handshake. The check says so instead of a generic "no simulator".
 
-**Why the "Reset twice" hint?**
-The syrup ladder (and the filler's) computes `Master_Enable` above the watchdog Reset rung, so with `Alm_CommLost` and FAULT both latched the first Reset clears only `Alm_CommLost` (`docs/syrup/progress.md`, open question). D7 adds "(twice ...)" exactly in that case (step 900 and `Alm_CommLost`), until the rung order is changed in the Editor.
+**Why was there a "Reset twice" hint, and why is it gone?**
+Both ladders computed `Master_Enable` above the watchdog's Reset rung. With `Alm_CommLost` and FAULT both latched, the Reset scan saw the old `Alm_CommLost` there, so `Seq_Enable` stayed FALSE, the FAULT → IDLE rung did not fire, and `Cmd` was already cleared for the next scan: a second Reset was needed, and D7 said so. Fixed in the Editor on 2026-11-14 (both PLCs): the `Master_Enable` rung now comes after the `Alm_CommLost` reset rung, so one Reset leaves FAULT. D7 no longer adds the hint.

@@ -50,7 +50,7 @@ Variables: located ones (`AT %…`) exactly as in `io-list.md`; helper bits and 
 - **First-scan defaults:** initial values of located variables (`AT %M…`) are ignored by the v4 runtime (the image, which starts at 0, is copied into the variables before every scan). So the setpoints get their defaults from a rung: internal BOOL `Init_Done` (no address); `NOT Init_Done` → MOVE 500 → `FillSetpoint`, MOVE 2000 → `RinseTime`, MOVE 1500 → `CapTime`, then set `Init_Done`. *(week X: data handling)*
 - Decode `ModeReq` with EQ: `Mode_Auto`, `Mode_Manual`, `Mode_Stop`.
 - Decode `Cmd` with EQ into one-scan pulses: `Start_Cmd`, `Stop_Cmd`, `Reset_Cmd`. The PLC sets `Cmd` back to 0 after reading it (MOVE 0), so a command acts only once.
-- `Master_Enable := E_Stop_OK AND NOT Comm_Lost` – gates every output later (MCR equivalent).
+- `Master_Enable := E_Stop_OK AND NOT Comm_Lost` – gates every output later (MCR equivalent). **Rung order:** after the watchdog's set / reset rungs, so one Reset leaves FAULT even when `Alm_CommLost` was latched too (fixed 2026-11-14, see `docs/syrup/progress.md`).
 - Heartbeat watchdog: TON 3 s on "Heartbeat did not change" → `Comm_Lost`.
 
 **Test:** after upload, `FillSetpoint` = 500, `RinseTime` = 2000, `CapTime` = 1500 (read over Modbus, HR 1054–1056). Force `E_Stop_OK` FALSE → `Master_Enable` FALSE. Write `Cmd` = 1 → `Start_Cmd` TRUE for one scan, `Cmd` back to 0.

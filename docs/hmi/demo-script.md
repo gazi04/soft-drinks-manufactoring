@@ -17,7 +17,7 @@ What was checked when:
 1. Start the stack (repo root): `docker compose up -d`
 2. Pre-demo check: `cd simulator && uv run python tests/demo_check.py`. If D2 says *Modbus server is OFF* or *no compiled program* (after a container re-creation or a laptop suspend): OpenPLC Editor, upload `plcs/filler` (device `localhost`) and `plcs/syrup` (device `127.0.0.2`).
 3. Start the simulator with its panel: `cd simulator && uv run simulator` (drives both PLCs).
-4. FUXA **Alarms**: **Ack** every row, **Reset** – then pick **Syrup room** in row 2 and **Reset** again. A fresh simulator start always leaves `Alm_CommLost` latched on **both** machines. If the syrup room was in FAULT too, press its Reset **twice** (ladder finding 2026-11-13).
+4. FUXA **Alarms**: **Ack** every row, **Reset** – then pick **Syrup room** in row 2 and **Reset** again. A fresh simulator start always leaves `Alm_CommLost` latched on **both** machines. One Reset per machine is enough, also after a FAULT (ladder fix 2026-11-14).
 5. `uv run python tests/demo_check.py` again → **0 FAIL** (a WARN tells you the fix).
 6. Panel defaults, tab `1 Filler`: **Supply /min** `30`, **Fill flow** `100`, switches **Supply paused** OFF, **Product available** ON, **E-stop** OFF. Tab `2 Syrup room`: no fault switch ON.
 7. FUXA: **Filler** in row 2 → **Auto**, **Start**; **Syrup room** in row 2 → **Auto**, **Start**.
@@ -61,7 +61,6 @@ Spare scenarios if there are questions:
 | Bottles stand on C1, filler empty, state Stopped | Start was not pressed in Auto: **Filler** in row 2, **Auto**, **Start**. |
 | Syrup room grey, buffer falling, filler soon Starved | Syrup room not started: **Syrup room** in row 2, **Auto**, **Start**. |
 | Red alarm chips right after starting the simulator | `Alm_CommLost` from the restart, on both machines: **Ack**, **Reset** per machine, **Start** per machine. |
-| Syrup room stays red after Reset, step FAULT | `Alm_CommLost` came with the FAULT: press **Reset** once more (ladder finding), then **Start**. |
 | Machine stays red after Reset (other cases) | The cause is still there (panel switch ON: E-stop, a syrup fault, fill flow < 50): fix it in the panel, then Reset + Start. |
 | A click in FUXA did nothing | About 1–2 % of FUXA's writes time out (issue I16): check the header (state, mode) and press again. |
 | Header: *Filler PLC LOST* / *Syrup PLC LOST* | `uv run python tests/demo_check.py`: D2 *Modbus server OFF* → upload that PLC from the Editor; container down → `docker compose up -d`. |

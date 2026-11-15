@@ -107,9 +107,9 @@ def reset_to_idle(client: ModbusTcpClient) -> int:
     """Auto, then Reset until Step = 0 (at most 3 Resets); returns the Step reached.
 
     Auto first: the transition 900 -> 0 needs Seq_Enable (Auto), in Mode Stop the abort rung keeps FAULT.
-    Repeated: if Alm_CommLost is latched too (a script that stopped its heartbeat), the first Reset only
-    clears it - Master_Enable (rung 6) is computed before the Reset rung of the watchdog (rung 10), so in
-    that scan Seq_Enable is still FALSE and FAULT stays. The second Reset then leaves FAULT.
+    Repeated as a safety net: before the ladder fix of 2026-11-14 a FAULT with Alm_CommLost also latched
+    needed two Resets (Master_Enable was computed above the watchdog's Reset rung). Since Master_Enable
+    comes after that rung, one Reset leaves FAULT; the loop then ends after the first try.
     Needs the heartbeat running and E_Stop_OK TRUE."""
     client.write_register(HR_MODE_REQ, MODE_AUTO)
     time.sleep(SETTLE)
