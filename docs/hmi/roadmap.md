@@ -2,7 +2,7 @@
 
 How to build the operator screens in FUXA, in small stages. Each stage builds on the one before. Design: `docs/project-report.md` section 8. Addresses: `docs/filler/io-list.md`. Machine behaviour: `docs/filler/state-diagram.md`. The stage checklist is ticked here and in `docs/filler/progress.md` section 3.
 
-**Status:** filler stages 0–6 done, 7 partly (7.4 optional, 7.6 open); issues closed except I16 (≈1–2 % of FUXA's Modbus writes time out, older than stage 6). Syrup room (section "Syrup room screens"): S0–S7 built (device, 48 tags, test page, header for two machines, syrup room screen, syrup room block on the Line overview, syrup room alarms, syrup room trends, wrap-up: `demo_check.py` D4 per PLC, demo script for both machines), **next: the live checks after a PLC upload** – S4 `buffer_starved`, S5 `level_sensor_stuck`, S6 one batch as a curve + H10 syrup, S7 `demo_check.py` 0 FAIL and one rehearsal of the demo script.
+**Status:** filler stages 0–6 done, 7 partly (7.4 optional, 7.6 open); issues closed except I16 (≈1–2 % of FUXA's Modbus writes time out, older than stage 6). Syrup room (section "Syrup room screens"): S0–S7 built (device, 48 tags, test page, header for two machines, syrup room screen, syrup room block on the Line overview, syrup room alarms, syrup room trends, wrap-up: `demo_check.py` D4 per PLC, demo script for both machines), live checks of S4–S6 passed (2026-11-14, see "Live verification" below); demo script rehearsed (2026-11-15).
 
 ## Goal
 
@@ -527,7 +527,13 @@ Open: a line-wide Start / Stop / Reset (report 8.4) writes to two PLCs in one cl
 - **Demo script for the whole line** (`docs/hmi/demo-script.md`, ~15 min, 12 steps): preparation for two PLCs (upload hint from D2, Ack + Reset per machine, Auto + Start for both, one batch before the demo so the trends have curves); new steps *Syrup room* screen, syrup *Trends*, `buffer_starved` (the `Product_Available` handshake: filler Starved without an alarm, continues by itself) and `level_sensor_stuck` (the high-high switch as the hardware backup, the *Machine* column in the alarm list), run in that order so the stuck sensor comes at the next batch at once; `e_stop` now stops both machines (one chain, `plant.py`), so both need Start. Spares, things to avoid (no simulator restart mid-batch; syrup scenarios wait for their step) and troubleshooting for both machines. Facts checked against `scenarios.py` and the setpoint defaults (`BufferLow` 800 L). **To rehearse once with live PLCs** – the syrup screens of S4–S6 have not seen live data yet.
 - **ISA-101 review** of the syrup screens (screenshots without PLC data, `locale="en-US"`): grey page, colour only for the state block, alarm chips, flowing pipes and the red limit ticks; units next to every value; no overlap. No change. (Without data the Manual buttons show, because FUXA has no `ModeReq` value to hide them; live they appear only in Manual – checked in S3.)
 - **Report 8.1** updated: the syrup room is built, with the list of screens for both machines.
-- **Open (needs the PLC upload):** `demo_check.py` 0 FAIL, then the live checks of S4–S6 and one rehearsal of the demo script.
+- **Done live:** `demo_check.py` 0 FAIL and the live checks of S4–S6 (2026-11-14), one rehearsal of the demo script (2026-11-15).
+
+**Live verification S4–S6 (2026-11-14):** both PLCs running, one simulator loop in a scratch driver (the HMI over Modbus), screens checked in a headless browser (`locale="en-US"`) and through FUXA's API; 24/26 checks, both FAILs were the driver's own conditions (log in `docs/syrup/progress.md`).
+- `test_hmi_tags.py` live **16/16** with the machines idle. With the line running, H2 found the filler's `FillLevel` one FUXA poll behind (290 / 310 ml): H2 is meant for an idle line.
+- **S4:** the syrup block is green with the step text during a batch and grey when stopped; the pipe is brown, or grey with "no product" and a yellow filler while the buffer is below `Product min`; `buffer_starved` recovers by itself. The agitator turns during MIX.
+- **S5:** `level_sensor_stuck` → `Alm_Overflow`, FAULT; FUXA lists `syrup_Alm_Overflow` (Syrup room, highhigh) in the table with the Machine column; Ack → status NA; Reset clears the bit and the acknowledged alarm leaves the list; the history has on, off and ack time.
+- **S6:** one batch in FUXA's history in display units (mixing level 590 L, temperature down to 4.0 °C, pressure up to 3.53 bar); H10 syrup passes; the syrup Trends screen opens without errors.
 
 ## Issues and open questions
 

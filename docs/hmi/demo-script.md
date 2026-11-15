@@ -4,7 +4,7 @@ A fixed order for presenting the line: two PLCs (OpenPLC, one runtime per machin
 
 What was checked when:
 - **Filler** steps: all checked live with FUXA as the HMI in HMI stage 7.3 (`roadmap.md`, 2026-11-04).
-- **Syrup room** steps: the scenarios on the real PLCs (`buffer_starved` and `level_sensor_stuck` by hand, 2026-11-13), the *Syrup room* screen with `cooling_failure` / `over_pressure` (S3, 2026-11-13). The Line block (S4), the syrup alarms (S5) and the syrup trends (S6) were built and checked on the FUXA project, **not yet with live PLC data** – the rehearsal is their first live run.
+- **Syrup room** steps: the scenarios on the real PLCs (`buffer_starved` and `level_sensor_stuck` by hand, 2026-11-13), the *Syrup room* screen with `cooling_failure` / `over_pressure` (S3, 2026-11-13). The Line block (S4), the syrup alarms (S5) and the syrup trends (S6) were checked live on 2026-11-14 (`roadmap.md`, "Live verification S4–S6"); the whole script was rehearsed on 2026-11-15.
 
 **Screens:** browser with FUXA (`http://localhost:1881`), one terminal with the simulator panel (at least 140×45 for the syrup tab). Optional: OpenPLC editor (filler `https://localhost:8443`, syrup room `https://127.0.0.2:8443`) to show the ladder.
 

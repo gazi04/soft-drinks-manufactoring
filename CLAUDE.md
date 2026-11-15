@@ -8,7 +8,7 @@ University PLC course project (master's, *PLC Programming*): a full soft drink p
 
 Read before proposing structure or code:
 - `docs/project-report.md` — the design: machines, handshakes, address map, simulator, HMI, modes/alarms, syllabus coverage, plan. **Source of truth for design decisions.**
-- `docs/<machine>/progress.md` — per-machine checklist, decisions, open questions and log (`docs/filler/` complete, `docs/syrup/` in progress: paper and ladder (stages 0–7) done, simulator stages 0–8 done, FUXA S0–S7 built; next: PLC upload, then `demo_check.py` 0 FAIL, the live checks of S4 `buffer_starved`, S5 `level_sensor_stuck`, S6 batch curve, one rehearsal of `docs/hmi/demo-script.md`, open live scenarios). Check the current step there before starting work on a machine, and update it as steps complete.
+- `docs/<machine>/progress.md` — per-machine checklist, decisions, open questions and log (`docs/filler/` complete, `docs/syrup/` complete: paper and ladder (stages 0–7), simulator stages 0–8, FUXA S0–S7, live checks and all scenarios 2026-11-14, demo script rehearsed 2026-11-15). Check the current step there before starting work on a machine, and update it as steps complete.
 - `docs/simulator/roadmap.md` — staged build plan for the Python simulator (stages 0–9, test per stage); progress is ticked in `docs/filler/progress.md` section 2.
 - `docs/simulator/design-notes.md` — short answers to the simulator's non-obvious decisions (timing, windows, Modbus link); keep it updated when such a decision changes.
 - `docs/hmi/roadmap.md` — staged build plan for the FUXA HMI (filler stages 0–7, syrup room stages S0–S7, test per stage, issues I1–I16); progress is ticked there and in section 3 of `docs/filler/progress.md` / `docs/syrup/progress.md`.
