@@ -11,7 +11,7 @@ How: a non-blocking fcntl.flock on <tempdir>/soft-drink-plant-<host>-<port>.lock
   stale lock can never block the next run (a plain "lock file exists" check could).
 - The file name contains host and port: the unit tests talk to fake PLC servers on
   other ports and never collide with a running simulator; a later second PLC
-  (ports 5021-5025) gets its own lock.
+  (ports 5022-5025) gets its own lock.
 - acquire() is idempotent inside one process (test_scenarios.py calls loop.run often);
   the lock is held until the process ends.
 """

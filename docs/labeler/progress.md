@@ -23,6 +23,7 @@ Labeler docs: `io-list.md`, `state-diagram.md`, `ladder-roadmap.md` (stages 0–
 - 2026-11-15: bottle held by a **centering bell** (`ClampValve`, `Bell_Down`) while it spins: steps CLAMP → WRAP → PRESS → UNCLAMP, interlock "spin only with the bell down".
 - 2026-11-15: **glue heater on in every mode** while `Master_Enable` and no FAULT (hysteresis `Heat_Demand`, window `Glue_Ready`, `GlueMax`), like the blow moulder's oven; step WARM_UP after Start.
 - 2026-11-15: end of the wrap = **turns counted with a CTU** on the spin pulse `Spin_Pulse` (`PressTurns` setpoint), not a timer.
+- 2026-11-16: **addresses in build order**: the filler keeps 127.0.0.1 / 502 (no move to 127.0.0.3 / 5023), the labeler takes **127.0.0.3 / 5023**, packer 127.0.0.4 / 5024, blow moulder 127.0.0.5 / 5025 (report 6.1).
 - 2026-11-15: 10 digital sensors → the two extra ones (`Roll_Low`, `Glue_Low`) in **`%MX4`** (free in the standard layout); 9 outputs `%QX0.0–1.0`; 7 alarm bits in `%MX5` (`%MX5.7` spare).
 
 ## Order of work and why
@@ -39,7 +40,7 @@ Same as the other machines: **paper → ladder → simulator → HMI**. Addresse
 - [x] Report updated (2026-11-15): 4 table + 4.4 (new design), 6.2 (`%MX4` sensor byte, `Cmd = 4`, labeler counter), 8.1 (labeler screen), 11 (syrup room done, labeler in progress); `CLAUDE.md`
 
 ### 1. Ladder logic (OpenPLC Editor v4) – stages in `ladder-roadmap.md`
-- [ ] Stage 0 – Third runtime container `plc-labeler` (Modbus 5024, editor 127.0.0.4:8443), project `plcs/labeler/`, `mx_bits` = 64, variables, FBs copied
+- [ ] Stage 0 – Third runtime container `plc-labeler` (Modbus 5023, editor 127.0.0.3:8443), project `plcs/labeler/`, `mx_bits` = 64, variables, FBs copied
 - [ ] Stage 1 – Modes and safety (copied from the syrup room), defaults, `Cmd = 4` decode, heartbeat
 - [ ] Stage 2 – Glue temperature: `Glue_Ready` window, `Heat_Demand` hysteresis
 - [ ] Stage 3 – Conditioning: `Outfeed_Full` (`C3_Full`), Starved filter timer, `Label_Mark` edge
@@ -49,7 +50,7 @@ Same as the other machines: **paper → ladder → simulator → HMI**. Addresse
 - [ ] Stage 7 – Alarms and FAULT
 
 ### 2. Python simulator – stages in `docs/simulator/roadmap.md`
-- [ ] Not planned yet (C3 conveyor, packer stand-in, `machines/labeler.py` with label roll, glue tank temperature, bell and turntable, fault injection (torn web, stuck bell, heater failure), `LabelerPlc` on 5024)
+- [ ] Not planned yet (C3 conveyor, packer stand-in, `machines/labeler.py` with label roll, glue tank temperature, bell and turntable, fault injection (torn web, stuck bell, heater failure), `LabelerPlc` on 5023)
 
 ### 3. HMI (FUXA) – stages in `docs/hmi/roadmap.md`
 - [ ] Not planned yet

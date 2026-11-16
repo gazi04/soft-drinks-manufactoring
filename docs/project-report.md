@@ -260,19 +260,17 @@ All components talk over **Modbus TCP**. Each OpenPLC runtime is a Modbus server
 
 All containers run on one Docker network and are started with one `docker compose up`. Inside the network every PLC listens on port 502 under its own service name. Different host ports are mapped only for debugging from the laptop.
 
-**Editor connection:** OpenPLC Editor v4 always connects to port **8443** (hard-coded, verified 2026-11-09 in Editor 4.3.3); only the device IP can be set in the project. So every PLC gets its own **loopback IP** on port 8443 (PLC *n* → `127.0.0.n`), like real PLCs on one network with the same port and different addresses. Exception until the filler service is renamed: the filler uses `127.0.0.1` (= `localhost`).
+**Editor connection:** OpenPLC Editor v4 always connects to port **8443** (hard-coded, verified 2026-11-09 in Editor 4.3.3); only the device IP can be set in the project. So every PLC gets its own **loopback IP** on port 8443, like real PLCs on one network with the same port and different addresses. Loopback IP and host Modbus port follow the **order in which the machines are built** (decision 2026-11-16): the filler came first and keeps `127.0.0.1` (= `localhost`) and port 502, every later PLC gets the next `127.0.0.n` and port `502n`. The filler service may still be renamed from `openplc` to `plc-filler`; its addresses stay.
 
 | Service | Role | Modbus inside network | Host Modbus port | Editor address (port 8443) |
 | --- | --- | --- | --- | --- |
-| `plc-blowmolder` | PLC 1 | `plc-blowmolder:502` | 5021 | 127.0.0.1* |
+| `plc-blowmolder` | PLC 1 | `plc-blowmolder:502` | 5025 | 127.0.0.5 |
 | `plc-syrup-carb` | PLC 2 | `plc-syrup-carb:502` | 5022 | 127.0.0.2 |
-| `plc-filler` | PLC 3 | `plc-filler:502` | 5023 | 127.0.0.3 (today `127.0.0.1`, service `openplc`) |
-| `plc-labeler` | PLC 4 | `plc-labeler:502` | 5024 | 127.0.0.4 |
-| `plc-packer` | PLC 5 | `plc-packer:502` | 5025 | 127.0.0.5 |
+| `plc-filler` | PLC 3 | `plc-filler:502` | 502 | 127.0.0.1 (service today: `openplc`) |
+| `plc-labeler` | PLC 4 | `plc-labeler:502` | 5023 | 127.0.0.3 |
+| `plc-packer` | PLC 5 | `plc-packer:502` | 5024 | 127.0.0.4 |
 | `simulator` | Plant model | client only | – | – |
 | `fuxa` | HMI / SCADA | client only | – | 1881 (web) |
-
-\* The blow moulder gets `127.0.0.1` only after the filler has moved to `127.0.0.3`.
 
 ### 6.2 Standard machine interface
 

@@ -10,7 +10,7 @@ Same as the filler and the syrup room (`docs/filler/io-list.md`, "Address rules"
 - Booleans → `%MX` (coils from 8192), numbers → `%MW` (holding registers from 1024), physical outputs → `%QX` (coils from 0).
 - Sensors are written by the simulator into `%MX` / `%MW`, not `%IX`.
 - Project setting **`mx_bits` = 64** in *Device → Servers → RuntimeServer* (covers `%MX0.0`–`%MX7.7`).
-- Own runtime container `plc-labeler`: Modbus host port **5024**, editor at **`127.0.0.4:8443`** (report 6.1). The addresses below are this PLC's own memory and may overlap with the other PLCs'.
+- Own runtime container `plc-labeler`: Modbus host port **5023**, editor at **`127.0.0.3:8443`** (report 6.1). The addresses below are this PLC's own memory and may overlap with the other PLCs'.
 
 Same byte group as the other machines for the same job (`%MX0` sensors, `%MX1` wiring, `%MX2` manual, `%MX3` conditioned, `%MX5` alarms; `%MW30–39` setpoints, `%MW50–53` status). **New for this machine:** 10 digital sensors, more than the 8 bits of `%MX0`, so the two extra ones go into **`%MX4`** (free in the standard layout, report 6.2).
 

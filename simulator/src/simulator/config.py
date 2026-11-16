@@ -11,7 +11,7 @@ file never changes while the simulator runs.
 
 # --- Connection -------------------------------------------------------------------
 PLC_HOST = "127.0.0.1"  # later "plc-filler" inside the Docker network
-PLC_PORT = 502  # later 5023 from the host (report section 6.1)
+PLC_PORT = 502  # the filler keeps 502 (report section 6.1, addresses in build order)
 SYRUP_PORT = 5022  # the syrup room's own runtime (plc-syrup-carb), same host
 
 # --- Tick loop --------------------------------------------------------------------

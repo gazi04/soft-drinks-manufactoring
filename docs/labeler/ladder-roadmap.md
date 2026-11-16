@@ -5,10 +5,10 @@ How to build the labeler PLC program in the OpenPLC Editor v4, in small stages. 
 ## Working rule for every stage
 
 1. Build only the rungs of this stage.
-2. Compile and upload (runtime `plc-labeler`, device IP `127.0.0.4`).
+2. Compile and upload (runtime `plc-labeler`, device IP `127.0.0.3`).
 3. **Test by forcing** in the debugger (the "Test" line of each stage).
 4. **Release all forces** (a leftover force blocks Modbus writes later).
-5. Run the Modbus test script for the stage (`simulator/tests/`, against port 5024).
+5. Run the Modbus test script for the stage (`simulator/tests/`, against port 5023).
 6. Tick it in `progress.md`; the user commits.
 
 Never start the next stage with a failing test. Before using a block for the first time, check that it exists in the Editor v4 library. All blocks of this machine are already used in the filler / syrup room: `ADD`, `SUB`, `EQ`, `GE`, `LE`, `LT`, `TON`, `TP`, `CTU`, `MOVE`, P contacts.
@@ -35,13 +35,13 @@ Function blocks: FB_Motor, FB_Valve (copied from plcs/syrup/)
 
 ## Stage 0 – Project and container setup
 
-- **Third runtime container.** `docker-compose.yml` gets a service `plc-labeler`, a copy of `plc-syrup-carb` with host Modbus port **5024**, editor at **`127.0.0.4:8443`**, own volumes `labeler-data` / `labeler-build` (report 6.1). On Linux every `127.x.x.x` address is loopback, no network setup needed.
-- New project `plcs/labeler/`; *Device*: board **OpenPLC Runtime v4**, IP **127.0.0.4**; *Servers*: Modbus TCP server, port 502 (inside the container), same buffer mapping as the syrup room (`plcs/syrup/devices/servers/modbusServer.json`), **`mx_bits` = 64** (covers the new sensor byte `%MX4`). Without the mapping the compile aborts with "Nothing produces %MW / %QX on this target".
+- **Third runtime container.** `docker-compose.yml` gets a service `plc-labeler`, a copy of `plc-syrup-carb` with host Modbus port **5023**, editor at **`127.0.0.3:8443`**, own volumes `labeler-data` / `labeler-build` (report 6.1). On Linux every `127.x.x.x` address is loopback, no network setup needed.
+- New project `plcs/labeler/`; *Device*: board **OpenPLC Runtime v4**, IP **127.0.0.3**; *Servers*: Modbus TCP server, port 502 (inside the container), same buffer mapping as the syrup room (`plcs/syrup/devices/servers/modbusServer.json`), **`mx_bits` = 64** (covers the new sensor byte `%MX4`). Without the mapping the compile aborts with "Nothing produces %MW / %QX on this target".
 - Declare every variable from `io-list.md`; constants from `state-diagram.md` (`GatePulse`, `CutPulse`, `StarvedDelay`, `ClampTimeout`, `LabelTimeout`, `OutTimeout`, `HeatTimeout`, `GlueMax`, `BlockedWarn`) as internal variables with initial values.
 - Copy `FB_Motor` and `FB_Valve` from `plcs/syrup/` (no changes).
 - One empty test rung, compile, upload.
 
-**Test** (`test_labeler_stage0.py`): write `GlueTemp` (HR 1036), `E_Stop_OK` (coil 8201) and `Roll_Low` (coil 8224, the new `%MX4` byte) on port 5024 and read them back; the debugger shows them. The filler (502) and the syrup room (5022) are unaffected. Needs the uploaded program: without `libplc_*.so` the runtime starts no Modbus server and the connection is reset.
+**Test** (`test_labeler_stage0.py`): write `GlueTemp` (HR 1036), `E_Stop_OK` (coil 8201) and `Roll_Low` (coil 8224, the new `%MX4` byte) on port 5023 and read them back; the debugger shows them. The filler (502) and the syrup room (5022) are unaffected. Needs the uploaded program: without `libplc_*.so` the runtime starts no Modbus server and the connection is reset.
 
 ## Stage 1 – Modes and safety  *(weeks IV, VI, VIII, X)*
 
@@ -125,5 +125,5 @@ Section 7, in this order (as the syrup room):
 
 ## After stage 7
 
-- Run all stage scripts once more (regression; a `tests/run_labeler.py` like `run_syrup.py`), then the Python simulator takes over (`docs/simulator/roadmap.md`, new section "Labeler simulator": conveyor C3 + packer stand-in, `machines/labeler.py` with label roll, glue tank temperature, turntable and bell, `LabelerPlc` on port 5024, C2 driven by the labeler PLC instead of the stand-in).
+- Run all stage scripts once more (regression; a `tests/run_labeler.py` like `run_syrup.py`), then the Python simulator takes over (`docs/simulator/roadmap.md`, new section "Labeler simulator": conveyor C3 + packer stand-in, `machines/labeler.py` with label roll, glue tank temperature, turntable and bell, `LabelerPlc` on port 5023, C2 driven by the labeler PLC instead of the stand-in).
 - The first **real conveyor link** between two PLCs: stop the labeler → C2 fills → the filler's S7 → filler **Blocked**; Start → C2 drains → the filler continues by itself (report 5.5).

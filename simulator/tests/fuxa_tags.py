@@ -171,7 +171,7 @@ class Machine:
     """One PLC = one FUXA Modbus device (report 3: one OpenPLC runtime per machine).
 
     A later machine (e.g. the syrup room) is one more Machine with its own key, PLC address
-    (planned host ports 5021-5025, report 6.1) and tag table built from its address map; the
+    (host ports 502, 5022-5025, report 6.1) and tag table built from its address map; the
     views draw it with conveyor()/machine_block() in fuxa_views.py (roadmap issue I11).
     Ids are derived from the key: device "d_<key>", tags "t_<key>_<name>"."""
 
