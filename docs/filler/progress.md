@@ -125,6 +125,13 @@ Replaced later by the real machines; the filler program does not change.
 | 2026-11-02 | Simulator structure: physics classes are pure Python (no Modbus, no UI) and return sensors + events; the UI sends commands through a queue applied at the start of a tick; `--headless` runs without the panel (Docker). Bottles are objects that carry their state (ml, rinsed, capped), so the simulator can audit the PLC. |
 | 2026-11-02 | The `simulator/tests/` scripts and the simulator both write S2–S8: never run them at the same time (two writers). |
 
+## Future enhancements (only if time remains)
+
+Moved here from the labeler design (2026-11-15, `docs/labeler/progress.md`): they check the filler's own work, so they belong to the filler.
+
+- **Fill level check (fill window):** after filling, compare the bottle's level with two setpoints, `FillMin` ≤ level ≤ `FillMax` (window compare, week VIII). Defaults to be measured with the simulator: at 100 ml/s and a 0.1 s tick a normal bottle ends at about 500–520 ml for a 500 ml setpoint. A bottle outside the window is rejected.
+- **Reject station with a reject bin:** a pusher that takes the bad bottles off the line into a bin, a "reject confirmed" sensor in the chute (timeout → alarm), a "reject bin full" sensor that stops the rejects (and the machine) until the operator empties the bin, a reject counter (CTU) and a reject rate on the HMI (`RejectCount × 1000 / total` in DINT, zero guard). The labeler's first draft had all of this (`docs/labeler/` git history, 2026-11-15).
+
 ## Open questions
 
 - **Manual interlocks missing for door and fill** (found 2026-11-04, HMI stage 7.3 scenario 9): `Man_Door` can drop a second bottle into a loaded entry pocket (no `Entry_Load` check in Manual), `Man_Fill` can overfill (811 ml seen, no `FillLevel < FillSetpoint` check in Manual). Auto is not affected. Proposed fixes and test: `ladder-roadmap.md` "Change: manual interlocks for door and fill". Open.

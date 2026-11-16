@@ -29,8 +29,8 @@ The line makes carbonated soft drink in PET bottles and packs them into 6-bottle
 2. **Transport:** empty bottles travel on conveyor C1 to the filler.
 3. **Rinsing, filling, capping:** each bottle is rinsed, filled with carbonated drink to the correct level, and capped.
 4. **Transport:** full bottles travel on conveyor C2 to the labeler.
-5. **Labeling and inspection:** a label is applied, and fill level and cap are checked. Bad bottles are pushed off the line.
-6. **Transport:** good bottles travel on conveyor C3 to the packer.
+5. **Labeling:** a label is cut from a roll, glued with hot melt and wrapped around the spinning bottle.
+6. **Transport:** labelled bottles travel on conveyor C3 to the packer.
 7. **Packing:** bottles are grouped in sixes, wrapped in film and shrunk in a heat tunnel. Each finished pack is counted.
 
 **Product flow**
@@ -95,7 +95,7 @@ Each machine owns and drives its **infeed conveyor** motor. The conveyor's **ful
 | 1 | `plc-blowmolder` | Stretch blow moulder | Preform hopper | Oven temperature (°C) |
 | 2 | `plc-syrup-carb` | Syrup room, mixer, carbonator | Mains water, syrup tank | Tank levels (L), product temperature (0.1 °C), CO2 pressure (0.01 bar) |
 | 3 | `plc-filler` | Rinser, filler, capper (monobloc) | C1 | Fill level (ml) |
-| 4 | `plc-labeler` | Labeler and inspection | C2 | Fill level check (ml) |
+| 4 | `plc-labeler` | Labeler | C2 | Hot-melt glue temperature (0.1 °C) |
 | 5 | `plc-packer` | Multipack shrink-wrapper | C3 | Shrink tunnel temperature (°C) |
 
 ### 4.1 Blow moulder (`plc-blowmolder`)
@@ -135,15 +135,18 @@ It is an **indexing machine**: three stations (rinse, fill, cap) on one internal
 - **Interlocks:** door only if the entry pocket is empty (the pocket has no sensor, so the PLC tracks it with a set/reset bit: set by the door, reset when the belt has moved; found by the simulator's jam scenario); filling only if *Product available*; index only when all station jobs are done; index with a bottle at the cap station only if C2 is not full (S7, filtered and latched as in section 5.3).
 - **Alarms:** fill timeout (valve open but level not rising), index jam, outfeed blocked too long.
 
-### 4.4 Labeler and inspection (`plc-labeler`)
+### 4.4 Labeler (`plc-labeler`)
 
-Labels bottles and removes faulty ones.
+Labels bottles. A **roll-fed hot-melt labeler** with one pocket on a turntable, one bottle at a time: the operator loads a label roll and glue blocks; the machine cuts one label off the web at each printed registration mark, puts melted glue on it, and **spins the bottle** so the label wraps around it. Every labelled bottle goes to C3: there is no inspection and no reject (decision 2026-11-15; a fill level check with a reject station is a future enhancement of the filler). Details: `docs/labeler/` (I/O list, state diagram, ladder roadmap, progress).
 
-- **Inputs:** bottle at labeler, label applied, fill level check, cap present check, reject confirmed, C3 full sensor (on the packer's infeed conveyor).
-- **Outputs:** C2 motor, label applicator, reject pusher.
-- **Sequence:** Idle → Detect bottle → Apply label → Inspect → Pass to C3 **or** Reject → Idle.
-- **Counters:** good bottles, rejected bottles (CTU), with reject rate shown on the HMI.
-- **Alarms:** label roll empty, label timeout, too many rejects in a row.
+- **Inputs:** bottle at the gate, bottle in the pocket, centering bell down, label present (used on a restart), registration mark, spin pulse (one per turn), label roll empty / low, glue low, C3 full sensor (on the packer's infeed conveyor), glue temperature (INT, 0.1 °C).
+- **Outputs:** C2 motor (runs continuously, bottles queue at the gate), infeed gate (TP pulse), centering bell, turntable, label feed, knife (TP pulse), glue roller, glue heater, discharge to C3.
+- **Sequence:** Idle → Warm up (glue at temperature) → Wait for bottle → Clamp → Wrap (spin + feed + glue, until the registration mark) → Press (knife cuts, bottle turns `PressTurns` more times, counted with a CTU) → Unclamp → Discharge to C3 (or wait while C3 is full) → Wait for bottle.
+- **Glue heater:** hysteresis control on the glue temperature, separate from the sequence; it stays ON in Stop and Manual (melting takes minutes), off only on E-stop, FAULT or over-temperature. Labelling only inside a temperature window (`Glue_Ready`).
+- **Interlocks:** never two bottles in the pocket; spin, feed and knife only with the bell down; feed and glue only with hot glue; discharge only with the bell up and never into a full C3.
+- **Counter:** labelled bottles (CTU); the operator zeroes it with `Cmd = 4`.
+- **Stop and resume:** a started label is always finished; on restart the pocket sensors show where the bottle is (a labelled bottle is never labelled twice). Limitation without a reject: a label broken off by an E-stop leaves on C3, and the operator removes that bottle.
+- **Alarms:** label timeout (web torn, turntable stuck), pocket jam, glue over-temperature, glue heat-up timeout → Fault; label roll empty → warning (state Starved); outfeed blocked too long → warning. Label roll low and glue low are early warnings in the HMI.
 
 ### 4.5 Multipack packer (`plc-packer`)
 
@@ -277,12 +280,13 @@ Every PLC uses the **same register layout**. The simulator and the HMI can then 
 
 | Address | Content | Written by | Read by |
 | --- | --- | --- | --- |
-| %MW0 | Command: 1 = Start, 2 = Stop, 3 = Reset | HMI | PLC |
+| %MW0 | Command: 1 = Start, 2 = Stop, 3 = Reset; 4 = Reset counters (labeler) | HMI | PLC |
 | %MW1 | Mode request: 0 = Stop, 1 = Auto, 2 = Manual | HMI | PLC |
 | %MX0.0–%MX0.7 | Digital sensors (one BOOL each) | Simulator | PLC |
 | %MX1.0–%MX1.2 | Interface in: `Product_Available` (filler only), `E_Stop_OK`, heartbeat bit | Simulator (wiring) | PLC |
 | %MX2.0–%MX2.7 | Manual hold-to-run buttons (one BOOL per actuator) | HMI | PLC |
 | %MX3.0–%MX3.7 | Conditioned signals (filtered sensors, hysteresis bits, jog watchdog) | PLC | Tests, HMI |
+| %MX4.0–%MX4.7 | More digital sensors, for a machine with more than 8 (labeler: 12) | Simulator | PLC |
 | %MX5.0–%MX5.7 | Alarms, one BOOL each; **`Alm_CommLost` is `%MX5.3` in every PLC**, the other bits are per machine | PLC | HMI |
 | %MX6.0 | Interface out: `Product_Available` (syrup room only) | PLC | Simulator (wiring) |
 | %MW12–%MW19 | Analog sensors (level, temperature, pressure), INT with fixed-point units | Simulator | PLC, HMI |
@@ -290,13 +294,13 @@ Every PLC uses the **same register layout**. The simulator and the HMI can then 
 | %MW40–%MW49 | Computed values (e.g. syrup target) | PLC | Tests, HMI |
 | %MW50 | Machine state: 0 Stopped, 1 Running, 2 Starved, 3 Blocked, 9 Fault | PLC | HMI |
 | %MW51 | Current sequencer step | PLC | HMI |
-| %MW53 | Main counter (filler: good bottles, syrup room: batches) | PLC | HMI |
+| %MW53 | Main counter (filler: good bottles, syrup room: batches, labeler: good bottles) | PLC | HMI |
 | %MW70–%MW79 | Animation data (conveyor slots, filler pocket states), ignored by the PLC; filler layout in `docs/filler/io-list.md` | Simulator | HMI |
 | %QX0.0–%QX1.7 | Actuator outputs (motors, valves, heaters) | PLC | Simulator, HMI |
 
 Sensors are written to memory (%MX bits, %MW words), not to physical inputs (%IX), because external Modbus clients cannot write the PLC's input image. The PLC program reads this memory as its sensors. Booleans are single `%MX` bits instead of bits packed inside a word, so ladder contacts and coils can use them directly.
 
-**Verified in OpenPLC v4** (2026-10-28, filler `smoke_test.py`): `%MWn` = holding register 1024 + n, `%MXa.b` = coil 8192 + 8a + b, `%QXa.b` = coil 8a + b. `%MX` is only reachable over Modbus with the project setting `mx_bits` = 64 (*Device → Servers → RuntimeServer*). Each machine's exact addresses are in its I/O list (`docs/filler/io-list.md`, `docs/syrup/io-list.md`).
+**Verified in OpenPLC v4** (2026-10-28, filler `smoke_test.py`): `%MWn` = holding register 1024 + n, `%MXa.b` = coil 8192 + 8a + b, `%QXa.b` = coil 8a + b. `%MX` is only reachable over Modbus with the project setting `mx_bits` = 64 (*Device → Servers → RuntimeServer*). Each machine's exact addresses are in its I/O list (`docs/filler/io-list.md`, `docs/syrup/io-list.md`, `docs/labeler/io-list.md`).
 
 ## 7. Python simulator: the virtual plant
 
@@ -425,7 +429,7 @@ FUXA is the operator's single window onto the whole line. It connects to all fiv
 | Blow moulder | Oven temperature, mould and stretch rod status, current step, manual controls |
 | Syrup room and carbonator | Tanks with live levels, pipes with flow animation, pumps and valves, temperature and CO2 pressure, recipe ratio |
 | Filler | Bottle at station, fill level, cap status, current step, manual controls |
-| Labeler | Label status, inspection result, good and reject counters, reject rate |
+| Labeler | Pocket and current step, glue temperature, label roll and glue warnings, labelled bottles counter and its reset |
 | Packer | Bottles in current group (0–6), tunnel temperature, finished packs |
 | Alarms | Active alarms and history from all PLCs, with acknowledge |
 | Trends | Tank levels, product temperature, CO2 pressure, oven and tunnel temperature over time |
@@ -526,7 +530,6 @@ Alarms are BOOLs in `%MX5.0–%MX5.7` (section 6.2), shown in FUXA's alarm list.
 | Over-temperature | Temperature above limit | Oven or tunnel too hot |
 | Over-pressure | Pressure above limit | Carbonator above maximum |
 | Material empty | Missing-material sensor or count | No preforms, no caps, no labels, no film |
-| Quality | Inspection result | Too many rejects in a row |
 | Communication lost | TON on the heartbeat bit (section 5.2) | Heartbeat unchanged for 3 s |
 | Outfeed blocked too long | TON on the Blocked state (section 5.3) | Filler blocked by full C2 for more than 2 min |
 
@@ -543,7 +546,7 @@ Every weekly topic of the course appears in at least one machine.
 | III | I/O devices and motor controls | Conveyor motors, pumps, agitator via `FB_Motor` |
 | IV | Relay logic diagrams | Start/stop seal-in circuits, interlocks between valves, conveyor-full latch |
 | VI | Logic gate functions | Permissives: fill only if bottle present AND product available AND NOT fault |
-| VII | Timers and counters | TON for mixing, rinsing, blowing, jam timeouts, sensor filtering and heartbeat watchdog; TP for the filler's door pulse; CTU for 6-packs, rejects and pack totals |
+| VII | Timers and counters | TON for mixing, rinsing, blowing, jam timeouts, sensor filtering and heartbeat watchdog; TP for the filler's door pulse and the labeler's gate and knife; CTU for batches, labelled bottles, the labeler's bottle turns, 6-packs and pack totals |
 | VIII | Math, compare, jump, MCR | Syrup ratio calculation (`MUL` before `DIV`, INT truncation), batch and buffer sums (`ADD`), level, temperature and pressure compares with hysteresis; master enable as MCR equivalent |
 | IX | Subroutines | `FB_Motor` and `FB_Valve`, reused in all five projects |
 | X | Data handling | MOVE of recipe values and setpoints, copying sensor words |
@@ -560,8 +563,8 @@ The line is built **one machine at a time, end to end**: paper design, PLC proje
 
 1. **Foundation:** process description, I/O lists, standard machine interface, Docker Compose with five runtimes.
 2. **Filler** (done): first complete machine, since it has a sequence and an analog value. Includes `FB_Motor`, `FB_Valve` and the mode and alarm template.
-3. **Syrup room and carbonator** (in progress): the process-control machine; links to the filler through `Product_Available`.
-4. *(stretch)* **Labeler:** adds inspection, rejects and the first real conveyor link (C2).
+3. **Syrup room and carbonator** (done): the process-control machine; links to the filler through `Product_Available`.
+4. *(stretch, in progress since 2026-11-15)* **Labeler:** adds a heated glue tank, a turn counter and the first real conveyor link (C2).
 5. *(stretch)* **Packer:** adds the 6-pack counter and shrink tunnel.
 6. *(stretch)* **Blow moulder:** completes the start of the line.
 7. **Line overview and integration tests:** full line run, starved and blocked situations (e.g. the filler-stop scenario in section 5.5), E-stop, communication loss (simulator stopped), fault injection.
