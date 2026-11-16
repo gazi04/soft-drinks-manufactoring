@@ -9,21 +9,21 @@
     "networkInterface": "0.0.0.0",
     "port": 502,
     "bufferMapping": {
-      "coils": {
-        "mxBits": 64,
-        "qxBits": 8192
-      },
       "holdingRegisters": {
         "qwCount": 1024,
         "mwCount": 1024,
         "mdCount": 1024,
         "mlCount": 1024
       },
-      "inputRegisters": {
-        "iwCount": 1024
+      "coils": {
+        "qxBits": 8192,
+        "mxBits": 64
       },
       "discreteInputs": {
         "ixBits": 8192
+      },
+      "inputRegisters": {
+        "iwCount": 1024
       }
     }
   }

@@ -4,7 +4,8 @@
   "runtimeIpAddress": "127.0.0.3",
   "vendorScreenData": {},
   "vendorScreenDataByBoard": {
-    "OpenPLC Simulator": {}
+    "OpenPLC Simulator": {},
+    "OpenPLC Runtime v4": {}
   },
   "selectedPlatformOptions": {},
   "vppPackagePinsByBoard": {},
