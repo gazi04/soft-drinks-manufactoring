@@ -1,0 +1,23 @@
+{
+  "deviceBoard": "OpenPLC Runtime v4",
+  "communicationPort": "",
+  "runtimeIpAddress": "127.0.0.3",
+  "vendorScreenData": {},
+  "vendorScreenDataByBoard": {
+    "OpenPLC Simulator": {}
+  },
+  "selectedPlatformOptions": {},
+  "vppPackagePinsByBoard": {},
+  "persistentStorageByBoard": {
+    "OpenPLC Simulator": {
+      "enabled": false,
+      "path": "",
+      "flushSeconds": 5
+    }
+  },
+  "targetDevice": {
+    "orchestratorId": "",
+    "deviceId": "",
+    "deviceName": ""
+  }
+}
