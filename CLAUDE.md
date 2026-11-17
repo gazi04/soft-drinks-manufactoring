@@ -8,7 +8,7 @@ University PLC course project (master's, *PLC Programming*): a full soft drink p
 
 Read before proposing structure or code:
 - `docs/project-report.md` — the design: machines, handshakes, address map, simulator, HMI, modes/alarms, syllabus coverage, plan. **Source of truth for design decisions.**
-- `docs/<machine>/progress.md` — per-machine checklist, decisions, open questions and log (`docs/filler/` complete, `docs/syrup/` complete: paper and ladder (stages 0–7), simulator stages 0–8, FUXA S0–S7, live checks and all scenarios 2026-11-14, demo script rehearsed 2026-11-15; `docs/labeler/` started 2026-11-15: paper done (I/O list, state diagram, ladder roadmap stages 0–7); ladder stages 0–3 done 2026-11-17, stage 4 (sequencer skeleton) next, loose ends listed under its current step). Check the current step there before starting work on a machine, and update it as steps complete.
+- `docs/<machine>/progress.md` — per-machine checklist, decisions, open questions and log (`docs/filler/` complete, `docs/syrup/` complete: paper and ladder (stages 0–7), simulator stages 0–8, FUXA S0–S7, live checks and all scenarios 2026-11-14, demo script rehearsed 2026-11-15; `docs/labeler/` started 2026-11-15: paper done (I/O list, state diagram, ladder roadmap stages 0–7); ladder stages 0–4 done 2026-11-17, stage 5 (outputs and interlocks) next, loose ends listed under its current step). Check the current step there before starting work on a machine, and update it as steps complete.
 - `docs/simulator/roadmap.md` — staged build plan for the Python simulator (stages 0–9, test per stage); progress is ticked in `docs/filler/progress.md` section 2.
 - `docs/simulator/design-notes.md` — short answers to the simulator's non-obvious decisions (timing, windows, Modbus link); keep it updated when such a decision changes.
 - `docs/hmi/roadmap.md` — staged build plan for the FUXA HMI (filler stages 0–7, syrup room stages S0–S7, test per stage, issues I1–I16); progress is ticked there and in section 3 of `docs/filler/progress.md` / `docs/syrup/progress.md`.
@@ -37,7 +37,7 @@ uv run simulator --headless               # tick loop without panel (console + l
 uv run pytest                             # simulator unit tests in tests/unit (no PLC needed; link/loop tests use a local pymodbus server)
 uv run python tests/run_filler.py         # ALL filler PLC test scripts in one command (~25 min; --quick ~6 min without closed loop/scenarios; names to pick some; --list, --fail-fast)
 uv run python tests/run_syrup.py          # ALL syrup room PLC test scripts in one command (~4.5 min, --quick ~2.5 min; stage 0 also needs the filler on 502, else NOT RUN)
-uv run python tests/run_labeler.py         # ALL labeler PLC test scripts in one command (~20 s so far; stage 0 SKIPs its filler / syrup room checks when those PLCs are down)
+uv run python tests/run_labeler.py         # ALL labeler PLC test scripts in one command (~1 min so far; stage 0 SKIPs its filler / syrup room checks when those PLCs are down)
 uv run python tests/test_signal_conditioning.py  # stage 3: Outfeed_Full filter + S6 edge (counted via GoodCount)
 uv run python tests/test_sequencer.py         # stage 4 (add --done with done bits forced in the debugger)
 uv run python tests/test_station_jobs.py      # stage 5a: done bits / job durations
@@ -60,6 +60,7 @@ uv run python tests/test_labeler_stage0.py    # labeler ladder stage 0: GlueTemp
 uv run python tests/test_labeler_stage1.py    # labeler ladder stage 1: defaults, Cmd 1-4 clear, heartbeat watchdog frozen at FALSE and TRUE (8 checks, ~25 s)
 uv run python tests/test_labeler_glue.py      # labeler ladder stage 2: Glue_Ready window (edges inclusive) and Heat_Demand hysteresis, both following the setpoints (21 checks, ~5 s)
 uv run python tests/test_labeler_conditioning.py  # labeler ladder stage 3: Outfeed_Full filter on C3_Full (2 s on, 3 s off, blinking ignored; 6 checks, ~20 s)
+uv run python tests/test_labeler_sequencer.py     # labeler ladder stage 4: one bottle 0->5->10->20->22->24->26->40->10 by writing the sensors, PressTurns, C3 full -> 35, restart with a labelled bottle, cold glue waits in 10, abort, FAULT exit (26 checks, ~25 s)
 uv run python tests/test_link.py              # simulator stage 5: plcs.py first contact, heartbeat only (5 checks; --restart adds the reconnect check)
 uv run python tests/test_link_syrup.py        # syrup simulator stage 4: SyrupPlc client on port 5022, heartbeat, write + read back, PLC reads the registers (10 checks, ~40 s; --restart adds the reconnect check)
 uv run python tests/test_closed_loop_syrup.py # syrup simulator stage 5: the simulator drives BOTH real PLCs through one batch (~3 min, needs both runtimes RUNNING and idle; `--syrup-only` when the filler runtime is down)
