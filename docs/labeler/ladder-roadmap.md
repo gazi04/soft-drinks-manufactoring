@@ -82,10 +82,10 @@ Same shape as the syrup room's `Temp_OK`, reversed (heating instead of cooling).
 
 - **Step decode** (EQ → `Step_Idle`, `Step_Warm`, `Step_Wait`, `Step_Clamp`, `Step_Wrap`, `Step_Press`, `Step_Unclamp`, `Step_WaitOut`, `Step_Discharge`, `Step_Fault`), `Seq_Enable := Mode_Auto AND Master_Enable`.
 - **Done bits** (section 5): `Spin_Counter := CTU(CU := Spin_Pulse, RESET := NOT Step_Press, PV := PressTurns)` (`state-diagram.md` rule 3).
-- **Transitions** from the step table, **no outputs yet**: 0 → 5 (Start), 5 → 10, 10 → 20 / 40 / 35 / 5, 20 → 22, 22 → 24 (`Mark_Edge`), 24 → 26, 26 → 40 / 35, 35 → 40, 40 → 10, 900 → 0.
+- **Transitions** from the step table, **no outputs yet**: 0 → 5 (Start), 5 → 10, 10 → 20 (needs `Glue_Ready`) / 40 / 35 / 5, 20 → 22, 22 → 24 (`Mark_Edge`), 24 → 26, 26 → 40 / 35, 35 → 40, 40 → 10, 900 → 0.
 - Abort rung: `NOT Master_Enable OR NOT Mode_Auto` → step 0 (as in the other machines).
 
-**Test** (`test_labeler_sequencer.py`): drive the sensors by hand and watch `Step`: Start with `GlueTemp` 1500 → stays 5; 1700 → 10; `Bottle_In_Pocket` → 20; `Bell_Down` → 22; `Label_Mark` pulse → 24; 2 `Spin_Pulse` pulses → 26 (1 pulse → stays 24); `Bell_Down` off → 40; `Bottle_In_Pocket` off → 10. Variants: `C3_Full` 3 s (`Outfeed_Full`) at the end of UNCLAMP → 35, free → 40; bottle with label in 10 → 40 directly; `GlueTemp` 1500 in 10 with an empty pocket → 5.
+**Test** (`test_labeler_sequencer.py`): drive the sensors by hand and watch `Step`: Start with `GlueTemp` 1500 → stays 5; 1700 → 10; `Bottle_In_Pocket` → 20; `Bell_Down` → 22; `Label_Mark` pulse → 24; 2 `Spin_Pulse` pulses → 26 (1 pulse → stays 24); `Bell_Down` off → 40; `Bottle_In_Pocket` off → 10. Variants: `C3_Full` 3 s (`Outfeed_Full`) at the end of UNCLAMP → 35, free → 40; bottle with label in 10 → 40 directly; `GlueTemp` 1500 in 10 with an empty pocket → 5; `GlueTemp` 1500 in 10 with an unlabelled bottle in the pocket → stays 10, back to 1700 → 20.
 
 ## Stage 5 – Outputs and interlocks  *(weeks III, VI, VII, IX: motor control, combinational logic, TP, FBs)*
 

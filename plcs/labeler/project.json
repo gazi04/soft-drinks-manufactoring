@@ -27,18 +27,6 @@
         "globalVariables": []
       }
     },
-    "libraries": [],
-    "debugVariables": {
-      "pous": {
-        "main": [
-          "Bottle_At_Gate",
-          "C3_Full",
-          "Outfeed_Full",
-          "Full_OnTimer",
-          "Full_OffTimer",
-          "Gate_Empty_Timer"
-        ]
-      }
-    }
+    "libraries": []
   }
 }

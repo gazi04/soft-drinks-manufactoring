@@ -54,7 +54,8 @@ The hot melt is solid at room temperature. The operator puts glue blocks into th
       │                     │   AND NOT Roll_Empty AND Glue_Ready              │                                      │
       │                     └──┬───────────────────────────────────┬───────────┘                                      │
       │  Bottle_In_Pocket AND  │                                   │ Bottle_In_Pocket AND Label_Present            │
-      │  NOT Label_Present     ▼                                   │ (already labelled: restart)                   │
+      │  NOT Label_Present AND │                                   │ (already labelled: restart)                   │
+      │  Glue_Ready            ▼                                   │                                               │
       │          ┌───────────────────────────┐                     │                                               │
       │          │ 20 CLAMP  ClampValve      │                     │                                               │
       │          └────────────┬──────────────┘                     │                                               │
@@ -105,7 +106,7 @@ C2 (`ConveyorMotor2`) runs in every step except FAULT and E-stop, also in IDLE (
 | --- | --- | --- | --- | --- |
 | 0 | IDLE | – | Auto AND Start AND no FAULT alarm → 5 | – |
 | 5 | WARM_UP | – | `Glue_Ready` → 10 | 120 s (`Alm_GlueHeatTimeout`) |
-| 10 | WAIT_BOTTLE | GateMotor as TP pulse (0.5 s) if `Bottle_At_Gate AND NOT Bottle_In_Pocket AND NOT Bottle_Entering AND NOT Roll_Empty AND Glue_Ready` (rule 2) | `Bottle_In_Pocket AND NOT Label_Present` → 20; `Bottle_In_Pocket AND Label_Present` → 40 (or 35 if `Outfeed_Full`); `NOT Glue_Ready AND NOT Bottle_In_Pocket` → 5 | none (waiting = **Starved**) |
+| 10 | WAIT_BOTTLE | GateMotor as TP pulse (0.5 s) if `Bottle_At_Gate AND NOT Bottle_In_Pocket AND NOT Bottle_Entering AND NOT Roll_Empty AND Glue_Ready` (rule 2) | `Bottle_In_Pocket AND NOT Label_Present AND Glue_Ready` → 20 (cold glue: the bottle waits in 10); `Bottle_In_Pocket AND Label_Present` → 40 (or 35 if `Outfeed_Full`); `NOT Glue_Ready AND NOT Bottle_In_Pocket` → 5 | none (waiting = **Starved**) |
 | 20 | CLAMP | ClampValve | `Bell_Down` → 22 | 2 s (`Alm_PocketJam`) |
 | 22 | WRAP | ClampValve, SpinMotor, LabelFeed, GlueRoller | `Label_Mark` rising edge → 24 | 5 s (`Alm_LabelTimeout`) |
 | 24 | PRESS | ClampValve, SpinMotor; Cutter as TP pulse (0.2 s) at step start | `Spin_Counter.Q` (CV ≥ `PressTurns`) → 26 | 5 s (`Alm_LabelTimeout`) |
@@ -184,7 +185,7 @@ GlueHeater  := Heat_Demand AND NOT Step_Fault AND GlueTemp < GlueMax      (inter
 
 Same two-threshold seal-in as the syrup room's `Temp_OK` (`docs/syrup/state-diagram.md` rule 2), here for heating. `Glue_Ready` is a separate, wider window: the heater switches inside a 5 °C band, labelling is allowed inside ±10 °C, so the heater's normal swing never stops labelling.
 
-When the operator adds cold glue blocks, `GlueTemp` drops. If it leaves the window, no new bottle is admitted and the machine goes back to WARM_UP after the current bottle (never in the middle of a label).
+When the operator adds cold glue blocks, `GlueTemp` drops. If it leaves the window, no new bottle is admitted and the machine goes back to WARM_UP after the current bottle (never in the middle of a label). A bottle that reached the pocket while the glue left the window waits in WAIT_BOTTLE (10 → 20 needs `Glue_Ready`, decision 2026-11-17): otherwise WRAP would start with feed and glue roller blocked by their interlock and end in a label timeout FAULT.
 
 ### 5. Counter: labelled bottles
 
@@ -207,7 +208,7 @@ After Reset → IDLE → Start, the machine passes WARM_UP and WAIT_BOTTLE, whic
 | Pocket | Next step | Why |
 | --- | --- | --- |
 | empty (`NOT Bottle_In_Pocket`) | gate admits the next bottle | normal start |
-| bottle, no label (`NOT Label_Present`) | CLAMP | label not started |
+| bottle, no label (`NOT Label_Present`) | CLAMP (once `Glue_Ready`) | label not started |
 | bottle with label | DISCHARGE (or WAIT_OUTFEED) | finished label: **never labelled twice** |
 
 **Known limitation** (no reject, decision 2026-11-15): an E-stop or FAULT in WRAP / PRESS leaves a half-wrapped label; `Label_Present` sees it, so the bottle is discharged onto C3 as it is. The operator takes it off by hand. With a reject station (future enhancement) the PLC would remember the broken-off label and reject the bottle instead.
