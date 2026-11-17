@@ -1,4 +1,4 @@
-"""Shared runner for the per-PLC test suites (run_filler.py, run_syrup.py).
+"""Shared runner for the per-PLC test suites (run_filler.py, run_syrup.py, run_labeler.py).
 
 Runs the test scripts of one machine one after the other, each in its own Python
 process (exactly as when started by hand), shows their output live and prints a

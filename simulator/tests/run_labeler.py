@@ -1,0 +1,22 @@
+"""All labeler PLC tests in one command (port 5023), in ladder-stage order.
+
+    uv run python tests/run_labeler.py              # all scripts, about 20 s so far
+    uv run python tests/run_labeler.py glue         # only the scripts whose name contains "glue"
+    uv run python tests/run_labeler.py --fail-fast  # stop at the first failing script
+    uv run python tests/run_labeler.py --list       # show the list
+
+Stage 0 checks the filler (502) and the syrup room (5022) only when they are up and prints
+SKIP otherwise, so it needs no other PLC. Needs the uploaded program; no simulator at the
+same time. Add a new stage script to SCRIPTS below.
+"""
+
+from suite import Script, main
+
+SCRIPTS = [
+    Script("test_labeler_stage0.py", "own Modbus port, %MX4 sensor byte, filler / syrup room memory separate"),
+    Script("test_labeler_stage1.py", "defaults, Cmd 1-4 clear, heartbeat watchdog frozen at FALSE and TRUE"),
+    Script("test_labeler_glue.py", "Glue_Ready window, Heat_Demand hysteresis, both follow the setpoints"),
+]
+
+if __name__ == "__main__":
+    main("Labeler", "127.0.0.1", 5023, SCRIPTS)
