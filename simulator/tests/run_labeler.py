@@ -17,6 +17,7 @@ SCRIPTS = [
     Script("test_labeler_stage1.py", "defaults, Cmd 1-4 clear, heartbeat watchdog frozen at FALSE and TRUE"),
     Script("test_labeler_glue.py", "Glue_Ready window, Heat_Demand hysteresis, both follow the setpoints"),
     Script("test_labeler_conditioning.py", "Outfeed_Full filter on C3_Full: 2 s on, 3 s off, blinking ignored"),
+    Script("test_labeler_sequencer.py", "one bottle 0->5->10->20->...->40->10 by writing the sensors, C3 full, restart, cold glue, abort, FAULT exit"),
 ]
 
 if __name__ == "__main__":
