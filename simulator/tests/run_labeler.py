@@ -16,6 +16,7 @@ SCRIPTS = [
     Script("test_labeler_stage0.py", "own Modbus port, %MX4 sensor byte, filler / syrup room memory separate"),
     Script("test_labeler_stage1.py", "defaults, Cmd 1-4 clear, heartbeat watchdog frozen at FALSE and TRUE"),
     Script("test_labeler_glue.py", "Glue_Ready window, Heat_Demand hysteresis, both follow the setpoints"),
+    Script("test_labeler_conditioning.py", "Outfeed_Full filter on C3_Full: 2 s on, 3 s off, blinking ignored"),
 ]
 
 if __name__ == "__main__":
