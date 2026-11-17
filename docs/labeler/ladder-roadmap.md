@@ -41,7 +41,7 @@ Function blocks: FB_Motor, FB_Valve (copied from plcs/syrup/)
 - Copy `FB_Motor` and `FB_Valve` from `plcs/syrup/` (no changes).
 - One empty test rung, compile, upload.
 
-**Test** (`test_labeler_stage0.py`): write `GlueTemp` (HR 1036), `E_Stop_OK` (coil 8201) and `Roll_Low` (coil 8224, the new `%MX4` byte) on port 5023 and read them back; the debugger shows them. The filler (502) and the syrup room (5022) are unaffected. Needs the uploaded program: without `libplc_*.so` the runtime starts no Modbus server and the connection is reset.
+**Test** (`test_labeler_stage0.py`): write `GlueTemp` (HR 1036), `E_Stop_OK` (coil 8201) and `Roll_Low` (coil 8224, the new `%MX4` byte) on port 5023 and read them back; the debugger shows them. The filler (502) and the syrup room (5022) are unaffected (checks L5 / L6, SKIP when that runtime is not up). Needs the uploaded program: without `libplc_*.so` the runtime starts no Modbus server and the connection is reset.
 
 ## Stage 1 – Modes and safety  *(weeks IV, VI, VIII, X)*
 
@@ -51,7 +51,7 @@ Copy section 1 of the syrup room and change only the defaults and the command de
 - `ModeReq` → `Mode_Stop/Auto/Manual` (EQ); `Cmd` → `Start_Cmd/Stop_Cmd/Reset_Cmd` **+ `Count_Reset_Cmd` (EQ `Cmd`, 4)**; then MOVE 0 → `Cmd` (the clear rung must also clear 4).
 - `Master_Enable := E_Stop_OK AND NOT Alm_CommLost`; heartbeat watchdog (XOR change detect, TON 3 s). **Rung order:** the `Master_Enable` rung comes after the watchdog's `Alm_CommLost` set / reset rungs (fixed in both PLCs 2026-11-14).
 
-**Test** (`test_labeler_stage1.py`): after upload HR 1054–1057 hold the defaults; a later write is kept; `Cmd` 1–4 each read back as 0 after one scan; `E_Stop_OK` FALSE → `Master_Enable` FALSE; heartbeat frozen 3 s → `Alm_CommLost`.
+**Test** (`test_labeler_stage1.py`): after upload HR 1054–1057 hold the defaults; a later write is kept; `Cmd` 1–4 each read back as 0 after one scan; `E_Stop_OK` FALSE → `Master_Enable` FALSE (debugger); heartbeat frozen 3 s → `Alm_CommLost`, **frozen at FALSE and at TRUE** (B6, B8: the timer must watch `Hb_Changed`, not the heartbeat value – bug found 2026-11-16); Reset with a dead heartbeat keeps the alarm.
 
 ## Stage 2 – Glue temperature  *(weeks IV, VIII: math, compare, seal-in)*
 
@@ -68,7 +68,7 @@ All rungs combinational, every scan (`state-diagram.md` rule 4):
 
 Same shape as the syrup room's `Temp_OK`, reversed (heating instead of cooling).
 
-**Test** (`test_labeler_glue.py`): `GlueTemp` 1590 / 1600 / 1700 / 1800 / 1810 → `Glue_Ready` F / T / T / T / F; `GlueBand` 50 → 1660 F; ramp 1700 → 1640 → 1660 → 1700 → 1680 → `Heat_Demand` F → T → T → F → F.
+**Test** (`test_labeler_glue.py`): `GlueTemp` 1590 / 1600 / 1700 / 1800 / 1810 → `Glue_Ready` F / T / T / T / F; `GlueBand` 50 (window 1650–1750) → 1640 F, 1750 T, 1760 F; ramp 1700 → 1640 → 1660 → 1700 → 1680 → `Heat_Demand` F → T → T → F → F.
 
 ## Stage 3 – Conditioning  *(weeks IV, VII: seal-in, timers)*
 
