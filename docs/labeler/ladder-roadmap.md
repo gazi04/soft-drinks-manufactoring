@@ -113,7 +113,7 @@ Section 7, in this order (as the syrup room):
 ## Stage 7 – Alarms and FAULT  *(week VII: timers as timeouts, week VIII: compare)*
 
 - `Alm_LabelTimeout` (%MX5.0): `Wrap_Timer` (TON `LabelTimeout`, `IN := Step_Wrap`) OR `Press_Timer` (`IN := Step_Press`) – two timers, so the timer restarts at 22 → 24 (syrup room lesson with `Water_Timer` / `Syrup_Timer`).
-- `Alm_PocketJam` (%MX5.1): `Entry_Timer` (`IN := Bottle_Entering`, 2 s), `Clamp_Timer` (`IN := Step_Clamp`, 2 s), `Unclamp_Timer` (`IN := Step_Unclamp`, 2 s), `Out_Timer` (`IN := Step_Discharge`, 3 s).
+- `Alm_PocketJam` (%MX5.1): `Entry_Timer` (`IN := Bottle_Entering`, 2 s), `Clamp_Timer` (`IN := Step_Clamp`, 2 s), `Unclamp_Timer` (`IN := Step_Unclamp`, 2 s), `Out_Timer` (`IN := Step_Discharge AND NOT Outfeed_Full`, 3 s: C3 filling up during DISCHARGE stops the pusher by interlock – Blocked, not a jam; decision 2026-11-18). **Entry tracking 3/3** in section 7: `Reset_Cmd AND Step_Fault → (R) Bottle_Entering`, else a gate jam whose bottle the operator took away keeps `Entry_Timer` running and the alarm can never be reset (decision 2026-11-18).
 - `Alm_OutfeedBlocked` (%MX5.2): `Blocked_Timer` (TON 2 min, `IN := Step_WaitOut`) – warning, no FAULT (copy of the filler).
 - `Alm_CommLost` (%MX5.3): from stage 1.
 - `Alm_LabelEmpty` (%MX5.4): `= Step_Wait AND Roll_Empty`, warning, not latched (follows its cause).
@@ -121,7 +121,7 @@ Section 7, in this order (as the syrup room):
 - `Alm_GlueHeatTimeout` (%MX5.6): `Heat_Timer` (TON `HeatTimeout`, `IN := Step_Warm`) → FAULT.
 - Each FAULT alarm: (S) by its cause, (R) by `Reset_Cmd AND NOT cause`. `No_Fault` (De Morgan), last rung: `NOT No_Fault` → `MOVE 900 → Step` (last writer of `Step`).
 
-**Test** (`test_labeler_alarms.py`, `--quick` without the 120 s and 2 min timeouts): no false alarm in a normal cycle; no `Label_Mark` in WRAP → FAULT after 5 s, all off; Reset → Start → the half-labelled bottle (`Label_Present`) goes to DISCHARGE; `Bell_Down` stuck in UNCLAMP → FAULT after 2 s; gate pulse without `Bottle_In_Pocket` → FAULT after 2 s; `GlueTemp` 2010 → FAULT, heater off, Reset ignored at 2010, accepted at 1700; WARM_UP with `GlueTemp` held at 1000 → FAULT after 120 s; WAIT_OUTFEED 2 min → warning, still in 35.
+**Test** (`test_labeler_alarms.py`, `--quick` without the 120 s and 2 min timeouts): no alarm in a normal cycle; no `Label_Mark` in WRAP → FAULT after 5 s, all off; Reset → Start → the half-labelled bottle (`Label_Present`) goes to DISCHARGE; PRESS without spin pulses → FAULT after 5 s of PRESS (own timer); CLAMP without `Bell_Down` → FAULT after 2 s, Start ignored in FAULT; `Bell_Down` stuck in UNCLAMP → FAULT after 2 s; gate pulse without `Bottle_In_Pocket` → FAULT after 2 s, Reset clears `Bottle_Entering` and the alarm; DISCHARGE with the bottle staying → FAULT after 3 s, but 4 s with `Outfeed_Full` → no alarm; `GlueTemp` 2010 → FAULT (also in Mode Stop), heater off, Reset ignored at 2010, accepted at 1700; `Roll_Empty` in WAIT_BOTTLE → `Alm_LabelEmpty` follows the sensor, not in IDLE; WARM_UP with `GlueTemp` held at 1000 → FAULT after 120 s; WAIT_OUTFEED 2 min → warning, still in 35, Reset ignored while blocked. Earlier scripts adapted so no step lasts longer than its timeout (gate → pocket < 2 s, UNCLAMP < 2 s, DISCHARGE with C3 free < 3 s); `GlueTemp` 2000 in the outputs test is now a FAULT.
 
 ## After stage 7
 

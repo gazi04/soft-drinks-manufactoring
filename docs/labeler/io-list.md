@@ -102,7 +102,7 @@ The C3 motor belongs to the packer; until the packer exists, the simulator's pac
 | Step | INT | %MW51 | HR 1075 | 0 IDLE, 5 WARM_UP, 10 WAIT_BOTTLE, 20 CLAMP, 22 WRAP, 24 PRESS, 26 UNCLAMP, 35 WAIT_OUTFEED, 40 DISCHARGE, 900 FAULT |
 | GoodCount | INT | %MW53 | HR 1077 | Labelled bottles discharged onto C3 (CTU; main counter, report 6.2); zeroed by `Cmd = 4` |
 | Alm_LabelTimeout | BOOL | %MX5.0 | coil 8232 | WRAP: no `Label_Mark` within 5 s (web torn, feed jammed), or PRESS: `PressTurns` not reached within 5 s (turntable stuck) (→ FAULT) |
-| Alm_PocketJam | BOOL | %MX5.1 | coil 8233 | A pocket movement did not finish: gated bottle not in the pocket (`Bottle_Entering`), CLAMP / UNCLAMP within 2 s, DISCHARGE (bottle out) within 3 s (→ FAULT) |
+| Alm_PocketJam | BOOL | %MX5.1 | coil 8233 | A pocket movement did not finish: gated bottle not in the pocket (`Bottle_Entering`), CLAMP / UNCLAMP within 2 s, DISCHARGE (bottle out) within 3 s while C3 is free – a full C3 is Blocked, not a jam (→ FAULT) |
 | Alm_OutfeedBlocked | BOOL | %MX5.2 | coil 8234 | Blocked longer than 2 min (warning, no FAULT; same as the filler) |
 | Alm_CommLost | BOOL | %MX5.3 | coil 8235 | Heartbeat not toggled for 3 s (→ outputs off via `Master_Enable`) |
 | Alm_LabelEmpty | BOOL | %MX5.4 | coil 8236 | Label roll empty (`Roll_Empty`): **warning only**, no new bottle admitted, State Starved, clears itself after the roll change |
