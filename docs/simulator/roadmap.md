@@ -393,3 +393,25 @@ Tests: `test_view.py` (+4: bar, sensor values and lamps, every fault marker, no 
 - Report section 7 and 5.1: syrup status, structure tree (`address_map_syrup.py`, `plant_lock.py`, `machines/syrup.py`, `SyrupPlc`), two links in the loop, the syrup physics as built, panel tabs; the old "simulator holds `Product_Available` TRUE" now only for `--filler-only`.
 
 Test: live `demo_check.py` against both runtimes, all three D6 cases (no simulator; `--filler-only`; both PLCs) seen in a run. Unit suite 304 passed.
+
+---
+
+## Labeler simulator
+
+Third machine, same pattern as the syrup room. Filler and syrup room classes do not change. Addresses: `docs/labeler/io-list.md`; behaviour: `docs/labeler/state-diagram.md`; checklist: `docs/labeler/progress.md` section 2. Planned 2026-11-18, not built yet.
+
+Before stage 0: close the labeler loose ends (`docs/labeler/progress.md`): filler and syrup room containers up again, programs uploaded, `demo_check.py` green.
+
+| # | Stage | Content | Test |
+| --- | --- | --- | --- |
+| 0 | Address map | `address_map_labeler.py` (converters from `address_map`): 9 outputs, sensors `%MX0` + `%MX4`, `GlueTemp`, status, 7 alarms, conditioned bits, setpoints, manual buttons, `SIM_WRITE_*` | unit: numbers = io-list (parsed from the doc), blocks contiguous, one-writer rule |
+| 1 | Pocket mechanics | `machines/labeler.py` part 1: gate (`Bottle_At_Gate` = C2 exit slot), travel gate -> pocket, bell up/down, turntable with `Spin_Pulse` (one pulse per turn), discharge onto C3 | gate pulse = one bottle in the pocket; bell time < 2 s; N turns = N pulses, each at least one tick |
+| 2 | Label + glue | label web: `Label_Mark` after one label length of feed, `Label_Present` when the label was fed with warm glue while spinning; roll counter -> `Roll_Low` / `Roll_Empty`; melt tank: first-order heater, room loss, glue level -> `Glue_Low` | heat-up 20 -> 170 °C well under `HeatTimeout` 120 s; label length fed < `LabelTimeout` 5 s; empty roll gives no mark |
+| 3 | Plant + C3 | `Labeler` in `Plant`, replaces `LabelerStandIn`; C2 motor now from the labeler PLC; new conveyor C3 with `C3_Full`; `PackerStandIn` drives C3 and takes bottles; shared E-stop, own heartbeat; `--no-labeler` keeps the stand-in | test controller labels bottles without a PLC; C3 fills when the packer stops |
+| 4 | Third link | `LabelerPlc` (shared `PlcLink` base) on port 5023, 7 alarms | heartbeat only, write + read back, reconnect |
+| 5 | Closed loop, three PLCs | `loop.py` with `labeler_plc=`, plant lock on 5023 | real bottles filler -> labeler -> C3, `GoodCount` + N |
+| 6 | Commands + scenarios | torn web, bell stuck, heater failed, heater stuck on (over-temperature), roll empty + roll change, glue low + refill, gate jam, packer stopped | each scenario gives the alarm / state of `docs/labeler/state-diagram.md` on the real PLC |
+| 7 | Panel | tab 3 labeler: rows (step, glue temp, roll, C3), new switches | pilot test + one scenario |
+| 8 | Wrap-up | animation words (`Anim_C3`, `Anim_Station`, if the HMI plan wants them), design-notes, README, `demo_check.py` (third PLC), report section 7, `CLAUDE.md` | live `demo_check.py` with three PLCs |
+
+Parameters (spin speed, label length, heater power, bell / travel times) are proposed at each stage and must fit the PLC constants (`ClampTimeout` 2 s, `LabelTimeout` 5 s, `OutTimeout` 3 s, `HeatTimeout` 120 s, `GlueMax` 200 °C), as the syrup room's parameter tables did.

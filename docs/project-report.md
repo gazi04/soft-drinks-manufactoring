@@ -562,7 +562,7 @@ The line is built **one machine at a time, end to end**: paper design, PLC proje
 1. **Foundation:** process description, I/O lists, standard machine interface, Docker Compose with five runtimes.
 2. **Filler** (done): first complete machine, since it has a sequence and an analog value. Includes `FB_Motor`, `FB_Valve` and the mode and alarm template.
 3. **Syrup room and carbonator** (done): the process-control machine; links to the filler through `Product_Available`.
-4. *(stretch, in progress since 2026-11-15)* **Labeler:** adds a heated glue tank, a turn counter and the first real conveyor link (C2).
+4. *(stretch, in progress since 2026-11-15)* **Labeler:** adds a heated glue tank, a turn counter and the first real conveyor link (C2). PLC program complete (ladder stages 0–7, 2026-11-18, all tests pass); simulator and HMI still to do (`docs/labeler/progress.md`).
 5. *(stretch)* **Packer:** adds the 6-pack counter and shrink tunnel.
 6. *(stretch)* **Blow moulder:** completes the start of the line.
 7. **Line overview and integration tests:** full line run, starved and blocked situations (e.g. the filler-stop scenario in section 5.5), E-stop, communication loss (simulator stopped), fault injection.
