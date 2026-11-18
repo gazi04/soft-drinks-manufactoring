@@ -284,6 +284,8 @@ def main() -> int:
 
         # ---------- Q14 PressTurns 3, Q15/Q16 C3 full at the end of UNCLAMP ----------
         plc.write(HR_PRESS_TURNS, 3)
+        # C3 full already now: Outfeed_Full needs 2 s, and UNCLAMP must end within ClampTimeout (2 s, stage 7)
+        plc.coil(COIL_C3_FULL, True)
         plc.coil(COIL_BOTTLE_IN_POCKET, True)
         plc.wait_step(20, 1)
         plc.coil(COIL_BELL_DOWN, True)
@@ -297,7 +299,6 @@ def main() -> int:
         results.append(check("Q14", held and ok,
                              f"PressTurns 3: 2 pulses -> stays 24 (seen {seen_held}), 3rd -> {seen[-1]} (expected 26)"))
         plc.write(HR_PRESS_TURNS, PRESS_TURNS)
-        plc.coil(COIL_C3_FULL, True)
         if not plc.wait_outfeed(True):
             results.append(check("Q15", False, "Outfeed_Full not TRUE within 5 s of C3_Full"))
         else:
