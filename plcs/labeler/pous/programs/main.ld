@@ -134,6 +134,18 @@ PROGRAM main
     Mot_Heater : FB_Motor; (* Motor instance: GlueHeater (run time = heater hours) *)
     Vlv_Clamp : FB_Valve; (* Valve instance: ClampValve (Master_Enable gate, cycles, open time) *)
     Vlv_Cutter : FB_Valve; (* Valve instance: Cutter *)
+    TP0 : TP;
+    Bottle_Ent : BOOL;
+    TP1 : TP;
+    FB_MOTOR0 : FB_Motor;
+    FB_MOTOR1 : FB_Motor;
+    FB_MOTOR2 : FB_Motor;
+    FB_MOTOR3 : FB_Motor;
+    FB_MOTOR4 : FB_Motor;
+    FB_MOTOR5 : FB_Motor;
+    FB_MOTOR6 : FB_Valve;
+    FB_MOTOR7 : FB_Motor;
+    FB_MOTOR8 : FB_Motor;
   END_VAR
 
 {
@@ -26901,7 +26913,8 @@ PROGRAM main
           "targetHandle": "input"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_2e0de4d6-0502-4a4e-915f-0dd32a08b726",
@@ -29074,7 +29087,8 @@ PROGRAM main
           "sourceHandle": "OUT",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_dc15b053-a0db-44bc-b710-da9f7c479815",
@@ -31247,7 +31261,8 @@ PROGRAM main
           "sourceHandle": "OUT",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_fb42a4fe-3d87-44ec-8752-5aeb08921ea5",
@@ -32105,7 +32120,8 @@ PROGRAM main
           "targetHandle": "input"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_5eb9264b-10da-40ef-96e3-eda142ad60ee",
@@ -32765,7 +32781,8 @@ PROGRAM main
           "targetHandle": "right-rail"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_6e978fc6-70cc-41a2-ba7e-9a6c76cb159f",
@@ -33272,7 +33289,8 @@ PROGRAM main
           "targetHandle": "right-rail"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_c9b05d22-7d75-44a6-9d8a-bacc7342d093",
@@ -34283,7 +34301,8 @@ PROGRAM main
           "targetHandle": "input"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_13ce543f-7479-44cf-b444-7d1db9116abf",
@@ -35948,7 +35967,8 @@ PROGRAM main
           "targetHandle": "input"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_578019d2-1bd1-4098-bf3e-83edc8694e67",
@@ -44136,7 +44156,8 @@ PROGRAM main
           "targetHandle": "input"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_c5322d05-31ad-4410-83e3-ce13dd25a0d4",
@@ -45441,7 +45462,8 @@ PROGRAM main
           "targetHandle": "input"
         }
       ],
-      "selectedNodes": []
+      "selectedNodes": [],
+      "handleBranches": []
     },
     {
       "id": "rung_main_3ab81194-c7a0-4f58-9190-b47cfedca87f",
@@ -47053,7 +47075,8 @@ PROGRAM main
           "sourceHandle": "output",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_2a7da5e7-acec-4ac7-a8d7-c5ba46bc7a09",
@@ -48665,7 +48688,8 @@ PROGRAM main
           "sourceHandle": "output",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_443539d4-76c7-48c0-a8e7-72c7d22fc651",
@@ -50277,7 +50301,8 @@ PROGRAM main
           "sourceHandle": "output",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_4629080d-4532-450a-b9bf-361f517f0aa3",
@@ -51736,7 +51761,8 @@ PROGRAM main
           "sourceHandle": "output",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_76691e25-75ef-4f55-9dd5-a951cd6ad6cf",
@@ -52889,7 +52915,8 @@ PROGRAM main
           "sourceHandle": "OUT",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_5f5f44a0-ffa7-49b9-b4c4-a4d8de20b13d",
@@ -54042,7 +54069,8 @@ PROGRAM main
           "sourceHandle": "OUT",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_2149a52b-94b7-496c-a88c-9ed4b88f23cf",
@@ -55195,7 +55223,8 @@ PROGRAM main
           "sourceHandle": "OUT",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_755276c8-fad3-480f-9868-cbc60a90a3ef",
@@ -56654,7 +56683,8 @@ PROGRAM main
           "sourceHandle": "output",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_b54af167-e836-4a60-ab3f-d0ccba01df02",
@@ -58113,7 +58143,8 @@ PROGRAM main
           "sourceHandle": "output",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_c175c94f-833f-4304-a11c-3b99e4a3c9b6",
@@ -59419,7 +59450,8 @@ PROGRAM main
           "sourceHandle": "output",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_90849df1-e408-4571-bd4a-3096fb322c2e",
@@ -60725,7 +60757,8 @@ PROGRAM main
           "sourceHandle": "output",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_35252186-ad2d-43d0-8f2c-4a6ab08716db",
@@ -61878,7 +61911,8 @@ PROGRAM main
           "sourceHandle": "OUT",
           "targetHandle": "input"
         }
-      ]
+      ],
+      "handleBranches": []
     },
     {
       "id": "rung_main_f0df0c83-2577-4b36-91b7-6ad88e5c0b5a",
