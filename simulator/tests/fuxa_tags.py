@@ -1,5 +1,5 @@
 """Generate the FUXA Modbus devices and tags of the PLCs (filler: address_map.py, syrup room:
-address_map_syrup.py) + the views (fuxa_views.py).
+address_map_syrup.py, labeler: address_map_labeler.py) + the views (fuxa_views.py).
 
 FUXA needs one tag per PLC address it shows or writes. Typing ~40 tags in the
 editor would copy the I/O list a third time (io-list.md, address_map.py, FUXA),
@@ -15,10 +15,10 @@ tests/test_hmi_tags.py.
 What it does:
 - starts from FUXA's current project (GET /api/project) when FUXA answers, so
   views built in the editor are kept; otherwise from the export file;
-- replaces only the devices of MACHINES ("d_filler", "d_syrup"), their connection-status tags and the views,
+- replaces only the devices of MACHINES ("d_filler", "d_syrup", "d_labeler"), their connection-status tags and the views,
   alarms and charts built by fuxa_views.py; other ones made in the editor stay;
 - turns FUXA's DAQ (history logging) on for each machine's trend_tags only (Trends views, stages 6
-  and S6: TREND_TAGS of the filler, SYRUP_TREND_TAGS of the syrup room);
+  S6 and L6: TREND_TAGS of the filler, SYRUP_TREND_TAGS of the syrup room, LABELER_TREND_TAGS of the labeler);
 - writes the export with sorted keys (same format as the stage 0 export).
 
 FUXA facts used here (FUXA 1.3.5, runtime/devices/modbus/index.js):
@@ -36,6 +36,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from simulator import address_map as am
+from simulator import address_map_labeler as lm
 from simulator import address_map_syrup as sm
 
 FUXA_URL = "http://localhost:1881"
@@ -164,6 +165,73 @@ SYRUP_TAGS: list[tuple[str, str, int, str, str]] = [
     ("Man_Transfer", COIL, sm.MAN_TRANSFER, "Bool", "manual: transfer pump"),
 ]
 
+# Labeler PLC (docs/labeler/io-list.md, HMI stage L1). Same description prefixes (the Tags page groups by
+# them). The glue temperatures are INT in 0.1 degC in the PLC; FUXA scales them (LABELER_SCALES).
+LABELER_TAGS: list[tuple[str, str, int, str, str]] = [
+    # status, written by the PLC
+    ("State", HOLDING, lm.STATE, "Int16", "status: 0 Stopped, 1 Running, 2 Starved, 3 Blocked, 9 Fault"),
+    ("Step", HOLDING, lm.STEP, "Int16", "status: 0 IDLE, 5 WARM_UP, 10 WAIT_BOTTLE, 20 CLAMP, 22 WRAP, 24 PRESS, "
+                                        "26 UNCLAMP, 35 WAIT_OUTFEED, 40 DISCHARGE, 900 FAULT"),
+    ("GoodCount", HOLDING, lm.GOOD_COUNT, "Int16", "status: labelled bottles discharged onto C3 (Cmd 4 zeroes it)"),
+    # alarms, written by the PLC
+    ("Alm_LabelTimeout", COIL, lm.ALM_LABEL_TIMEOUT, "Bool", "alarm: no label mark / press turns within 5 s (FAULT)"),
+    ("Alm_PocketJam", COIL, lm.ALM_POCKET_JAM, "Bool", "alarm: gate, bell or discharge movement not finished (FAULT)"),
+    ("Alm_OutfeedBlocked", COIL, lm.ALM_OUTFEED_BLOCKED, "Bool", "alarm: Blocked longer than 2 min (warning)"),
+    ("Alm_CommLost", COIL, lm.ALM_COMM_LOST, "Bool", "alarm: heartbeat not toggled for 3 s"),
+    ("Alm_LabelEmpty", COIL, lm.ALM_LABEL_EMPTY, "Bool", "alarm: label roll empty (warning, Starved)"),
+    ("Alm_GlueOverTemp", COIL, lm.ALM_GLUE_OVER_TEMP, "Bool", "alarm: glue at or above GlueMax 200 degC (FAULT)"),
+    ("Alm_GlueHeatTimeout", COIL, lm.ALM_GLUE_HEAT_TIMEOUT, "Bool", "alarm: glue not ready within 120 s of WARM_UP (FAULT)"),
+    # outputs, written by the PLC
+    ("ConveyorMotor2", COIL, lm.CONVEYOR_MOTOR2, "Bool", "output: C2 infeed conveyor"),
+    ("GateMotor", COIL, lm.GATE_MOTOR, "Bool", "output: infeed gate pulse (one bottle)"),
+    ("ClampValve", COIL, lm.CLAMP_VALVE, "Bool", "output: centering bell down"),
+    ("SpinMotor", COIL, lm.SPIN_MOTOR, "Bool", "output: turntable"),
+    ("LabelFeed", COIL, lm.LABEL_FEED, "Bool", "output: label web feed rollers"),
+    ("Cutter", COIL, lm.CUTTER, "Bool", "output: knife pulse"),
+    ("GlueRoller", COIL, lm.GLUE_ROLLER, "Bool", "output: glue roller"),
+    ("GlueHeater", COIL, lm.GLUE_HEATER, "Bool", "output: melt tank heater"),
+    ("DischargeMotor", COIL, lm.DISCHARGE_MOTOR, "Bool", "output: pusher, pocket -> C3"),
+    # conditioned values, written by the PLC
+    ("Outfeed_Full", COIL, lm.OUTFEED_FULL, "Bool", "conditioned: C3 really full (C3_Full filtered)"),
+    ("Bottle_Entering", COIL, lm.BOTTLE_ENTERING, "Bool", "conditioned: bottle between gate and pocket"),
+    ("Jog_Block", COIL, lm.JOG_BLOCK, "Bool", "conditioned: manual button held > 10 s, manual outputs ignored until all released"),
+    ("Heat_Demand", COIL, lm.HEAT_DEMAND, "Bool", "conditioned: heater hysteresis wants heat"),
+    ("Glue_Ready", COIL, lm.GLUE_READY, "Bool", "conditioned: glue inside GlueSetpoint +- GlueBand"),
+    ("Starved", COIL, lm.STARVED, "Bool", "conditioned: no bottle at the gate for 2 s, or roll empty"),
+    # sensors and wiring, written by the simulator (read only for the HMI)
+    ("Bottle_At_Gate", COIL, lm.BOTTLE_AT_GATE, "Bool", "sensor: bottle waiting at the gate (end of C2)"),
+    ("Bottle_In_Pocket", COIL, lm.BOTTLE_IN_POCKET, "Bool", "sensor: bottle in the pocket on the turntable"),
+    ("Bell_Down", COIL, lm.BELL_DOWN, "Bool", "sensor: centering bell down (bottle clamped)"),
+    ("Label_Present", COIL, lm.LABEL_PRESENT, "Bool", "sensor: label on the bottle in the pocket"),
+    ("C3_Full", COIL, lm.C3_FULL, "Bool", "sensor: C3 outfeed conveyor full"),
+    ("Roll_Empty", COIL, lm.ROLL_EMPTY, "Bool", "sensor: label roll empty"),
+    ("Label_Mark", COIL, lm.LABEL_MARK, "Bool", "sensor: registration mark on the label web (pulse)"),
+    ("Spin_Pulse", COIL, lm.SPIN_PULSE, "Bool", "sensor: one pulse per turn of the turntable"),
+    ("Roll_Low", COIL, lm.ROLL_LOW, "Bool", "sensor: label roll low (FUXA warning)"),
+    ("Glue_Low", COIL, lm.GLUE_LOW, "Bool", "sensor: glue low in the melt tank (FUXA warning)"),
+    ("GlueTemp", HOLDING, lm.GLUE_TEMP, "Int16", "sensor: melt temperature, degC in FUXA (PLC 0.1 degC: 1700 = 170.0)"),
+    ("E_Stop_OK", COIL, lm.E_STOP_OK, "Bool", "wiring: E-stop chain healthy (FALSE = stop)"),
+    ("Heartbeat", COIL, lm.HEARTBEAT, "Bool", "wiring: toggled every 1 s by the simulator"),
+    # commands and setpoints, written by the HMI (FUXA is the only writer)
+    ("Cmd", HOLDING, lm.CMD, "Int16", "command: 1 Start, 2 Stop, 3 Reset, 4 Reset counter (the PLC sets it back to 0)"),
+    ("ModeReq", HOLDING, lm.MODE_REQ, "Int16", "command: 0 Stop, 1 Auto, 2 Manual"),
+    ("GlueSetpoint", HOLDING, lm.GLUE_SETPOINT, "Int16", "setpoint: melt temperature, degC in FUXA (PLC 0.1 degC)"),
+    ("GlueHyst", HOLDING, lm.GLUE_HYST, "Int16", "setpoint: heater band, degC in FUXA (PLC 0.1 degC)"),
+    ("GlueBand", HOLDING, lm.GLUE_BAND, "Int16", "setpoint: Glue_Ready window +-, degC in FUXA (PLC 0.1 degC)"),
+    ("PressTurns", HOLDING, lm.PRESS_TURNS, "Int16", "setpoint: bottle turns after the cut"),
+    # manual buttons, written by the HMI (hold-to-run, Manual mode only)
+    ("Man_C2", COIL, lm.MAN_C2, "Bool", "manual: C2 conveyor"),
+    ("Man_Gate", COIL, lm.MAN_GATE, "Bool", "manual: open the gate"),
+    ("Man_Clamp", COIL, lm.MAN_CLAMP, "Bool", "manual: bell down"),
+    ("Man_Spin", COIL, lm.MAN_SPIN, "Bool", "manual: turntable (only with the bell down)"),
+    ("Man_Feed", COIL, lm.MAN_FEED, "Bool", "manual: label feed + glue roller (only with glue ready)"),
+    ("Man_Cut", COIL, lm.MAN_CUT, "Bool", "manual: knife"),
+    ("Man_Discharge", COIL, lm.MAN_DISCHARGE, "Bool", "manual: pusher (only with the bell up and C3 free)"),
+    # animation, written by the simulator, ignored by the PLC (HMI L0)
+    ("Anim_C3", HOLDING, lm.ANIM_C3, "Int16", "animation: C3 slots, bit 0 entry .. bit 7 packer end"),
+    ("Anim_Station", HOLDING, lm.ANIM_STATION, "Int16", "animation: pocket 0 empty 1 bottle 2 labelling 3 labelled"),
+]
+
 
 
 @dataclass(frozen=True)
@@ -213,7 +281,14 @@ SYRUP_TREND_TAGS = ("MixLevel", "BufferLevel", "ProductTemp", "CoolSetpoint", "C
                     "State")
 SYRUP = Machine("syrup", "Syrup room PLC", "plc-syrup-carb:502", tuple(SYRUP_TAGS), SYRUP_TREND_TAGS,
                 scales=SYRUP_SCALES)
-MACHINES = (FILLER, SYRUP)
+# Fixed-point tags of the labeler (io-list: INT in 0.1 degC)
+LABELER_SCALES = (("GlueTemp", 10), ("GlueSetpoint", 10), ("GlueHyst", 10), ("GlueBand", 10))
+# Logged for the labeler's Trends view (HMI L6). GlueSetpoint draws the target line; scaled first,
+# so the history is in degC, as for the syrup room.
+LABELER_TREND_TAGS = ("GlueTemp", "GlueSetpoint", "GoodCount", "State")
+LABELER = Machine("labeler", "Labeler PLC", "plc-labeler:502", tuple(LABELER_TAGS), LABELER_TREND_TAGS,
+                  scales=LABELER_SCALES)
+MACHINES = (FILLER, SYRUP, LABELER)
 
 # the filler's ids under their old names (views and checks use them)
 DEVICE_ID, DEVICE_NAME, PLC_ADDRESS = FILLER.device_id, FILLER.name, FILLER.address

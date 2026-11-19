@@ -1,18 +1,20 @@
 """The FUXA views: header (on every view), Line, Filler, Alarms, Trends, and a Tags test page per PLC
-(filler, syrup room). Functions that can draw any machine take `m: ft.Machine` (default: the filler).
+(filler, syrup room, labeler). Functions that can draw any machine take `m: ft.Machine` (default: the filler).
 
 Built from fuxa_shapes.py (the FUXA shape formats) and fuxa_tags.py (the tag
 table). Run through `uv run python tests/fuxa_tags.py`, which writes the export
 that is then imported into FUXA.
 
-Header for two machines (report 8.1/8.2, roadmap stages 2 and S2), 1280 x 96 at the top of every view:
-  row 1 (the same on every view): Filler chip | Syrup room chip | E-stop | Filler PLC link |
-         Syrup PLC link | Line Alarms Trends
+Header for three machines (report 8.1/8.2, roadmap stages 2, S2 and L2), 1280 x 96 at the top of every view:
+  row 1 (the same on every view): Filler chip | Syrup room chip | Labeler chip | E-stop per PLC | Line Alarms Trends
          A machine chip is coloured by that machine's State and shows state, step and mode
-         ("Stop – press Auto" after a PLC restart, issue I10); a click opens its screen.
+         ("Stop – press Auto" after a PLC restart, issue I10); a click opens its screen. Its PLC
+         link is a cover over the right part of the chip: invisible while FUXA is connected,
+         yellow "PLC slow" / red "PLC LOST" otherwise (it hides the stale state and mode).
   row 2 (the machine of this view): machine box | Start Stop Reset | Auto Manual Stop | its alarm chips
          On Line, Alarms and Trends the machine box is a picker: these views exist once per
-         machine (v_filler_line / v_syrup_line ...), same body, and the picker opens the other one.
+         machine (v_filler_line / v_syrup_line / v_labeler_line ...), same body, and the picker
+         opens the same view for another machine.
 Colours (ISA-101): grey is normal, colour only for states and problems. State colours
 follow report 8.2. The header only WRITES Cmd (1 Start, 2 Stop, 3 Reset; the PLC sets
 it back to 0) and ModeReq (0 Stop, 1 Auto, 2 Manual) of the machine in row 2.
@@ -21,9 +23,10 @@ it back to 0) and ModeReq (0 Stop, 1 Auto, 2 Manual) of the machine in row 2.
 from dataclasses import dataclass
 
 from simulator import address_map as am
+from simulator import address_map_labeler as lm
 from simulator import config
-from simulator.plcs import (ALARM_NAMES, MODE_NAMES, STATE_NAMES, STEP_NAMES, SYRUP_ALARM_NAMES,
-                            SYRUP_STEP_NAMES)
+from simulator.plcs import (ALARM_NAMES, LABELER_ALARM_NAMES, LABELER_STEP_NAMES, MODE_NAMES, STATE_NAMES,
+                            STEP_NAMES, SYRUP_ALARM_NAMES, SYRUP_STEP_NAMES)
 
 import fuxa_shapes as fs
 import fuxa_tags as ft
@@ -41,14 +44,24 @@ SYRUP_MAIN_ID, SYRUP_MAIN_NAME = "v_syrup_main", "Syrup room"  # the syrup room'
 SYRUP_LINE_ID, SYRUP_LINE_NAME = "v_syrup_line", "Line (syrup room)"
 SYRUP_ALARMS_ID, SYRUP_ALARMS_NAME = "v_syrup_alarms", "Alarms (syrup room)"
 SYRUP_TRENDS_ID, SYRUP_TRENDS_NAME = "v_syrup_trends", "Trends (syrup room)"
+LABELER_TAGS_ID, LABELER_TAGS_NAME = "v_labeler_tags", "Labeler tags"  # side menu only (test page, HMI L1)
+# Line, Alarms and Trends a third time with the labeler in header row 2 (HMI L2)
+LABELER_LINE_ID, LABELER_LINE_NAME = "v_labeler_line", "Line (labeler)"
+LABELER_ALARMS_ID, LABELER_ALARMS_NAME = "v_labeler_alarms", "Alarms (labeler)"
+LABELER_TRENDS_ID, LABELER_TRENDS_NAME = "v_labeler_trends", "Trends (labeler)"
+LABELER_MAIN_ID, LABELER_MAIN_NAME = "v_labeler_main", "Labeler"  # the labeler's screen (HMI L3)
 GENERATED = (LINE_ID, MAIN_ID, ALARMS_ID, TRENDS_ID, TAGS_ID, SYRUP_TAGS_ID,
-             SYRUP_LINE_ID, SYRUP_ALARMS_ID, SYRUP_TRENDS_ID, SYRUP_MAIN_ID)
-NAV = ((LINE_ID, LINE_NAME), (MAIN_ID, MAIN_NAME), (SYRUP_MAIN_ID, SYRUP_MAIN_NAME), (ALARMS_ID, ALARMS_NAME),
+             SYRUP_LINE_ID, SYRUP_ALARMS_ID, SYRUP_TRENDS_ID, SYRUP_MAIN_ID, LABELER_TAGS_ID,
+             LABELER_LINE_ID, LABELER_ALARMS_ID, LABELER_TRENDS_ID, LABELER_MAIN_ID)
+NAV = ((LINE_ID, LINE_NAME), (MAIN_ID, MAIN_NAME), (SYRUP_MAIN_ID, SYRUP_MAIN_NAME),
+       (LABELER_MAIN_ID, LABELER_MAIN_NAME), (ALARMS_ID, ALARMS_NAME),
        (TRENDS_ID, TRENDS_NAME), (TAGS_ID, TAGS_NAME))  # side menu
 HEADER_KEY = {LINE_ID: "line", MAIN_ID: "main", ALARMS_ID: "alarms", TRENDS_ID: "trends",
               TAGS_ID: "tags", SYRUP_TAGS_ID: "syrup_tags", SYRUP_LINE_ID: "syrup_line",
               SYRUP_ALARMS_ID: "syrup_alarms", SYRUP_TRENDS_ID: "syrup_trends",
-              SYRUP_MAIN_ID: "syrup_main"}  # header id prefix per view
+              SYRUP_MAIN_ID: "syrup_main", LABELER_TAGS_ID: "labeler_tags", LABELER_LINE_ID: "labeler_line",
+              LABELER_ALARMS_ID: "labeler_alarms", LABELER_TRENDS_ID: "labeler_trends",
+              LABELER_MAIN_ID: "labeler_main"}  # header id prefix per view
 ALARM_PANEL = "[alarms]"  # side-menu target that opens FUXA's own alarm panel (active + history)
 
 
@@ -61,23 +74,34 @@ class MachineUi:
     steps: dict[int, str]
     alarms: tuple[str, ...]  # alarm bits in address order
     detail: str  # view the machine chip opens
+    short: str = ""  # label of its row-2 picker button (76 px: "Syrup room" does not fit at 14 px bold)
+
+    @property
+    def pick_label(self) -> str:
+        return self.short or self.title
 
 
 FILLER_UI = MachineUi(ft.FILLER, "Filler", "Filler PLC", STEP_NAMES, ALARM_NAMES, MAIN_ID)
-SYRUP_UI = MachineUi(ft.SYRUP, "Syrup room", "Syrup PLC", SYRUP_STEP_NAMES, SYRUP_ALARM_NAMES, SYRUP_MAIN_ID)
-UIS = (FILLER_UI, SYRUP_UI)
+SYRUP_UI = MachineUi(ft.SYRUP, "Syrup room", "Syrup PLC", SYRUP_STEP_NAMES, SYRUP_ALARM_NAMES, SYRUP_MAIN_ID,
+                     short="Syrup")
+LABELER_UI = MachineUi(ft.LABELER, "Labeler", "Labeler PLC", LABELER_STEP_NAMES, LABELER_ALARM_NAMES,
+                       LABELER_MAIN_ID)
+UIS = (FILLER_UI, SYRUP_UI, LABELER_UI)
 
 # The views shown once per machine: kind -> machine key -> view id (header nav and row-2 picker)
-SHARED = {"line": {"filler": LINE_ID, "syrup": SYRUP_LINE_ID},
-          "alarms": {"filler": ALARMS_ID, "syrup": SYRUP_ALARMS_ID},
-          "trends": {"filler": TRENDS_ID, "syrup": SYRUP_TRENDS_ID}}
+SHARED = {"line": {"filler": LINE_ID, "syrup": SYRUP_LINE_ID, "labeler": LABELER_LINE_ID},
+          "alarms": {"filler": ALARMS_ID, "syrup": SYRUP_ALARMS_ID, "labeler": LABELER_ALARMS_ID},
+          "trends": {"filler": TRENDS_ID, "syrup": SYRUP_TRENDS_ID, "labeler": LABELER_TRENDS_ID}}
 KIND = {view_id: kind for kind, views in SHARED.items() for view_id in views.values()}
 # The machine in header row 2 of every view
-CONTEXT = {MAIN_ID: FILLER_UI, TAGS_ID: FILLER_UI, SYRUP_TAGS_ID: SYRUP_UI, SYRUP_MAIN_ID: SYRUP_UI}
+CONTEXT = {MAIN_ID: FILLER_UI, TAGS_ID: FILLER_UI, SYRUP_TAGS_ID: SYRUP_UI, SYRUP_MAIN_ID: SYRUP_UI,
+           LABELER_TAGS_ID: LABELER_UI, LABELER_MAIN_ID: LABELER_UI}
 CONTEXT |= {view_id: ui for views in SHARED.values() for ui in UIS for key, view_id in views.items()
             if key == ui.m.key}
 VIEW_NAMES = {LINE_ID: LINE_NAME, SYRUP_LINE_ID: SYRUP_LINE_NAME, ALARMS_ID: ALARMS_NAME,
-              SYRUP_ALARMS_ID: SYRUP_ALARMS_NAME, TRENDS_ID: TRENDS_NAME, SYRUP_TRENDS_ID: SYRUP_TRENDS_NAME}
+              SYRUP_ALARMS_ID: SYRUP_ALARMS_NAME, TRENDS_ID: TRENDS_NAME, SYRUP_TRENDS_ID: SYRUP_TRENDS_NAME,
+              LABELER_LINE_ID: LABELER_LINE_NAME, LABELER_ALARMS_ID: LABELER_ALARMS_NAME,
+              LABELER_TRENDS_ID: LABELER_TRENDS_NAME}
 
 
 def shared_view(kind: str, ui: MachineUi) -> str:
@@ -95,8 +119,11 @@ STATE_COLOURS = {0: GREY, 1: GREEN, 2: YELLOW, 3: ORANGE, 9: RED}  # report 8.2
 ALARM_LABELS = {"Alm_IndexJam": "Index jam", "Alm_FillTimeout": "Fill timeout",
                 "Alm_OutfeedBlocked": "Outfeed blocked", "Alm_CommLost": "Comm lost",
                 "Alm_Overflow": "Overflow", "Alm_OverPressure": "Over-pressure", "Alm_CoolTimeout": "Cool timeout",
-                "Alm_LowSyrup": "Low syrup", "Alm_DoseTimeout": "Dose timeout"}
+                "Alm_LowSyrup": "Low syrup", "Alm_DoseTimeout": "Dose timeout",
+                "Alm_LabelTimeout": "Label timeout", "Alm_PocketJam": "Pocket jam", "Alm_LabelEmpty": "Roll empty",
+                "Alm_GlueOverTemp": "Glue too hot", "Alm_GlueHeatTimeout": "Heat timeout"}
 LINK_OK = 5  # FUXA connection status: 0 off, 3 warning, 5 connected
+NO_LINK = "#dedede"  # E-stop segment of a PLC FUXA is not connected to: unknown, neither OK nor pressed
 
 CMD_BUTTONS = (("Start", 1), ("Stop", 2), ("Reset", 3))
 MANUAL = 2  # ModeReq value of Manual
@@ -109,15 +136,18 @@ MODE_WORDS = {0: "Stop – press Auto", 1: "Auto", 2: "Manual (paused)"}
 NAV_BUTTONS = (("line", "Line"), ("alarms", "Alarms"), ("trends", "Trends"))
 
 # Header geometry (x from the left edge, see the module docstring)
+# Three machines (HMI L2): the PLC link is a cover inside each machine chip (LINK_W, right part), so
+# no separate link chips; row 2 shifts right for a three-button picker, the alarm chips get narrower
+# (the labeler has 7). 16 + 3 x 250 + 2 x 8 = 782 | E-stop 790-996 (a segment per PLC, I17) | nav 1004-1264.
 ROW1_Y, ROW1_H = 10, 36  # chips and buttons of row 1 (the machine chips are 4 px taller)
 ROW2_Y, ROW2_H = 54, 32
-CHIP_X, CHIP_W, CHIP_GAP = 16, 260, 8  # machine chips
-ESTOP_X, ESTOP_W = 556, 140
-LINK_X, LINK_W, LINK_GAP = 704, 140, 8
+CHIP_X, CHIP_W, CHIP_GAP = 16, 250, 8  # machine chips
+LINK_W = 112  # the link cover over the right part of a machine chip (state and mode words)
+ESTOP_X, ESTOP_SEG_W, ESTOP_GAP = 790, 66, 4  # one E-stop segment per PLC (I17): 790-996
 NAV_X, NAV_W, NAV_GAP = 1004, 84, 4
-PICK_X, PICK_W, PICK_GAP = 16, 98, 4  # row 2: machine box / picker
-CMD_X, MODE_X, BTN_W, BTN_GAP = 226, 446, 66, 4
-ALARM_X, ALARM_W, ALARM_GAP = 666, 94, 4
+PICK_X, PICK_W, PICK_GAP = 16, 76, 4  # row 2: machine box / picker, 16-252
+CMD_X, MODE_X, BTN_W, BTN_GAP = 262, 478, 66, 4  # 262-468, 478-684
+ALARM_X, ALARM_W, ALARM_GAP = 694, 78, 4  # up to 7 chips: 694-1264
 
 T = ft.tag_id  # tag name -> FUXA tag id of the FILLER. A function that can draw another machine takes
 #                `m: ft.Machine` and shadows it locally with `T = m.tag_id` (one device per PLC, issue I11).
@@ -140,15 +170,13 @@ class Builder:
 
 def header(b: Builder, key: str, current: str) -> None:
     """Draw the header of view `current` into builder b. key makes the ids unique per view.
-    Row 1 shows both machines; row 2 belongs to CONTEXT[current]."""
+    Row 1 shows every machine; row 2 belongs to CONTEXT[current]."""
     ui = CONTEXT[current]
     p = f"hdr_{key}"
     b.add(fs.rect(0, 0, W, HEADER_H, HEADER_BG, rx=0))
     for i, chip in enumerate(UIS):
         machine_chip(b, p, chip, CHIP_X + i * (CHIP_W + CHIP_GAP), here=chip.detail == current)
     estop_chip(b, p)
-    for i, chip in enumerate(UIS):
-        link_chip(b, p, chip, LINK_X + i * (LINK_W + LINK_GAP))
     # Navigation: the shared views of this view's machine; the machine screens open from the chips
     for i, (kind, label) in enumerate(NAV_BUTTONS):
         here = KIND.get(current) == kind
@@ -173,43 +201,57 @@ def machine_chip(b: Builder, p: str, ui: MachineUi, x: float, here: bool) -> Non
     b.add(fs.enum_texts(f"{k}_step", T("Step"), ui.steps, x + 10, 42, size=12, click_through=True))
     b.add(fs.enum_texts(f"{k}_mode", T("ModeReq"), MODE_WORDS, right, 42, size=12, bold=True, anchor="end",
                         click_through=True))
+    link_cover(b, k, ui, x + CHIP_W - LINK_W)  # after the words: it hides them when the link is lost
     if here:
         b.add(fs.rect(x, ROW1_Y + ROW1_H + 3, CHIP_W, 4, ACTIVE, rx=1))
 
 
 def estop_chip(b: Builder, p: str) -> None:
-    """One E-stop chain reaches both PLCs (report 9.2); the chip is red when EITHER PLC sees it pressed.
-    Drawing order (later = on top), so every combination reads cleanly:
-      1. grey chip   2. "E-stop OK" per PLC while that PLC reads 1 (both visible = the same text twice)
-      3. one red cover per PLC, transparent ("none") while it reads 1: it hides every OK text
-      4. "E-STOP PRESSED" per PLC while that PLC reads 0.
-    A PLC whose link is lost has no value: its texts stay hidden and the other PLC still decides.
-    Only one PLC pressed (a wiring fault) also shows red."""
-    mid = ESTOP_X + ESTOP_W / 2
-    b.add(fs.rect(ESTOP_X, ROW1_Y, ESTOP_W, ROW1_H, NEUTRAL, f"{p}_estop"))
-    for ui in UIS:
-        b.add(fs.conditional_text(f"{p}_estop_{ui.m.key}_ok", ui.m.tag_id("E_Stop_OK"), 1, 1, mid, 33, "E-stop OK",
-                                  size=14, anchor="middle"))
-    for ui in UIS:
-        b.add(fs.rect_ranges(f"{p}_estop_{ui.m.key}", ui.m.tag_id("E_Stop_OK"), ESTOP_X, ROW1_Y, ESTOP_W, ROW1_H,
-                             [fs.colour_range(0, 0, RED), fs.colour_range(1, 1, "none")], default="none"))
-    for ui in UIS:
-        b.add(fs.conditional_text(f"{p}_estop_{ui.m.key}_on", ui.m.tag_id("E_Stop_OK"), 0, 0, mid, 33,
-                                  "E-STOP PRESSED", size=13, bold=True, color="#ffffff", anchor="middle"))
+    """One E-stop chain reaches every PLC (report 9.2); the chip shows it per PLC, one segment each
+    (decision I17, 2026-11-19). Per segment, drawing order (later = on top):
+      1. the segment, red while that PLC reads E_Stop_OK = 0, grey otherwise
+      2. "E-stop OK" while it reads 1, "E-STOP" (white) while it reads 0 (bottom line)
+      3. a link cover over the WHOLE segment, on that PLC's FUXA connection status: transparent while
+         connected, light grey otherwise (a cover over the bottom line only left the top half red:
+         FUXA colours the segment from null, too; found in the browser check)
+      4. the PLC's short name (top line), always readable, and "no link" while the cover shows.
+    Why the cover: FUXA gives a lost device's tags the value null, and its ranges read null as 0, so
+    without it a lost PLC showed "E-STOP PRESSED" (I17). The cover hides only its own PLC's segment;
+    the other PLCs still show the E-stop. A real E-stop turns every segment red; a single red segment
+    is a wiring fault (only that PLC sees the chain open)."""
+    for i, ui in enumerate(UIS):
+        e, k = ui.m.tag_id("E_Stop_OK"), f"{p}_estop_{ui.m.key}"
+        x = ESTOP_X + i * (ESTOP_SEG_W + ESTOP_GAP)
+        mid = x + ESTOP_SEG_W / 2
+        b.add(fs.rect_ranges(k, e, x, ROW1_Y, ESTOP_SEG_W, ROW1_H,
+                             [fs.colour_range(0, 0, RED), fs.colour_range(1, 1, NEUTRAL)], default=NEUTRAL))
+        b.add(fs.conditional_text(f"{k}_ok", e, 1, 1, mid, 40, "E-stop OK", size=11, anchor="middle"))
+        b.add(fs.conditional_text(f"{k}_on", e, 0, 0, mid, 40, "E-STOP", size=12, bold=True, color="#ffffff",
+                                  anchor="middle"))
+        status = ui.m.status_tag_id
+        b.add(fs.rect_ranges(f"{k}_link", status, x, ROW1_Y, ESTOP_SEG_W, ROW1_H,
+                             [fs.colour_range(0, LINK_OK - 1, NO_LINK, NO_LINK),  # border too: no red edge shows
+                              fs.colour_range(LINK_OK, LINK_OK, "none")], default=NO_LINK))
+        b.add(fs.text(mid, 24, ui.pick_label, size=10, anchor="middle", element_id=f"{k}_name"))
+        b.add(fs.conditional_text(f"{k}_nolink", status, 0, LINK_OK - 1, mid, 40, "no link", size=11,
+                                  color=MUTED, anchor="middle"))
 
 
-def link_chip(b: Builder, p: str, ui: MachineUi, x: float) -> None:
-    """FUXA's own connection status of one PLC device: grey OK, yellow slow, red LOST."""
-    status, k, mid = ui.m.status_tag_id, f"{p}_{ui.m.key}_link", x + LINK_W / 2
-    b.add(fs.rect_ranges(k, status, x, ROW1_Y, LINK_W, ROW1_H,
-                         [fs.colour_range(0, 0, RED), fs.colour_range(1, LINK_OK - 1, YELLOW),
-                          fs.colour_range(LINK_OK, LINK_OK, NEUTRAL)], default=NEUTRAL))
-    b.add(fs.conditional_text(f"{k}_lost", status, 0, 0, mid, 33, f"{ui.plc_label} LOST",
-                              size=13, bold=True, color="#ffffff", anchor="middle"))
-    b.add(fs.conditional_text(f"{k}_slow", status, 1, LINK_OK - 1, mid, 33, f"{ui.plc_label} slow",
-                              size=13, bold=True, anchor="middle"))
-    b.add(fs.conditional_text(f"{k}_ok", status, LINK_OK, LINK_OK, mid, 33, f"{ui.plc_label} OK",
-                              size=13, anchor="middle"))
+def link_cover(b: Builder, k: str, ui: MachineUi, x: float) -> None:
+    """FUXA's own connection status of one PLC device, as a cover over the right part of its machine
+    chip (HMI L2: three chips leave no room for link chips). Connected: transparent, the chip shows
+    state and mode as usual (ISA-101: nothing to see when all is well). Slow: yellow "PLC slow".
+    Lost: red "PLC LOST" over the state and mode words, which are stale then. A click goes through
+    to the chip (no_click), so the machine's screen still opens."""
+    status, mid = ui.m.status_tag_id, x + LINK_W / 2
+    svg, items = fs.rect_ranges(f"{k}_link", status, x, ROW1_Y - 2, LINK_W, ROW1_H + 4,
+                                [fs.colour_range(0, 0, RED), fs.colour_range(1, LINK_OK - 1, YELLOW),
+                                 fs.colour_range(LINK_OK, LINK_OK, "none")], default="none")
+    b.add((no_click(svg), items))
+    b.add(fs.conditional_text(f"{k}_link_lost", status, 0, 0, mid, 33, "PLC LOST", size=13, bold=True,
+                              color="#ffffff", anchor="middle", click_through=True))
+    b.add(fs.conditional_text(f"{k}_link_slow", status, 1, LINK_OK - 1, mid, 33, "PLC slow", size=13, bold=True,
+                              anchor="middle", click_through=True))
 
 
 def row2(b: Builder, p: str, ui: MachineUi, current: str) -> None:
@@ -217,13 +259,13 @@ def row2(b: Builder, p: str, ui: MachineUi, current: str) -> None:
     T = ui.m.tag_id  # this machine's tags
     kind = KIND.get(current)
     if kind is None:  # a machine's own screen: a label, nothing to choose
-        b.add(fs.rect(PICK_X, ROW2_Y, 2 * PICK_W + PICK_GAP, ROW2_H, ACTIVE, f"{p}_machine"))
-        b.add(fs.text(PICK_X + PICK_W + PICK_GAP / 2, 75, ui.title, size=14, bold=True, color="#ffffff",
-                      anchor="middle"))
+        width = len(UIS) * PICK_W + (len(UIS) - 1) * PICK_GAP
+        b.add(fs.rect(PICK_X, ROW2_Y, width, ROW2_H, ACTIVE, f"{p}_machine"))
+        b.add(fs.text(PICK_X + width / 2, 75, ui.title, size=14, bold=True, color="#ffffff", anchor="middle"))
     else:  # a shared view: the picker opens the same view for the other machine
         for i, other in enumerate(UIS):
             here = other is ui
-            b.add(fs.button(f"{p}_pick_{other.m.key}", other.title, PICK_X + i * (PICK_W + PICK_GAP), ROW2_Y,
+            b.add(fs.button(f"{p}_pick_{other.m.key}", other.pick_label, PICK_X + i * (PICK_W + PICK_GAP), ROW2_Y,
                             PICK_W, ROW2_H, [] if here else [fs.goto(shared_view(kind, other))],
                             background=ACTIVE if here else NEUTRAL, color="#ffffff" if here else TEXT))
 
@@ -245,7 +287,7 @@ def row2(b: Builder, p: str, ui: MachineUi, current: str) -> None:
         b.add(fs.rect_ranges(f"{p}_{name}", T(name), x, ROW2_Y, ALARM_W, ROW2_H,
                              [fs.colour_range(0, 0, NEUTRAL), fs.colour_range(1, 1, RED)], default=NEUTRAL,
                              events=[fs.goto(shared_view("alarms", ui))]))
-        b.add(fs.text(x + ALARM_W / 2, 74, ALARM_LABELS[name], size=11, anchor="middle", click_through=True))
+        b.add(fs.text(x + ALARM_W / 2, 74, ALARM_LABELS[name], size=10, anchor="middle", click_through=True))
 
 
 # --- Filler detail screen (stage 3) ----------------------------------------------
@@ -276,8 +318,11 @@ SETPOINTS = (
 LAMP_RANGES = [fs.colour_range(0, 0, LAMP_OFF, TEXT), fs.colour_range(1, 1, LAMP_ON, TEXT)]
 
 
-def lamp(b: Builder, tag: str, x: float, y: float, label: str, m: ft.Machine = ft.FILLER) -> None:
-    b.add(fs.circle_ranges(f"lamp_{tag}", m.tag_id(tag), x, y, 8, LAMP_RANGES, default=LAMP_OFF))
+def lamp(b: Builder, tag: str, x: float, y: float, label: str, m: ft.Machine = ft.FILLER,
+         element_id: str | None = None) -> None:
+    """A lamp on one bit. element_id: needed when a view has two lamps with the same tag name from two
+    PLCs (Line: the filler's and the labeler's Outfeed_Full); one id = one FUXA binding (found in L4)."""
+    b.add(fs.circle_ranges(element_id or f"lamp_{tag}", m.tag_id(tag), x, y, 8, LAMP_RANGES, default=LAMP_OFF))
     b.add(fs.text(x + 14, y + 4, label, size=12))
 
 
@@ -425,13 +470,15 @@ def buffer_scale_note() -> tuple[str, str]:
             f"(x{scale:g} time compression: a batch lasts minutes, not hours)")
 
 
-def decimals(tag: str) -> int:
-    return len(str(ft.SYRUP.factor(tag))) - 1
+def decimals(tag: str, m: ft.Machine = ft.SYRUP) -> int:
+    return len(str(m.factor(tag))) - 1
 
 
-def pipe(b: Builder, element_id: str, tag: str, colour: str, x: float, y: float, w: float, h: float) -> None:
-    """A pipe that is grey while its pump / valve is OFF and shows the medium's colour while it flows."""
-    b.add(fs.rect_ranges(element_id, S(tag), x, y, w, h,
+def pipe(b: Builder, element_id: str, tag: str, colour: str, x: float, y: float, w: float, h: float,
+         m: ft.Machine = ft.SYRUP) -> None:
+    """A pipe that is grey while its pump / valve is OFF and shows the medium's colour while it flows
+    (the labeler uses it for its label web: grey while the feed stands, white while it runs)."""
+    b.add(fs.rect_ranges(element_id, m.tag_id(tag), x, y, w, h,
                          [fs.colour_range(0, 0, PIPE_OFF), fs.colour_range(1, 1, colour)], default=PIPE_OFF))
 
 
@@ -540,17 +587,201 @@ def syrup_view() -> dict:
     return fs.view(SYRUP_MAIN_ID, SYRUP_MAIN_NAME, W, H, b.parts, b.items)
 
 
+# --- Labeler screen (HMI L3) ------------------------------------------------------------
+L = ft.LABELER.tag_id  # labeler tag name -> FUXA tag id
+GLUE_COLOUR = "#c07a2a"  # molten hot-melt
+GLUE_SCALE_C = 220  # temperature bar 0..220 degC
+GLUE_MAX_C = 200  # PLC constant GlueMax 2000 (0.1 degC): over-temperature FAULT (docs/labeler/state-diagram.md)
+GLUE_TOP, GLUE_H = 150, 200  # temperature bar y 150..350
+# Pocket state codes (simulator, %MW71) -> bottle body and label band colours, and a word
+POCKET_BODY = {lm.POCKET_EMPTY: (BG, "#9e9e9e"), lm.POCKET_BOTTLE: (PRODUCT, "#555555"),
+               lm.POCKET_LABELLING: (PRODUCT, "#555555"), lm.POCKET_LABELLED: (PRODUCT, "#555555")}
+POCKET_LABEL = {lm.POCKET_EMPTY: "none", lm.POCKET_BOTTLE: "none", lm.POCKET_LABELLING: "#d9d2bd",
+                lm.POCKET_LABELLED: "#ffffff"}
+LABELER_POCKET_WORDS = {lm.POCKET_EMPTY: "empty", lm.POCKET_BOTTLE: "bottle", lm.POCKET_LABELLING: "labelling",
+                        lm.POCKET_LABELLED: "labelled"}
+# Setpoints: (label, tag, unit, min, max), in the units FUXA shows (degC, scaled from the PLC's 0.1 degC).
+# Chosen so a legal value never trips an alarm or loses a label (checked 2026-11-19 against the PLC
+# constants and simulator.config):
+#   setpoint - window >= 165 - 15 = 150 degC = GLUE_STICK_MIN_C (below it the label falls off);
+#   setpoint + window <= 180 + 15 = 195 degC < GlueMax 200 degC (over-temperature FAULT);
+#   heater band <= 5 < 6 <= window: Glue_Ready stays on while the heater cycles;
+#   slowest warm-up 20 -> 180 - 6 = 174 degC takes about 51 s < HeatTimeout 120 s;
+#   4 turns = 4 s at SPIN_TURN_S 1.0 s < LabelTimeout 5 s.
+# The PLC defaults (170 / 5 / 10 degC, 2 turns) lie inside every range.
+LABELER_SETPOINTS = (
+    ("Glue setpoint", "GlueSetpoint", "°C", 165, 180),
+    ("Heater band", "GlueHyst", "°C", 2, 5),
+    ("Ready window ±", "GlueBand", "°C", 6, 15),
+    ("Turns after cut", "PressTurns", "turns", 1, 4),
+)
+LABELER_MANUAL_BUTTONS = (("C2", "Man_C2"), ("Gate", "Man_Gate"), ("Bell", "Man_Clamp"), ("Turntable", "Man_Spin"),
+                          ("Feed + glue", "Man_Feed"), ("Knife", "Man_Cut"), ("Pusher", "Man_Discharge"))
+RESET_COUNTER = 4  # Cmd value: GoodCount -> 0 (labeler only; Reset = 3 keeps the count)
+C3_X, C3_PITCH = 530, 22  # first C3 slots on the screen (all 8; the Line view shows C3 too, L4)
+
+
+def labeler_process(b: Builder) -> None:
+    """C2 end and gate -> pocket on the turntable (bell above, disc below) -> pusher -> C3; label roll and
+    web from the top left; melt tank as a temperature bar on the right."""
+    m = ft.LABELER
+    b.add(fs.text(16, 128, "Process", size=15, bold=True))
+    b.add(f'<circle cx="96" cy="123" r="6" fill="{LAMP_ON}" stroke="{TEXT}" stroke-width="1.5"/>')  # legend
+    b.add(fs.text(108, 127, "ON", size=12, color=MUTED))
+    # C2 end and the gate
+    b.add(fs.text(40, 318, "C2 from the filler", size=12, color=MUTED))
+    b.add(fs.rect(40, 330, 210, 8, "#555555", rx=2))
+    b.add(fs.rect_ranges("gate", L("GateMotor"), 252, 268, 8, 70,
+                         [fs.colour_range(0, 0, "#555555"), fs.colour_range(1, 1, LAMP_ON, TEXT)], default="#555555"))
+    lamp(b, "ConveyorMotor2", 48, 356, "C2 motor", m)
+    lamp(b, "Bottle_At_Gate", 196, 356, "bottle at gate", m)
+    lamp(b, "GateMotor", 48, 380, "gate open (pulse)", m)
+    lamp(b, "Bottle_Entering", 196, 380, "bottle on its way", m)
+    # label roll and web (white while the feed runs)
+    b.add(f'<circle cx="190" cy="180" r="34" fill="#e2e2e2" stroke="{TEXT}" stroke-width="1.5"/>')
+    b.add(f'<circle cx="190" cy="180" r="8" fill="{BG}" stroke="{TEXT}" stroke-width="1.5"/>')
+    b.add(fs.text(190, 236, "label roll", size=12, color=MUTED, anchor="middle"))
+    pipe(b, "web_top", "LabelFeed", LAMP_ON, 190, 144, 116, 5, m)
+    pipe(b, "web_down", "LabelFeed", LAMP_ON, 301, 144, 5, 146, m)
+    pipe(b, "web_in", "LabelFeed", LAMP_ON, 301, 285, 29, 5, m)
+    for k, (tag, label) in enumerate((("Roll_Low", "roll low"), ("Roll_Empty", "roll empty"))):  # left of the roll
+        lamp(b, tag, 40, 150 + k * 24, label, m)
+    for k, (tag, label) in enumerate((("Label_Mark", "label mark"), ("Cutter", "knife"), ("GlueRoller", "glue roller"))):
+        lamp(b, tag, 318, 166 + k * 24, label, m)  # beside the web, where they act
+    # pocket: bell above, bottle (body + label band), turntable below
+    b.add(fs.rect_ranges("bell", L("Bell_Down"), 322, 226, 60, 14,
+                         [fs.colour_range(0, 0, "#bdbdbd", TEXT), fs.colour_range(1, 1, "#555555", TEXT)],
+                         default="#bdbdbd"))
+    b.add(fs.rect_ranges("pocket_body", L("Anim_Station"), 330, 248, 44, 84,
+                         [fs.colour_range(c, c, fill, line) for c, (fill, line) in POCKET_BODY.items()], default=BG))
+    b.add(fs.rect_ranges("pocket_label", L("Anim_Station"), 330, 274, 44, 30,
+                         [fs.colour_range(c, c, colour, "#555555" if colour != "none" else "none")
+                          for c, colour in POCKET_LABEL.items()], default="none"))
+    b.add(fs.impeller("turntable", 352, 352, 16, L("SpinMotor")))
+    b.add(fs.enum_texts("pocket_word", L("Anim_Station"), LABELER_POCKET_WORDS, 352, 392, size=13, bold=True,
+                        anchor="middle"))
+    for k, (tag, label) in enumerate((("Bottle_In_Pocket", "bottle in pocket"), ("ClampValve", "bell valve"),
+                                      ("Bell_Down", "bell down"), ("Label_Present", "label on bottle"),
+                                      ("SpinMotor", "turntable"), ("Spin_Pulse", "turn pulse"))):
+        lamp(b, tag, 400, 250 + k * 24, label, m)
+    # pusher -> C3 (all 8 slot bits of Anim_C3; the Line view draws C3 too)
+    b.add(fs.text(C3_X, 260, "C3 to the packer", size=12, color=MUTED))
+    for i in range(8):
+        b.add(fs.rect_ranges(f"lab_c3_slot{i}", L("Anim_C3"), C3_X + i * C3_PITCH, 290, 16, 40,
+                             [fs.colour_range(0, 0, BG), fs.colour_range(1, 1, PRODUCT, "#333333")],
+                             default=BG, bitmask=1 << i))
+    b.add(fs.rect(C3_X - 4, 332, 8 * C3_PITCH + 4, 6, "#555555", rx=2))
+    lamp(b, "DischargeMotor", C3_X, 356, "pusher", m)
+    lamp(b, "C3_Full", C3_X, 380, "C3 full", m)
+    lamp(b, "Outfeed_Full", C3_X + 84, 380, "outfeed full", m)
+
+
+def labeler_tank(b: Builder) -> None:
+    """Melt tank: temperature bar 0..220 degC with a red tick at GlueMax, the setpoint as a thin bar."""
+    m, x = ft.LABELER, 770
+    b.add(fs.text(x + 40, 128, "Melt tank", size=14, bold=True, anchor="middle"))
+    b.add(fs.progress("glue_temp", L("GlueTemp"), x, GLUE_TOP, 50, GLUE_H, 0, GLUE_SCALE_C, GLUE_COLOUR))
+    b.add(fs.progress("glue_setpoint", L("GlueSetpoint"), x + 56, GLUE_TOP, 12, GLUE_H, 0, GLUE_SCALE_C, "#8a8a8a"))
+    b.add(fs.text(x - 4, GLUE_TOP + 10, f"{GLUE_SCALE_C}", size=11, color=MUTED, anchor="end"))
+    b.add(fs.text(x - 4, GLUE_TOP + GLUE_H, "0", size=11, color=MUTED, anchor="end"))
+    y = GLUE_TOP + GLUE_H * (1 - GLUE_MAX_C / GLUE_SCALE_C)
+    b.add(fs.rect(x - 6, y - 1, 80, 2, RED, rx=0, element_id="glue_max_tick"))
+    b.add(fs.text(x + 78, y + 4, f"max {GLUE_MAX_C} °C", size=11, color="#a00000"))
+    b.add(fs.value("val_GlueTemp", L("GlueTemp"), x + 40, GLUE_TOP + GLUE_H + 22, size=15))
+    b.add(fs.text(x + 44, GLUE_TOP + GLUE_H + 22, "°C", size=13))
+    b.add(fs.text(x + 74, GLUE_TOP + GLUE_H + 22, "grey bar = setpoint", size=11, color=MUTED))
+    for k, (tag, label) in enumerate((("GlueHeater", "heater"), ("Heat_Demand", "heat wanted"),
+                                      ("Glue_Ready", "glue ready"), ("Glue_Low", "glue low"))):
+        lamp(b, tag, x + 92, 214 + k * 24, label, m)
+
+
+def labeler_values(b: Builder) -> None:
+    """Step, the labelled-bottle counter with its own reset, the glue temperature."""
+    m, x, right = ft.LABELER, 990, 1225
+    b.add(fs.text(x, 128, "Labeling", size=15, bold=True))
+    b.add(fs.text(x, 158, "Step", size=13))
+    b.add(fs.enum_texts("labeler_step", L("Step"), LABELER_STEP_NAMES, right + 30, 158, size=15, bold=True,
+                        anchor="end"))
+    b.add(fs.text(x, 188, "Labelled bottles", size=13))
+    b.add(fs.value("val_labeler_GoodCount", L("GoodCount"), right, 188, size=15))
+    # one write per click (I13): Cmd = 4, the PLC zeroes GoodCount and clears Cmd
+    b.add(fs.button("labeler_reset_counter", "Reset counter", x, 198, 150, 32,
+                    [fs.set_value(L("Cmd"), RESET_COUNTER)], background=NEUTRAL))
+    for label, tag, y in (("Glue temperature", "GlueTemp", 262), ("Glue setpoint", "GlueSetpoint", 288)):
+        b.add(fs.text(x, y, label, size=13))
+        b.add(fs.value(f"val_labeler_{tag}", L(tag), right, y, size=15))
+        b.add(fs.text(right + 5, y, "°C", size=12, color=MUTED))
+    lamp(b, "Starved", x + 8, 318, "starved (no bottle 2 s / roll empty)", m)
+    lamp(b, "Jog_Block", x + 8, 342, "manual blocked (jog watchdog)", m)
+    for k, line in enumerate(("Reset counter zeroes the count (Cmd 4).", "Reset in the header clears alarms",
+                              "and keeps the count.")):
+        b.add(fs.text(x, 372 + k * 15, line, size=11, color=MUTED))
+
+
+def labeler_setpoints(b: Builder) -> None:
+    b.add(fs.rect(16, 420, 760, 280, "#dcdcdc", rx=6))
+    b.add(fs.text(32, 450, "Setpoints", size=15, bold=True))
+    m = ft.LABELER
+    for k, (label, tag, unit, lo, hi) in enumerate(LABELER_SETPOINTS):
+        x, y = 32, 485 + k * 42
+        d = decimals(tag, m)
+        b.add(fs.text(x, y, label, size=13))
+        b.add(fs.number_input(f"in_labeler_{tag}", L(tag), x + 140, y - 21, 84, 30, lo, hi, step="any" if d else None))
+        b.add(fs.text(x + 232, y, unit, size=13))
+        b.add(fs.text(x + 280, y, f"{lo:.{d}f}–{hi:.{d}f}", size=11, color=MUTED))
+    for k, line in enumerate((
+        "Type a value and press Enter; values outside the range are refused.",
+        "The heater switches on below setpoint − band and off at the setpoint (hysteresis).",
+        "Glue is ready inside setpoint ± window; the window is always wider than the band, so the",
+        "glue stays ready while the heater cycles. Turns after cut press the label tail on.",
+    )):
+        b.add(fs.text(32, 638 + k * 17, line, size=12, color=MUTED))
+
+
+def labeler_manual(b: Builder) -> None:
+    b.add(fs.rect(792, 420, 472, 280, "#dcdcdc", rx=6))
+    b.add(fs.text(808, 450, "Manual (hold to run)", size=15, bold=True))
+    b.add(fs.conditional_text("labeler_manual_hint", L("ModeReq"), 0, MANUAL - 1, 808, 500,
+                              "The buttons appear in Manual mode (header).", size=13, color=MUTED))
+    for i, (label, tag) in enumerate(LABELER_MANUAL_BUTTONS):
+        x, y = 808 + (i % 4) * 112, 470 + (i // 4) * 58
+        b.add(fs.hold_button(f"labeler_{tag}", label, x, y, 108, 48, L(tag), L("ModeReq"), MANUAL, MANUAL))
+    b.add(fs.conditional_text("labeler_manual_blocked", L("Jog_Block"), 1, 1, 808, 598,
+                              "Manual blocked: a button was held > 10 s. Release all.", size=13, bold=True,
+                              color="#a00000"))
+    for k, line in enumerate(("Interlocks (the PLC checks them, also in Manual):",
+                              "gate: pocket empty · bell: a bottle in the pocket",
+                              "turntable, knife: bell down · feed + glue: bell down, glue ready",
+                              "pusher: bell up, C3 not full · heater: automatic in every mode",
+                              "A button acts only while it is held.")):
+        b.add(fs.text(808, 620 + k * 17, line, size=12, color=TEXT if k == 0 else MUTED))
+
+
+def labeler_view() -> dict:
+    b = Builder()
+    header(b, HEADER_KEY[LABELER_MAIN_ID], LABELER_MAIN_ID)
+    labeler_process(b)
+    labeler_tank(b)
+    labeler_values(b)
+    labeler_setpoints(b)
+    labeler_manual(b)
+    return fs.view(LABELER_MAIN_ID, LABELER_MAIN_NAME, W, H, b.parts, b.items)
+
+
 # --- Line overview (stage 4; syrup room block S4) ---------------------------------
 # Report 8.3: FUXA polls every 200 ms, too slow for smooth motion, so a conveyor is 8 slots and
 # the simulator writes one bit per slot (Anim_C1/C2, bit 0 = entry ... bit 7 = exit). Each slot is
 # a bottle shape bound to ONE bit (FUXA bitmask), so bottles step along and visibly pile up.
 # The rollers turn while the conveyor's motor output is ON.
-SLOT_PITCH, SLOT_W, SLOT_H = 38, 26, 46
+SLOT_PITCH, SLOT_W, SLOT_H = 30, 22, 46  # 8 slots = 240 px: C1, C2 and C3 fit in one row (HMI L4)
 BELT_Y = 360  # top of the belt band
 STANDIN = "#bdbdbd"
 # Syrup room block (S4): above the filler block (y 270), same x and width, so the product pipe
 # runs straight down between the two centres (y 226..270)
 SYRUP_BLOCK_Y, SYRUP_BLOCK_H = 108, 118
+# One row (HMI L4): x of every part of the Line view, left to right
+C1_X, FILLER_X, BLOCK_W, C2_X = 108, 364, 200, 580
+LABELER_X, LABELER_W, C3_LINE_X, PACKER_X = 836, 160, 1012, 1140
 
 
 def no_click(svg: str) -> str:
@@ -563,17 +794,21 @@ def click_through(svg: str) -> str:
     return svg.replace("<g ", '<g pointer-events="none" ', 1)
 
 
-def conveyor(b: Builder, key: str, x: float, label: str, anim: str, motor: str | None, bottle: str) -> None:
+def conveyor(b: Builder, key: str, x: float, label: str, anim: str, motor: str | None, bottle: str,
+             anim_m: ft.Machine = ft.FILLER, motor_m: ft.Machine = ft.FILLER) -> None:
     """8 slots + belt + 3 rollers. motor None = driven by a machine that is not built (static rollers).
+    anim_m / motor_m: the PLC whose memory holds the slot word (the simulator writes it there) and the
+    PLC that drives the motor; for C2 they differ (slots in the filler PLC, motor from the labeler).
     One call per conveyor, so a later machine's conveyor is one more call (issue I11)."""
     b.add(fs.text(x, BELT_Y - 90, label, size=13, bold=True))
     b.add(fs.rect(x - 4, BELT_Y, 8 * SLOT_PITCH + 4, 10, "#555555", rx=2))
     for i in range(8):
-        b.add(fs.rect_ranges(f"{key}_slot{i}", T(anim), x + i * SLOT_PITCH, BELT_Y - SLOT_H - 2, SLOT_W, SLOT_H,
-                             [fs.colour_range(0, 0, BG), fs.colour_range(1, 1, bottle, "#333333")],
+        b.add(fs.rect_ranges(f"{key}_slot{i}", anim_m.tag_id(anim), x + i * SLOT_PITCH, BELT_Y - SLOT_H - 2,
+                             SLOT_W, SLOT_H, [fs.colour_range(0, 0, BG), fs.colour_range(1, 1, bottle, "#333333")],
                              default=BG, bitmask=1 << i))
     for k in range(3):
-        b.add(fs.roller(f"{key}_roller{k}", x + 14 + k * 140, BELT_Y + 24, 11, T(motor) if motor else None))
+        b.add(fs.roller(f"{key}_roller{k}", x + 14 + k * 105, BELT_Y + 24, 11,
+                        motor_m.tag_id(motor) if motor else None))
 
 
 def standin_block(b: Builder, x: float, y: float, w: float, h: float, lines: tuple[str, ...]) -> None:
@@ -600,24 +835,26 @@ def machine_block(b: Builder, key: str, x: float, y: float, w: float, h: float, 
 
 def line_view(view_id: str = LINE_ID) -> dict:
     """The line overview; view_id picks the machine of header row 2 (same body for every machine).
-    Real machines (filler, syrup room since S4) are blocks coloured by their State; a click opens
-    their screen. Machines not built yet are grey stand-ins."""
+    Real machines (filler, syrup room since S4, labeler since L4) are blocks coloured by their State; a
+    click opens their screen. Machines not built yet (blow moulder, packer) are grey stand-ins.
+    One row, left to right (decision 2026-11-19): blow moulder 16-96 | C1 108-348 | filler 364-564 with the
+    syrup room above it | C2 580-820 | labeler 836-996 | C3 1012-1252 | packer stand-in under the end of C3."""
     b = Builder()
     header(b, HEADER_KEY[view_id], view_id)
     b.add(fs.text(16, 128, "Line overview", size=15, bold=True))
     # blow moulder (stand-in) -> C1
-    standin_block(b, 16, 300, 110, 100, ("Blow moulder", "simulated", "(bottle supply)"))
-    conveyor(b, "c1", 140, "C1 infeed", "Anim_C1", "ConveyerMotor1", "#ffffff")
-    lamp(b, "S2", 420, BELT_Y + 56, "S2")
+    standin_block(b, 16, 300, 80, 100, ("Blow", "moulder", "simulated"))
+    conveyor(b, "c1", C1_X, "C1 infeed", "Anim_C1", "ConveyerMotor1", "#ffffff")
+    lamp(b, "S2", C1_X + 8 * SLOT_PITCH - 40, BELT_Y + 56, "S2")
     # filler: coloured block, mini pockets, index belt rollers
-    fx, fy, fw, fh = 464, 270, 236, 170
+    fx, fy, fw, fh = FILLER_X, 270, BLOCK_W, 170
     machine_block(b, "filler", fx, fy, fw, fh, "Filler", MAIN_ID)
     for k, (_name, anim, _lamps) in enumerate(POCKETS):
         ranges = [fs.colour_range(code, code, fill, line) for code, (fill, line) in POCKET_COLOURS.items()]
-        svg, items = fs.rect_ranges(f"filler_pocket{k}", T(anim), fx + 30 + k * 48, fy + 62, 30, 50, ranges, default=BG)
+        svg, items = fs.rect_ranges(f"filler_pocket{k}", T(anim), fx + 16 + k * 46, fy + 62, 30, 50, ranges, default=BG)
         b.add((no_click(svg), items))
     for k in range(2):
-        svg, items = fs.roller(f"filler_roller{k}", fx + 60 + k * 116, fy + 128, 9, T("IndexMotor"))
+        svg, items = fs.roller(f"filler_roller{k}", fx + 50 + k * 100, fy + 128, 9, T("IndexMotor"))
         b.add((svg.replace("<path ", '<path pointer-events="none" ', 1), items))
     # syrup room (S4): the real syrup PLC as a block above the filler, coloured by its State, with
     # its step and buffer level (the buffer is why Product_Available comes and goes)
@@ -638,14 +875,31 @@ def line_view(view_id: str = LINE_ID) -> dict:
     # the other end of the wire: the filler's input (the simulator copies the signal, emulating
     # the hardwiring). Pipe brown + lamp off = the signal does not reach the filler.
     lamp(b, "Product_Available", fx + 20, top + 24, "filler input")
-    # C2 (driven by the labeler stand-in) -> labeler (stand-in)
-    conveyor(b, "c2", 724, "C2 outfeed (driven by the labeler)", "Anim_C2", None, PRODUCT)
-    lamp(b, "S7", 730, BELT_Y + 56, "S7 C2 full")
-    lamp(b, "Outfeed_Full", 860, BELT_Y + 56, "outfeed full")
-    standin_block(b, 1040, 300, 120, 100, ("Labeler", "simulated", "(takes bottles)"))
+    # C2: its slots are written into the filler PLC, its motor is the labeler's ConveyorMotor2 (L4)
+    conveyor(b, "c2", C2_X, "C2 (driven by the labeler)", "Anim_C2", "ConveyorMotor2", PRODUCT,
+             motor_m=ft.LABELER)
+    lamp(b, "S7", C2_X + 6, BELT_Y + 56, "S7 C2 full")
+    lamp(b, "Outfeed_Full", C2_X + 120, BELT_Y + 56, "outfeed full")
+    # labeler (L4): the real labeler PLC as a block, coloured by its State, with its step and glue
+    # temperature (the reason it waits in WARM_UP); click opens the Labeler screen
+    lx = LABELER_X
+    machine_block(b, "labeler", lx, fy, LABELER_W, fh, "Labeler", LABELER_MAIN_ID, ft.LABELER)
+    b.add(fs.enum_texts("labeler_step_line", L("Step"), LABELER_STEP_NAMES, lx + LABELER_W / 2, fy + 70, size=13,
+                        bold=True, anchor="middle", click_through=True))
+    b.add(fs.text(lx + LABELER_W / 2 - 8, fy + 96, "Glue", size=12, anchor="end", click_through=True))
+    svg, items = fs.value("line_glue", L("GlueTemp"), lx + LABELER_W / 2 + 44, fy + 96, size=13)
+    b.add((click_through(svg), items))
+    b.add(fs.text(lx + LABELER_W / 2 + 48, fy + 96, "°C", size=12, click_through=True))
+    # C3 (driven by the packer stand-in, no PLC output: static rollers) -> packer (stand-in)
+    conveyor(b, "c3", C3_LINE_X, "C3 (driven by the packer)", "Anim_C3", None, PRODUCT, anim_m=ft.LABELER)
+    lamp(b, "C3_Full", C3_LINE_X + 6, BELT_Y + 56, "C3 full", ft.LABELER, "lamp_labeler_C3_Full")
+    lamp(b, "Outfeed_Full", C3_LINE_X + 96, BELT_Y + 56, "outfeed full", ft.LABELER, "lamp_labeler_Outfeed_Full")
+    standin_block(b, PACKER_X, 450, 1264 - PACKER_X, 84, ("Packer", "simulated", "(takes bottles)"))
     # counters and legend
     b.add(fs.text(16, 500, "Good bottles", size=14))
     b.add(fs.value("line_goodcount", T("GoodCount"), 180, 500, size=16))
+    b.add(fs.text(220, 500, "Labelled", size=14))
+    b.add(fs.value("line_labeler_goodcount", L("GoodCount"), 330, 500, size=16))
     b.add(fs.rect(16, 540, 14, 24, "#ffffff", rx=2, stroke="#333333"))
     b.add(fs.text(38, 557, "bottle on a belt (one per slot; the simulator writes the slot bits)", size=12, color=MUTED))
     b.add(fs.roller("legend_roller", 23, 590, 8, None))
@@ -677,7 +931,26 @@ SYRUP_ALARMS = {
     "Alm_CommLost": ("high", "Plant heartbeat lost for 3 s (simulator link)"),
     "Alm_LowSyrup": ("low", "Low syrup: not enough for the next batch (warning, Starved; clears after refill)"),
 }
-ALARM_TEXTS = {FILLER_UI.m.key: ALARMS, SYRUP_UI.m.key: SYRUP_ALARMS}  # machine key -> its alarms
+# Causes: docs/labeler/io-list.md + state-diagram.md (LabelTimeout 5 s, ClampTimeout 2 s, OutTimeout 3 s,
+# HeatTimeout 120 s, GlueMax 200.0 degC). LabelEmpty is not latched (Starved, clears after the roll change).
+LABELER_ALARMS = {
+    "Alm_LabelTimeout": ("highhigh", "Label timeout: no label mark within 5 s in WRAP (web torn) or turns not "
+                                     "reached within 5 s in PRESS (FAULT)"),
+    "Alm_PocketJam": ("highhigh", "Pocket jam: bottle not in the pocket, bell not moved within 2 s, or not "
+                                  "discharged within 3 s (FAULT)"),
+    "Alm_GlueOverTemp": ("highhigh", "Glue over-temperature: 200 °C reached, heater off (FAULT; Reset below 200 °C)"),
+    "Alm_GlueHeatTimeout": ("highhigh", "Glue heat-up timeout: not ready within 120 s of WARM_UP (heater failed, FAULT)"),
+    "Alm_CommLost": ("high", "Plant heartbeat lost for 3 s (simulator link)"),
+    "Alm_OutfeedBlocked": ("low", "Outfeed blocked longer than 2 min: C3 full (warning, no FAULT)"),
+    "Alm_LabelEmpty": ("low", "Label roll empty: no new bottle (warning, Starved; clears after the roll change)"),
+    # FUXA-only warnings straight on sensor bits (decision 2026-11-15: no PLC alarm bit, nothing latched)
+    "Roll_Low": ("low", "Label roll low: prepare the next roll (warning)"),
+    "Glue_Low": ("low", "Glue low in the melt tank: add glue blocks (warning)"),
+}
+# Labeler warnings on sensor bits: FUXA alarms, but no header chip (row 2 is full with the 7 PLC bits)
+SENSOR_WARNINGS = {"labeler": ("Roll_Low", "Glue_Low")}
+ALARM_TEXTS = {FILLER_UI.m.key: ALARMS, SYRUP_UI.m.key: SYRUP_ALARMS,  # machine key -> its alarms
+               LABELER_UI.m.key: LABELER_ALARMS}
 
 
 def alarm_name(bit: str, m: ft.Machine = ft.FILLER) -> str:
@@ -708,7 +981,7 @@ def alarms_view(view_id: str = ALARMS_ID) -> dict:
         "is acknowledged, also one that came and went, so nothing is missed. Ack does not change the PLC.",
         f"Reset = the {ui.title.lower()} PLC (picked in the header) clears its alarm bits, but only those whose",
         "cause is gone. After a FAULT the machine also needs Start. Colours: red = FAULT, orange = high, yellow = warning.",
-        f"The list shows the alarms of both machines (column Machine); Reset acts on the {ui.title.lower()} only "
+        f"The list shows the alarms of every machine (column Machine); Reset acts on the {ui.title.lower()} only "
         "(other machine: picker in the header).",
     )):
         b.add(fs.text(176, 406 + k * 20, line, size=13, color=TEXT if k in (0, 2) else MUTED))
@@ -731,11 +1004,13 @@ def apply_alarms(project: dict) -> list[str]:
 
 def side_menu() -> list[dict]:
     """FUXA's side menu (top-left button): the views plus FUXA's alarm panel with the history."""
-    icons = {LINE_ID: "linear_scale", MAIN_ID: "local_drink", SYRUP_MAIN_ID: "opacity", ALARMS_ID: "notifications",
+    icons = {LINE_ID: "linear_scale", MAIN_ID: "local_drink", SYRUP_MAIN_ID: "opacity", LABELER_MAIN_ID: "label",
+             ALARMS_ID: "notifications",
              TRENDS_ID: "show_chart", TAGS_ID: "list"}
     items = [{"id": f"nav_{key}", "text": name, "view": view_id, "icon": icons[view_id]}
              for view_id, name in NAV for key in [HEADER_KEY[view_id]]]
     return items + [{"id": "nav_syrup_tags", "text": SYRUP_TAGS_NAME, "view": SYRUP_TAGS_ID, "icon": "list"},
+                    {"id": "nav_labeler_tags", "text": LABELER_TAGS_NAME, "view": LABELER_TAGS_ID, "icon": "list"},
                     {"id": "nav_alarm_panel", "text": "Alarm history", "view": ALARM_PANEL, "icon": "history"}]
 
 
@@ -762,7 +1037,15 @@ SYRUP_CHARTS = (
                                                   ("PressSetpoint", "Setpoint bar", "#8a8a8a")]),
     ("ch_syrup_state", "Syrup room state", 30, [("State", "State", TEXT)]),
 )
-MACHINE_CHARTS = {FILLER_UI.m.key: CHARTS, SYRUP_UI.m.key: SYRUP_CHARTS}  # machine key -> its charts
+# Labeler (L6): a warm-up takes about a minute, so 15 min show it and the heater cycling after it
+LABELER_CHARTS = (
+    ("ch_labeler_glue", "Glue temperature (°C)", 15, [("GlueTemp", "Glue °C", DARK_BLUE),
+                                                      ("GlueSetpoint", "Setpoint °C", "#8a8a8a")]),
+    ("ch_labeler_count", "Labelled bottles", 30, [("GoodCount", "Labelled bottles", TEXT)]),
+    ("ch_labeler_state", "Labeler state", 30, [("State", "State", TEXT)]),
+)
+MACHINE_CHARTS = {FILLER_UI.m.key: CHARTS, SYRUP_UI.m.key: SYRUP_CHARTS,  # machine key -> its charts
+                  LABELER_UI.m.key: LABELER_CHARTS}
 SYRUP_CHART_PLACES = {"ch_syrup_levels": (16, 106, 616, 282), "ch_syrup_temp": (648, 106, 616, 282),
                       "ch_syrup_press": (16, 396, 616, 250), "ch_syrup_state": (648, 396, 616, 250)}
 SYRUP_CHART_DECIMALS = {"ch_syrup_temp": 1, "ch_syrup_press": 2}  # legend shows 4.5 degC / 3.25 bar
@@ -781,6 +1064,9 @@ def trends_view(view_id: str = TRENDS_ID) -> dict:
     header(b, HEADER_KEY[view_id], view_id)
     if CONTEXT[view_id] is SYRUP_UI:
         syrup_trends(b)
+        return fs.view(view_id, VIEW_NAMES[view_id], W, H, b.parts, b.items)
+    if CONTEXT[view_id] is LABELER_UI:
+        labeler_trends(b)
         return fs.view(view_id, VIEW_NAMES[view_id], W, H, b.parts, b.items)
     # fill chart across the top, count (left) and state (right) below it
     places = {"ch_filler_fill": (16, 106, 1248, 300), "ch_filler_count": (16, 414, 616, 250),
@@ -810,6 +1096,24 @@ def syrup_trends(b: Builder) -> None:
     b.add(fs.text(64, 686, "its setpoint, gets CO2 up to its setpoint, then goes to the buffer.", size=13))
     b.add(fs.text(64, 706, f"Last {SYRUP_CHARTS[0][2]} min, state {SYRUP_CHARTS[3][2]} min. FUXA stores °C / bar "
                   "as shown (scaled first).", size=12, color=MUTED))
+
+
+LABELER_CHART_PLACES = {"ch_labeler_glue": (16, 106, 1248, 300), "ch_labeler_count": (16, 414, 616, 250),
+                        "ch_labeler_state": (648, 414, 616, 250)}  # the filler's layout
+
+
+def labeler_trends(b: Builder) -> None:
+    """L6: glue temperature across the top, labelled bottles (left) and state (right) below it."""
+    for chart_id, _title, window, _lines in LABELER_CHARTS:
+        options = fs.chart_options(window, **({"decimalsPrecision": 1} if chart_id == "ch_labeler_glue" else {}))
+        b.add(fs.chart(chart_id.replace("ch_", "trend_"), chart_id, *LABELER_CHART_PLACES[chart_id], options))
+    key = " · ".join(f"{number} {name}" for number, name in STATE_NAMES.items())
+    b.add(fs.text(648, 684, f"State: {key}", size=13))
+    # x = 64: FUXA's round menu button covers the bottom-left corner; lines end before x 640
+    b.add(fs.text(64, 668, "Normal: the glue warms up to its setpoint in under a minute,", size=13))
+    b.add(fs.text(64, 686, "then the heater keeps it in a narrow band (saw tooth).", size=13))
+    b.add(fs.text(64, 706, f"Last {LABELER_CHARTS[0][2]} min (glue), {LABELER_CHARTS[1][2]} min (count, state). "
+                  "FUXA stores °C as shown (scaled first).", size=12, color=MUTED))
 
 
 def apply_charts(project: dict) -> list[str]:
@@ -872,7 +1176,11 @@ def apply_views(project: dict) -> list[str]:
     project["hmi"]["views"] = kept + [line_view(), filler_view(), alarms_view(), trends_view(), tags_view(),
                                       tags_view(ft.SYRUP, SYRUP_TAGS_ID, SYRUP_TAGS_NAME, HEADER_KEY[SYRUP_TAGS_ID]),
                                       line_view(SYRUP_LINE_ID), alarms_view(SYRUP_ALARMS_ID),
-                                      trends_view(SYRUP_TRENDS_ID), syrup_view()]
+                                      trends_view(SYRUP_TRENDS_ID), syrup_view(),
+                                      tags_view(ft.LABELER, LABELER_TAGS_ID, LABELER_TAGS_NAME,
+                                                HEADER_KEY[LABELER_TAGS_ID]),
+                                      line_view(LABELER_LINE_ID), alarms_view(LABELER_ALARMS_ID),
+                                      trends_view(LABELER_TRENDS_ID), labeler_view()]
     project["hmi"]["layout"].setdefault("navigation", {})["items"] = side_menu()
     project["hmi"]["layout"]["start"] = LINE_ID  # the overview is the main screen (report 8.1)
     return changes

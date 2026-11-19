@@ -1,10 +1,10 @@
 """The FUXA project (docs/hmi/fuxa-project.json) matches the PLCs: tags, screens, alarms, trends.
 
     uv run python tests/test_hmi_tags.py --offline   # H1 only: the export file, no PLC, no FUXA
-    uv run python tests/test_hmi_tags.py             # H1-H10: FUXA and both PLCs must be running
+    uv run python tests/test_hmi_tags.py             # H1-H12: FUXA and all three PLCs must be running
 
 Checks:
-    H1 export (per device, filler + syrup room): every signal of its address map has exactly one tag,
+    H1 export (per device, filler + syrup room + labeler): every signal of its address map has exactly one tag,
        with FUXA address = Modbus number + 1, the right area and type (catches an edit in
        the editor that moved a tag); the degC / bar tags of the syrup room have FUXA's
        expression scale (read this / f, write Math.round(this * f)), no other tag has a scale
@@ -15,33 +15,40 @@ Checks:
     H4 FUXA reports the PLC device as connected (connection status tag = 5)
     H2 + H4 also run for the syrup room PLC (port 5022), and H3 there writes PressHyst 0.29 bar
        through FUXA: the PLC must get 29 (rounded, not cut off to 28), then the old value
-    H5 header (export, stages 2 and S2), on every generated view:
-       row 1 = both machines: a chip per machine on its State that opens its screen, with one
-       show-text per state, step and mode value; the E-stop chip on both PLCs (drawing order:
-       OK texts, red covers, PRESSED texts); a link chip per PLC; Line/Alarms/Trends open the
+    H2 + H4 also run for the labeler PLC (port 5023, HMI L1), and H3 there writes GlueHyst 3.5 degC
+       through FUXA: the PLC must get 35, then the old value
+    H5 header (export, stages 2, S2 and L2), on every generated view:
+       row 1 = all three machines: a chip per machine on its State that opens its screen, with one
+       show-text per state, step and mode value; an E-stop segment per PLC (I17: red at 0, "E-stop OK" /
+       "E-STOP" texts, then a "no link" cover on that PLC's connection status, so a lost PLC never shows
+       red); a link cover per PLC inside its chip (L2); Line/Alarms/Trends open the
        view of the same machine. Row 2 = the machine of the view (fv.CONTEXT): Start/Stop/Reset
        write its Cmd 1/2/3, Auto/Manual/Stop its ModeReq 1/2/0, a chip per alarm bit; on shared
-       views the picker opens the same view for the other machine. Every button has at most one
+       views the picker opens the same view for each other machine. Every button has at most one
        event per kind (several writes per click dropped FUXA's PLC link). Layout: header boxes
-       inside 1280 x 96, none overlapping in a row
+       inside 1280 x 96, none overlapping in a row, except a link cover, which must lie inside its own chip
     H6 Filler screen (export, stage 3): a hold-to-run button per Man_* (1 on press, 0 on
        release and on mouseout, visible only in Manual); setpoint inputs with the right
        tag and min < max; a lamp per sensor/output; pocket + state words per Anim_* tag;
        fill level and setpoint bars
-    H7 Line overview (export, stage 4; both Line views): 8 slot shapes per conveyor, each bound to its own bit
-       (bitmask 1, 2, 4 ... 128) of Anim_C1 / Anim_C2; C1 and index rollers turn with
-       ConveyorMotor1 / IndexMotor, C2 rollers static; the filler block opens the Filler view;
+    H7 Line overview (export, stage 4; every Line view): 8 slot shapes per conveyor, each bound to its own bit
+       (bitmask 1, 2, 4 ... 128) of Anim_C1 / Anim_C2 (filler PLC) / Anim_C3 (labeler PLC); C1 and index rollers
+       turn with ConveyorMotor1 / IndexMotor, C2 rollers with the LABELER's ConveyorMotor2, C3 rollers static
+       (packer stand-in); the filler block opens the Filler view; L4: the labeler block on the labeler State opens
+       the Labeler view, its step / glue texts let clicks through; the row C1 < filler < C2 < labeler < C3 runs left
+       to right without overlap, the packer stand-in below the end of C3;
        S4: the syrup room block on the syrup State (one colour per state) opens the Syrup room
        view, its state / step texts and buffer level (syrup BufferLevel) let clicks through; the
        product pipe and "no product" on the syrup PLC's Product_Available (the source), the
        "filler input" lamp on the filler's; syrup block above the pipe above the filler block
-    H8 Alarms (export, stages 5 and S5): one FUXA alarm per PLC alarm bit of EVERY machine
+    H8 Alarms (export, stages 5, S5 and L5): one FUXA alarm per PLC alarm bit of EVERY machine, plus the
+       labeler's warnings on the sensor bits Roll_Low / Glue_Low (priority low)
        (names <machine>_<bit>, unique) with exactly one priority enabled (the one of
        fv.ALARM_TEXTS), group = the machine's title, active at value 1, checked (checkdelay > 0),
        ackmode ackactive; each Alarms view has one unfiltered active-alarms table (the whole
        line) with Ack and Machine (group) columns and a Reset button (Cmd = 3 of the machine of
        that Alarms view); every alarm chip opens its machine's Alarms view; the side menu opens FUXA's alarm panel (history)
-    H9 Trends (export, stages 6 and S6), per machine: FUXA's DAQ (history) is on for exactly its
+    H9 Trends (export, stages 6, S6 and L6), per machine: FUXA's DAQ (history) is on for exactly its
        trend tags (every change); every line of its charts is bound to an existing, logged tag of
        its device, stepAfter; its Trends view has one realtime chart widget per chart of that
        machine (loading the history when it opens); the side menu opens Trends
@@ -51,10 +58,19 @@ Checks:
        sizes, the values, a step text per step, every pipe on its output; the note under the buffer
        tank names the simulator's buffer draw factor with the numbers of simulator.config; the
        agitator impeller in the mixing tank turns with the Agitator output
+    H12 Labeler screen (export, HMI L3): a hold-to-run button per labeler Man_* (only in its Manual mode),
+       the 4 setpoint inputs with their limits (decimal step for degC) AND the limits' rules: lowest ready
+       glue >= the simulator's stick limit, highest window edge < GlueMax, heater band < window, max turns
+       < label timeout; a lamp per sensor / output / conditioned bit, the glue temperature and setpoint bars
+       (0..220 degC) with the GlueMax tick, pocket body / label / word on every Anim_Station code, C3 slots
+       on the bits of Anim_C3, turntable turning with SpinMotor, web on LabelFeed, the step texts, and
+       Reset counter = ONE write of labeler Cmd 4
     H10 DAQ (live, stage 6): FUXA's history (GET /api/daq) has values of every trend tag from
        the last 10 min (also when idle: one value a minute at least), and no stored fill level
        is above the fill setpoint + 20 ml. Syrup room: every syrup trend tag has points too, and
        the stored setpoints are in degC / bar (CoolSetpoint <= 10, PressSetpoint <= 5), not raw INTs
+       Labeler (L6): every labeler trend tag has points, stored in degC (GlueSetpoint <= 200,
+       GlueTemp <= 250), not raw INTs
 
 Run H2 with the simulator idle (no bottles moving), so the values do not change between
 the two reads; each tag still gets 3 tries. H3 writes only FillSetpoint (FUXA owns it);
@@ -73,6 +89,7 @@ from pymodbus.client import ModbusTcpClient
 from pymodbus.exceptions import ModbusException
 
 from simulator import address_map as am
+from simulator import address_map_labeler as lm
 from simulator import address_map_syrup as sm
 from simulator import config
 
@@ -123,9 +140,23 @@ def expected_syrup_addresses() -> set[tuple[str, int]]:
     return {(ft.HOLDING if 1024 <= getattr(sm, n) < 2048 else ft.COIL, getattr(sm, n)) for n in names}
 
 
+LABELER_NOT_SIGNALS = {"OUTPUTS_START", "OUTPUTS_COUNT", "SENSOR_BLOCK_START", "EXTRA_SENSOR_BLOCK_START",
+                       "ANALOG_START", "ANALOG_COUNT", "STATUS_START", "STATUS_COUNT", "ALARMS_START",
+                       "ALARMS_COUNT", "CONDITIONED_START", "CONDITIONED_COUNT", "SETPOINTS_START",
+                       "SETPOINTS_COUNT", "ANIM_START", "ANIM_COUNT", "UNUSED_MX1_0"}
+
+
+def expected_labeler_addresses() -> set[tuple[str, int]]:
+    """Every signal address in address_map_labeler (pocket codes are values, not addresses)."""
+    names = [n for n in dir(lm) if n.isupper() and isinstance(getattr(lm, n), int)
+             and not n.startswith("POCKET_") and n not in LABELER_NOT_SIGNALS]
+    return {(ft.HOLDING if 1024 <= getattr(lm, n) < 2048 else ft.COIL, getattr(lm, n)) for n in names}
+
+
 def h1_export() -> list[bool]:
     return [h1_machine(ft.FILLER, expected_addresses(), fv.TAGS_ID),
-            h1_machine(ft.SYRUP, expected_syrup_addresses(), fv.SYRUP_TAGS_ID)]
+            h1_machine(ft.SYRUP, expected_syrup_addresses(), fv.SYRUP_TAGS_ID),
+            h1_machine(ft.LABELER, expected_labeler_addresses(), fv.LABELER_TAGS_ID)]
 
 
 def h1_machine(m: ft.Machine, expected: set[tuple[str, int]], page_id: str) -> bool:
@@ -209,11 +240,19 @@ def header_boxes(svg: str, key: str) -> dict[str, tuple[float, float, float, flo
 
 
 def layout_problems(svg: str, key: str) -> list[str]:
-    """Header boxes inside 1280 x 96 and no two of the same row overlapping (the E-stop overlay
-    lies on the E-stop chip on purpose)."""
+    """Header boxes inside 1280 x 96 and no two of the same row overlapping, except a PLC link cover,
+    which must lie inside its own box (its machine chip, or its E-stop segment)."""
     boxes, problems = header_boxes(svg, key), []
-    covers = [f"hdr_{key}_estop"] + [f"hdr_{key}_estop_{ui.m.key}" for ui in fv.UIS]
-    allowed = {frozenset((a, b)) for a in covers for b in covers if a != b}  # E-stop chip + its red covers
+    pairs = [(f"hdr_{key}_{m}_chip", f"hdr_{key}_{m}_link") for m in (ui.m.key for ui in fv.UIS)]
+    pairs += [(f"hdr_{key}_estop_{m}", f"hdr_{key}_estop_{m}_link") for m in (ui.m.key for ui in fv.UIS)]
+    allowed = {frozenset(pair) for pair in pairs}
+    for box, cover in pairs:
+        if box not in boxes or cover not in boxes:
+            problems.append(f"{box} or {cover} missing")
+            continue
+        (bx, by, bw, bh), (cx, cy, cw, ch) = boxes[box], boxes[cover]
+        if not (bx <= cx and cx + cw <= bx + bw and by <= cy and cy + ch <= by + bh):
+            problems.append(f"{cover} not inside {box}")
     for ident, (x, y, w, h) in boxes.items():
         if x < 0 or y < 0 or x + w > fv.W or y + h > fv.HEADER_H:
             problems.append(f"{ident} outside the header")
@@ -267,7 +306,7 @@ def h5_header() -> bool:
             elif other is not ui and (target not in views or fv.KIND.get(target) != kind
                                       or fv.CONTEXT[target] is not other):
                 problems.append(f"{name}: picker {other.m.key} opens {target}")
-        # Row 1: both machines, E-stop of both PLCs, both PLC links, navigation
+        # Row 1: every machine with its PLC link cover, the E-stop of every PLC, navigation
         for chip in fv.UIS:
             k = f"hdr_{key}_{chip.m.key}"
             if prop(items, f"{k}_chip").get("variableId") != chip.m.tag_id("State") \
@@ -278,16 +317,36 @@ def h5_header() -> bool:
                 for number in names:
                     if not shows_at(items, f"{k}_{prefix}_{number}", chip.m.tag_id(tag), number):
                         problems.append(f"{name}: {chip.m.key} has no {prefix} text for {number}")
-            if prop(items, f"{k}_link").get("variableId") != chip.m.status_tag_id:
-                problems.append(f"{name}: no link chip for {chip.m.key}")
-        for chip in fv.UIS:  # E-stop: per PLC a red cover, an OK text and a PRESSED text (fv.estop_chip)
-            e, k = chip.m.tag_id("E_Stop_OK"), f"hdr_{key}_estop_{chip.m.key}"
-            if prop(items, k).get("variableId") != e or not shows_at(items, f"{k}_ok", e, 1) \
-                    or not shows_at(items, f"{k}_on", e, 0):
-                problems.append(f"{name}: E-stop chip not complete for {chip.m.key}")
-        order = [svg.find(f'id="hdr_{key}_estop_{c.m.key}{s}"') for s in ("_ok", "", "_on") for c in fv.UIS]
-        if -1 in order or order != sorted(order):
-            problems.append(f"{name}: E-stop drawing order wrong (OK texts, red covers, PRESSED texts)")
+            if prop(items, f"{k}_link").get("variableId") != chip.m.status_tag_id \
+                    or not shows_at(items, f"{k}_link_lost", chip.m.status_tag_id, 0):
+                problems.append(f"{name}: no link cover for {chip.m.key}")
+            elif not (svg.find(f'id="{k}_mode_0"') < svg.find(f'id="{k}_link"') < svg.find(f'id="{k}_link_lost"')):
+                problems.append(f"{name}: {chip.m.key} link cover not drawn over the state / mode words")
+            elif 'pointer-events="none"' not in re.search(rf'<rect [^>]*id="{k}_link"[^>]*>', svg).group(0):
+                problems.append(f"{name}: {chip.m.key} link cover catches the chip's click")
+        lefts = []
+        for chip in fv.UIS:  # E-stop, a segment per PLC (I17): red at 0, OK / E-STOP texts, link cover on top
+            e, k, status = chip.m.tag_id("E_Stop_OK"), f"hdr_{key}_estop_{chip.m.key}", chip.m.status_tag_id
+            seg = prop(items, k)
+            if seg.get("variableId") != e or {(r["min"], r["color"]) for r in seg.get("ranges", [])} != {(0, fv.RED), (1, fv.NEUTRAL)} \
+                    or not shows_at(items, f"{k}_ok", e, 1) or not shows_at(items, f"{k}_on", e, 0):
+                problems.append(f"{name}: E-stop segment not complete for {chip.m.key}")
+            cover = prop(items, f"{k}_link")
+            covered = {(r["min"], r["max"], r["color"]) for r in cover.get("ranges", [])}
+            if cover.get("variableId") != status or covered != {(0, fv.LINK_OK - 1, fv.NO_LINK), (fv.LINK_OK, fv.LINK_OK, "none")}:
+                problems.append(f"{name}: {chip.m.key} E-stop segment has no link cover on its own PLC's status")
+            if not any(a["type"] == "show" and a["variableId"] == status and a["range"] == {"min": 0, "max": fv.LINK_OK - 1}
+                       for a in prop(items, f"{k}_nolink").get("actions", [])):
+                problems.append(f"{name}: {chip.m.key} has no 'no link' text")
+            order = [svg.find(f'id="{k}{s}"') for s in ("", "_ok", "_on", "_link", "_name", "_nolink")]
+            if -1 in order or order != sorted(order):
+                problems.append(f"{name}: {chip.m.key} E-stop drawing order wrong (segment, texts, cover, name, no link)")
+            boxes = header_boxes(svg, key)
+            if boxes.get(f"{k}_link") != boxes.get(k):  # the whole segment: a partial cover left half of it red
+                problems.append(f"{name}: {chip.m.key} link cover does not cover the whole E-stop segment")
+            lefts.append(header_boxes(svg, key).get(k, (0,))[0])
+        if lefts != sorted(lefts):
+            problems.append(f"{name}: E-stop segments not in machine order {lefts}")
         for nav_kind, label in fv.NAV_BUTTONS:
             target = goes_to(items, f"{p}_nav_{nav_kind}")
             if target not in views or fv.KIND.get(target) != nav_kind or fv.CONTEXT[target] is not ui:
@@ -304,6 +363,10 @@ def h5_header() -> bool:
         missing = [i for i in items if f'id="{i}"' not in svg]
         if missing:
             problems.append(f"{name}: items without SVG element {missing[:3]}")
+        ids = re.findall(r'\sid="([^"]+)"', svg)  # one id = one FUXA binding: a duplicate drives two shapes (L4)
+        twice = sorted({i for i in ids if ids.count(i) > 1})
+        if twice:
+            problems.append(f"{name}: element ids used twice {twice[:4]}")
         problems += [f"{name}: {x}" for x in layout_problems(svg, key)]
     return check("H5 header", not problems, f"{len(fv.GENERATED)} views, start {project['hmi']['layout'].get('start')}"
                  + (f"; {problems[:4]}" if problems else ""))
@@ -418,11 +481,101 @@ def h11_syrup() -> bool:
     return check("H11 Syrup screen", not problems, f"{len(items)} items" + (f"; {problems[:4]}" if problems else ""))
 
 
+LABELER_LAMPS = ("ConveyorMotor2", "Bottle_At_Gate", "GateMotor", "Bottle_Entering", "Roll_Low", "Roll_Empty",
+                 "Label_Mark", "Cutter", "GlueRoller", "Bottle_In_Pocket", "ClampValve", "Bell_Down", "Label_Present",
+                 "SpinMotor", "Spin_Pulse", "DischargeMotor", "C3_Full", "Outfeed_Full", "GlueHeater", "Heat_Demand",
+                 "Glue_Ready", "Glue_Low", "Starved", "Jog_Block")
+LABEL_TIMEOUT_S = 5  # PLC constant LabelTimeout (docs/labeler/state-diagram.md)
+
+
+def h12_labeler() -> bool:
+    """The labeler screen (HMI L3): hold buttons, setpoints with safe limits, lamps, pocket, glue bar, counter reset."""
+    project = json.loads(ft.EXPORT.read_text())
+    view = next((v for v in project["hmi"]["views"] if v["id"] == fv.LABELER_MAIN_ID), None)
+    if view is None:
+        return check("H12 Labeler screen", False, "view missing")
+    items, svg, problems = view["items"], view["svgcontent"], []
+    L, mode = ft.LABELER.tag_id, ft.LABELER.tag_id("ModeReq")
+    for label, tag in fv.LABELER_MANUAL_BUTTONS:  # hold to run, on the LABELER tag, only in its Manual mode
+        item = prop(items, f"HXB_labeler_{tag}")
+        ev = {(e["type"], e["actparam"], e["actoptions"]["variableId"]) for e in item.get("events", [])}
+        want = {(k, n, L(tag)) for k, n in (("mousedown", "1"), ("mouseup", "0"), ("mouseout", "0"))}
+        shows = [a for a in item.get("actions", []) if a["type"] == "show" and a["variableId"] == mode]
+        if ev != want or not shows or shows[0]["range"] != {"min": fv.MANUAL, "max": fv.MANUAL}:
+            problems.append(f"manual {label} wrong")
+    if {t for _l, t in fv.LABELER_MANUAL_BUTTONS} != {n for n, *_ in ft.LABELER_TAGS if n.startswith("Man_")}:
+        problems.append("not one hold button per Man_* tag")
+    limits = {}
+    for _label, tag, _unit, lo, hi in fv.LABELER_SETPOINTS:
+        p = prop(items, f"HXI_in_labeler_{tag}")
+        opts = p.get("options", {})
+        if p.get("variableId") != L(tag) or not lo < hi or (opts.get("min"), opts.get("max")) != (lo, hi):
+            problems.append(f"setpoint {tag} wrong")
+        if (f'id="I-HXI_in_labeler_{tag}" type="number" step="any"' in svg) != (ft.LABELER.factor(tag) != 1):
+            problems.append(f"setpoint {tag}: step attribute")
+        limits[tag] = (lo, hi)
+    # the limits keep every legal combination safe (fv.LABELER_SETPOINTS comment)
+    sp, hyst, band, turns = (limits.get(t, (0, 0)) for t in ("GlueSetpoint", "GlueHyst", "GlueBand", "PressTurns"))
+    if sp[0] - band[1] < config.GLUE_STICK_MIN_C:
+        problems.append(f"lowest ready glue {sp[0] - band[1]} degC < stick limit {config.GLUE_STICK_MIN_C}")
+    if sp[1] + band[1] >= fv.GLUE_MAX_C:
+        problems.append(f"highest window edge {sp[1] + band[1]} degC reaches GlueMax {fv.GLUE_MAX_C}")
+    if hyst[1] >= band[0]:
+        problems.append(f"heater band {hyst[1]} not below the window {band[0]}: Glue_Ready would drop while heating")
+    if turns[1] * config.SPIN_TURN_S >= LABEL_TIMEOUT_S:
+        problems.append(f"{turns[1]} turns reach the {LABEL_TIMEOUT_S} s label timeout")
+    for tag in LABELER_LAMPS:
+        if prop(items, f"lamp_{tag}").get("variableId") != L(tag):
+            problems.append(f"no lamp {tag}")
+    for bar, tag in (("GXP_glue_temp", "GlueTemp"), ("GXP_glue_setpoint", "GlueSetpoint")):
+        p = prop(items, bar)
+        if p.get("variableId") != L(tag) or (p.get("ranges") or [{}])[0].get("max") != fv.GLUE_SCALE_C:
+            problems.append(f"bar {tag} wrong")
+    if 'id="glue_max_tick"' not in svg:
+        problems.append("no GlueMax tick")
+    for value_id, tag in (("val_GlueTemp", "GlueTemp"), ("val_labeler_GoodCount", "GoodCount"),
+                          ("val_labeler_GlueTemp", "GlueTemp"), ("val_labeler_GlueSetpoint", "GlueSetpoint")):
+        if prop(items, value_id).get("variableId") != L(tag):
+            problems.append(f"no value {value_id}")
+    ev = prop(items, "HXB_labeler_reset_counter").get("events", [])  # one write: Cmd = 4 of the LABELER
+    if [(e["type"], e["actoptions"].get("variableId"), e["actparam"]) for e in ev] != [("click", L("Cmd"), "4")]:
+        problems.append(f"Reset counter does not write labeler Cmd = 4 (once): {ev}")
+    for element_id in ("pocket_body", "pocket_label"):
+        p = prop(items, element_id)
+        if p.get("variableId") != L("Anim_Station") or {r["min"] for r in p.get("ranges", [])} != set(fv.LABELER_POCKET_WORDS):
+            problems.append(f"{element_id} not on every Anim_Station code")
+    for code in fv.LABELER_POCKET_WORDS:
+        if not shows_at(items, f"pocket_word_{code}", L("Anim_Station"), code):
+            problems.append(f"no pocket word {code}")
+    for i in range(8):
+        p = prop(items, f"lab_c3_slot{i}")
+        if p.get("variableId") != L("Anim_C3") or p.get("bitmask") != 1 << i:
+            problems.append(f"C3 slot {i} not on bit {i} of Anim_C3")
+    acts = prop(items, "turntable").get("actions", [])
+    if {(a["type"], a["range"]["min"], a["variableId"]) for a in acts} != {("clockwise", 1, L("SpinMotor")),
+                                                                           ("stop", 0, L("SpinMotor"))}:
+        problems.append("turntable does not turn with SpinMotor")
+    for pipe_id in ("web_top", "web_down", "web_in"):
+        if prop(items, pipe_id).get("variableId") != L("LabelFeed"):
+            problems.append(f"{pipe_id} not on LabelFeed")
+    if prop(items, "bell").get("variableId") != L("Bell_Down") or prop(items, "gate").get("variableId") != L("GateMotor"):
+        problems.append("bell / gate not on Bell_Down / GateMotor")
+    for number in fv.LABELER_STEP_NAMES:
+        if not shows_at(items, f"labeler_step_{number}", L("Step"), number):
+            problems.append(f"no step text {number}")
+    if not shows_at(items, "labeler_manual_blocked", L("Jog_Block"), 1):
+        problems.append("no 'manual blocked' text on Jog_Block")
+    missing = [i for i in items if f'id="{i}"' not in svg]
+    if missing:
+        problems.append(f"items without SVG element {missing[:3]}")
+    return check("H12 Labeler screen", not problems, f"{len(items)} items" + (f"; {problems[:4]}" if problems else ""))
+
+
 def h7_line() -> bool:
-    """Both Line views (filler and syrup room in header row 2) have the same body."""
+    """Every Line view (filler, syrup room, labeler in header row 2) has the same body."""
     project = json.loads(ft.EXPORT.read_text())
     problems, counts = [], []
-    for view_id in (fv.LINE_ID, fv.SYRUP_LINE_ID):
+    for view_id in fv.SHARED["line"].values():
         view = next((v for v in project["hmi"]["views"] if v["id"] == view_id), None)
         if view is None:
             problems.append(f"view {view_id} missing")
@@ -436,11 +589,12 @@ def h7_line() -> bool:
 
 def h7_body(view: dict) -> list[str]:
     items, problems = view["items"], []
-    for key, anim in (("c1", "Anim_C1"), ("c2", "Anim_C2")):
+    # slot words live in the PLC the simulator writes them to: C1 / C2 in the filler, C3 in the labeler (L0)
+    for key, anim, m in (("c1", "Anim_C1", ft.FILLER), ("c2", "Anim_C2", ft.FILLER), ("c3", "Anim_C3", ft.LABELER)):
         for i in range(8):
             prop = items.get(f"{key}_slot{i}", {}).get("property", {})
-            if prop.get("variableId") != ft.tag_id(anim) or prop.get("bitmask") != 1 << i:
-                problems.append(f"{key} slot {i} not on bit {i} of {anim}")
+            if prop.get("variableId") != m.tag_id(anim) or prop.get("bitmask") != 1 << i:
+                problems.append(f"{key} slot {i} not on bit {i} of {m.key} {anim}")
     def turns_with(item_id: str) -> str | None:
         acts = items.get(item_id, {}).get("property", {}).get("actions", [])
         kinds = {(a["type"], a["range"]["min"], a["variableId"]) for a in acts}
@@ -451,8 +605,10 @@ def h7_body(view: dict) -> list[str]:
     for k in range(3):
         if turns_with(f"c1_roller{k}") != ft.tag_id("ConveyerMotor1"):
             problems.append(f"C1 roller {k}")
-        if turns_with(f"c2_roller{k}") is not None:
-            problems.append(f"C2 roller {k} should be static")
+        if turns_with(f"c2_roller{k}") != ft.LABELER.tag_id("ConveyorMotor2"):  # the labeler drives C2 (L4)
+            problems.append(f"C2 roller {k} not on the labeler's ConveyorMotor2")
+        if turns_with(f"c3_roller{k}") is not None:  # the packer is a stand-in: no PLC output
+            problems.append(f"C3 roller {k} should be static")
     for k in range(2):
         if turns_with(f"filler_roller{k}") != ft.tag_id("IndexMotor"):
             problems.append(f"index roller {k}")
@@ -460,9 +616,67 @@ def h7_body(view: dict) -> list[str]:
     if not ev or ev[0]["action"] != "onpage" or ev[0]["actparam"] != fv.MAIN_ID:
         problems.append("filler block does not open the Filler view")
     problems += h7_syrup(view)
+    problems += h7_labeler(view)
     missing = [i for i in items if f'id="{i}"' not in view["svgcontent"]]
     if missing:
         problems.append(f"items without SVG element {missing[:3]}")
+    return problems
+
+
+def h7_labeler(view: dict) -> list[str]:
+    """L4: the labeler block (State colour, click -> its screen, step and glue drawn click-through on top),
+    C3 lamps on the labeler's tags, and the row left to right without overlap:
+    C1 < filler < C2 < labeler < C3, packer stand-in below the end of C3."""
+    items, svg, problems = view["items"], view["svgcontent"], []
+    L = ft.LABELER.tag_id
+    block = prop(items, "labeler_block")
+    if block.get("variableId") != L("State") or {(r["min"], r["max"]) for r in block.get("ranges", [])} \
+            != {(v, v) for v in fv.STATE_COLOURS}:
+        problems.append("labeler block not coloured by the labeler State")
+    if goes_to(items, "labeler_block") != fv.LABELER_MAIN_ID:
+        problems.append("labeler block does not open the Labeler view")
+    on_top = []
+    for prefix, tag, names in (("labeler_state", "State", STATE_NAMES), ("labeler_step_line", "Step", fv.LABELER_STEP_NAMES)):
+        bad = [n for n in names if not shows_at(items, f"{prefix}_{n}", L(tag), n)]
+        if bad:
+            problems.append(f"labeler {tag} texts {bad[:3]}")
+        on_top += [f"{prefix}_{n}" for n in names]
+    if prop(items, "line_glue").get("variableId") != L("GlueTemp"):
+        problems.append("glue value not on the labeler GlueTemp")
+    on_top.append("line_glue")
+    for element_id in on_top:
+        element = re.search(rf'<\w+ [^>]*id="{element_id}"[^>]*>', svg)
+        if element is None or 'pointer-events="none"' not in element.group(0):
+            problems.append(f"{element_id} catches the labeler block's click")
+            break
+    if prop(items, "line_labeler_goodcount").get("variableId") != L("GoodCount"):
+        problems.append("labelled-bottle counter not on the labeler GoodCount")
+    # two lamps with the same tag name from two PLCs: each its own id and binding (found in L4: one id drove both)
+    for lamp_id, tag in (("lamp_Outfeed_Full", ft.tag_id("Outfeed_Full")), ("lamp_S7", ft.tag_id("S7")),
+                         ("lamp_labeler_Outfeed_Full", L("Outfeed_Full")), ("lamp_labeler_C3_Full", L("C3_Full"))):
+        if prop(items, lamp_id).get("variableId") != tag:
+            problems.append(f"{lamp_id} not on {tag}")
+    ids = re.findall(r'\sid="([^"]+)"', svg)
+    twice = sorted({i for i in ids if ids.count(i) > 1})
+    if twice:
+        problems.append(f"element ids used twice (one FUXA binding for two shapes): {twice[:4]}")
+
+    def x_span(element_id: str) -> tuple[float, float, float] | None:
+        element = re.search(rf'<rect [^>]*id="{element_id}"[^>]*>', svg)
+        if element is None:
+            return None
+        a = dict(BOX_ATTR.findall(element.group(0)))
+        return float(a["x"]), float(a["x"]) + float(a["width"]), float(a["y"])
+    row = [x_span(i) for i in ("c1_slot0", "c1_slot7", "filler_block", "c2_slot0", "c2_slot7", "labeler_block",
+                               "c3_slot0", "c3_slot7")]
+    if None in row:
+        return problems + ["a part of the row is missing"]
+    edges = [v for left, right, _ in row for v in (left, right)]
+    if edges != sorted(edges) or row[-1][1] > fv.W:  # strictly left to right, inside the view
+        problems.append(f"row not left to right without overlap: {[(round(a), round(b)) for a, b, _ in row]}")
+    texts = re.findall(r'<text [^>]*x="([\d.]+)"[^>]*y="([\d.]+)"[^>]*>Packer</text>', svg)
+    if not texts or not (row[-2][0] <= float(texts[0][0]) <= fv.W and float(texts[0][1]) > fv.BELT_Y + 56):
+        problems.append("packer stand-in not below the end of C3")
     return problems
 
 
@@ -520,9 +734,13 @@ def h8_alarms() -> bool:
         problems.append("two alarm definitions with the same name")
     for ui in fv.UIS:  # every machine: one definition per alarm bit, group = the machine (column Machine)
         texts = fv.ALARM_TEXTS.get(ui.m.key, {})
-        if set(texts) != set(ui.alarms):
-            problems.append(f"{ui.title}: alarm texts {sorted(texts)} != alarm bits {sorted(ui.alarms)}")
-        for bit in ui.alarms:
+        warnings = fv.SENSOR_WARNINGS.get(ui.m.key, ())  # FUXA-only warnings on sensor bits (labeler, L5)
+        if set(texts) != set(ui.alarms) | set(warnings):
+            problems.append(f"{ui.title}: alarm texts {sorted(texts)} != alarm bits + warnings")
+        for bit in warnings:
+            if texts.get(bit, ("",))[0] != "low" or ui.m.tag_id(bit) not in {ui.m.tag_id(n) for n, *_ in ui.m.tags}:
+                problems.append(f"{ui.title} {bit}: a sensor warning must be priority low, on an existing tag")
+        for bit in [*ui.alarms, *warnings]:
             a = defs.get(fv.alarm_name(bit, ui.m))
             if a is None or a["property"].get("variableId") != ui.m.tag_id(bit):
                 problems.append(f"no {ui.title} alarm for {bit}")
@@ -534,7 +752,7 @@ def h8_alarms() -> bool:
                 problems.append(f"{ui.title} {bit}: levels {on}")
             elif on[0] != texts.get(bit, ("",))[0] or lvl["group"] != ui.title or not lvl["text"]:
                 problems.append(f"{ui.title} {bit}: priority {on[0]} / group {lvl['group']!r}")
-    for view_id in (fv.ALARMS_ID, fv.SYRUP_ALARMS_ID):  # one Alarms view per machine (header row 2)
+    for view_id in fv.SHARED["alarms"].values():  # one Alarms view per machine (header row 2)
         view = next((v for v in project["hmi"]["views"] if v["id"] == view_id), None)
         if view is None:
             problems.append(f"view {view_id} missing")
@@ -653,6 +871,22 @@ def h10_daq_syrup() -> bool:
         if raw:
             problems.append(f"{tag} stored as {max(raw):g} (> {top}: not scaled)")
     return check("H10 DAQ syrup", not problems, f"points in 10 min: {counts}" + (f"; {problems[:4]}" if problems else ""))
+
+
+def h10_daq_labeler() -> bool:
+    """The labeler's history (HMI L6): every trend tag has points from the last 10 min, stored in
+    degC as shown. Checked on GlueSetpoint (165-180 degC; the raw INT would be 1650-1800) and on
+    GlueTemp, which never passes GlueMax 200 degC by much (raw: up to 2000)."""
+    problems, counts = [], {}
+    for tag in ft.LABELER.trend_tags:
+        counts[tag] = len(fuxa_history(tag, 10, ft.LABELER))
+        if not counts[tag]:
+            problems.append(f"no {tag} history in the last 10 min")
+    for tag, top in (("GlueSetpoint", 200), ("GlueTemp", 250)):
+        raw = [v for _, v in fuxa_history(tag, 10, ft.LABELER) if v > top]
+        if raw:
+            problems.append(f"{tag} stored as {max(raw):g} (> {top}: not scaled)")
+    return check("H10 DAQ labeler", not problems, f"points in 10 min: {counts}" + (f"; {problems[:4]}" if problems else ""))
 
 
 def fuxa_values(ids: list[str]) -> dict[str, object]:
@@ -774,6 +1008,34 @@ def syrup_live() -> list[bool]:
         plc.close()
 
 
+def h3_labeler(plc: ModbusTcpClient) -> bool:
+    """A scaled labeler setpoint written through FUXA: GlueHyst 3.5 degC -> PLC 35; the old value is written back."""
+    old = plc_value(plc, ft.HOLDING, lm.GLUE_HYST)
+    probe = 3.5 if old != 35 else 4.5
+    fuxa_set(ft.LABELER.tag_id("GlueHyst"), probe)
+    time.sleep(0.5)
+    seen = plc_value(plc, ft.HOLDING, lm.GLUE_HYST)
+    fuxa_set(ft.LABELER.tag_id("GlueHyst"), old / 10)
+    time.sleep(0.5)
+    back = plc_value(plc, ft.HOLDING, lm.GLUE_HYST)
+    return check("H3 write path labeler", seen == round(probe * 10) and back == old,
+                 f"GlueHyst via FUXA {probe} degC -> PLC {seen} ({round(probe * 10)} expected), restored {back} (was {old})")
+
+
+def labeler_live() -> list[bool]:
+    """H4 + H2 + H3 + H10 for the labeler PLC (port 5023, HMI L1 / L6). H3 writes one setpoint FUXA owns and restores it."""
+    plc = ModbusTcpClient(config.PLC_HOST, port=config.LABELER_PORT, timeout=2)
+    try:
+        if not plc.connect():
+            return [check("H2 read path labeler", False, f"no connection to {config.PLC_HOST}:{config.LABELER_PORT}")]
+        plc.read_holding_registers(lm.STATE, count=1)
+        return [h4_connected(ft.LABELER), h2_read(plc, ft.LABELER), h3_labeler(plc), h10_daq_labeler()]
+    except (ModbusException, OSError):
+        return [check("H2 read path labeler", False, "the labeler PLC does not answer on Modbus (upload the program)")]
+    finally:
+        plc.close()
+
+
 def filler_live() -> list[bool]:
     """H4, H2, H3, H10 for the filler PLC (port 502). A filler that does not answer is one FAIL, so
     the syrup room's checks still run."""
@@ -790,9 +1052,10 @@ def filler_live() -> list[bool]:
 
 
 def main() -> None:
-    results = [*h1_export(), h5_header(), h6_filler(), h7_line(), h8_alarms(), h9_trends(), h11_syrup()]
+    results = [*h1_export(), h5_header(), h6_filler(), h7_line(), h8_alarms(), h9_trends(), h11_syrup(),
+               h12_labeler()]
     if "--offline" not in sys.argv:
-        results += filler_live() + syrup_live()
+        results += filler_live() + syrup_live() + labeler_live()
     print(f"\n{sum(results)}/{len(results)} checks passed")
     sys.exit(0 if all(results) else 1)
 

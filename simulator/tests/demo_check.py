@@ -3,14 +3,15 @@
     uv run python tests/demo_check.py
 
 Each line is PASS / WARN / FAIL and says how to fix it. The checks follow the things
-that broke during development; D2, D3, D6 and D7 run once per PLC (filler, syrup room):
-    D1 containers openplc, plc-syrup-carb and fuxa are running
+that broke during development; D2, D3, D6 and D7 run once per PLC (filler, syrup room, labeler):
+    D1 containers openplc, plc-syrup-carb, plc-labeler and fuxa are running
     D2 per runtime: a compiled PLC program exists AND its Modbus server is enabled. A container
        re-creation resets /workdir/plugins.conf (container layer, not a volume): the program
        still runs from the build volume, but modbus_slave is off until the next upload
     D3 per runtime: the PLC program answers on Modbus
-    D4 FUXA is up and connected to each PLC (one line per PLC, connection status 5). One link at 0 =
-       that PLC is down (D3); all at 0 can also be FUXA's missing Modbus plugin
+    D4 FUXA is up and connected to each PLC that has a FUXA device (one line per PLC, connection
+       status 5; all three PLCs since HMI L7). One link at 0 = that PLC is down (D3); all at 0
+       can also be FUXA's missing Modbus plugin
     D5 FUXA has the current screens (live project = docs/hmi/fuxa-project.json)
     D6 per PLC: one simulator writes its sensors (plant lock held) - WARN if none
     D7 per PLC: ready, mode Auto, no active alarm
@@ -28,10 +29,11 @@ from types import ModuleType
 from pymodbus.client import ModbusTcpClient
 
 from simulator import address_map as am
+from simulator import address_map_labeler as lm
 from simulator import address_map_syrup as sm
 from simulator import config, plant_lock
-from simulator.plcs import (ALARM_NAMES, MODE_NAMES, STATE_NAMES, STEP_NAMES, SYRUP_ALARM_NAMES,
-                            SYRUP_STATE_NAMES, SYRUP_STEP_NAMES)
+from simulator.plcs import (ALARM_NAMES, LABELER_ALARM_NAMES, LABELER_STATE_NAMES, LABELER_STEP_NAMES, MODE_NAMES,
+                            STATE_NAMES, STEP_NAMES, SYRUP_ALARM_NAMES, SYRUP_STATE_NAMES, SYRUP_STEP_NAMES)
 
 ROOT = Path(__file__).resolve().parents[2]
 EXPORT = ROOT / "docs" / "hmi" / "fuxa-project.json"
@@ -47,11 +49,12 @@ class Runtime:
     """One OpenPLC runtime container and what D7 needs to read its status."""
 
     def __init__(self, service: str, label: str, editor_ip: str, project: str, port: int,
-                 amap: ModuleType, steps: dict, states: dict, alarms: tuple, hmi: str):
+                 amap: ModuleType, steps: dict, states: dict, alarms: tuple, hmi: str, fuxa: bool = True):
         self.service, self.label, self.editor_ip = service, label, editor_ip
         self.project, self.port = project, port
         self.amap, self.steps, self.states, self.alarms = amap, steps, states, alarms
         self.hmi = hmi  # where the operator presses Auto / Reset / Start for this PLC
+        self.fuxa = fuxa  # FUXA has a Modbus device for this PLC (D4); False for a machine without HMI yet
 
 
 RUNTIMES = [
@@ -60,6 +63,9 @@ RUNTIMES = [
     Runtime("plc-syrup-carb", "syrup", "127.0.0.2", "plcs/syrup", config.SYRUP_PORT,
             sm, SYRUP_STEP_NAMES, SYRUP_STATE_NAMES, SYRUP_ALARM_NAMES,
             "the FUXA header (row 2: Syrup room, e.g. on the Syrup room screen)"),
+    Runtime("plc-labeler", "labeler", "127.0.0.3", "plcs/labeler", config.LABELER_PORT,
+            lm, LABELER_STEP_NAMES, LABELER_STATE_NAMES, LABELER_ALARM_NAMES,
+            "the FUXA header (row 2: Labeler, e.g. on the Labeler screen)"),
 ]
 SERVICES = {"fuxa", *(rt.service for rt in RUNTIMES)}
 COLOURS = {"PASS": "\033[32m", "WARN": "\033[33m", "FAIL": "\033[31m"}
@@ -136,15 +142,16 @@ def d3_plc(rt: Runtime) -> ModbusTcpClient | None:
 
 
 def d4_fuxa() -> bool:
-    """One line per PLC device. True when FUXA answers (then D5 runs)."""
-    ids = [status_tag(rt.label) for rt in RUNTIMES]
+    """One line per PLC device (only the PLCs FUXA has a device for). True when FUXA answers (then D5 runs)."""
+    with_device = [rt for rt in RUNTIMES if rt.fuxa]
+    ids = [status_tag(rt.label) for rt in with_device]
     try:
         values = {v["id"]: v.get("value") for v in get_json(f"/api/getTagValue?ids={urllib.parse.quote(json.dumps(ids))}")}
     except OSError:
         report("FAIL", "D4 FUXA", f"FUXA does not answer on {FUXA} – `docker compose up -d fuxa`")
         return False
     all_down = not any(values.get(i) == 5 for i in ids)
-    for rt, tag in zip(RUNTIMES, ids):
+    for rt, tag in zip(with_device, ids):
         name, value = f"D4 FUXA -> {rt.label} PLC", values.get(tag)
         if value == 5:
             report("PASS", name, "connected")
@@ -169,18 +176,27 @@ def d5_project() -> None:
                "--data @docs/hmi/fuxa-project.json http://localhost:1881/api/project")
 
 
+def _d6_cause(free: list[str]) -> str:
+    """The likely start option behind the PLCs nobody writes (the CLI's two ways to leave PLCs out)."""
+    if free == ["labeler"]:
+        return " (simulator started with --no-labeler?) – restart `uv run simulator` without it"
+    if free == ["syrup", "labeler"]:
+        return " (simulator started with --filler-only?) – restart `uv run simulator` without it"
+    return " – restart `uv run simulator`"
+
+
 def d6_simulator() -> None:
-    """One plant lock per PLC (plant_lock.py). The filler alone held = simulator started with --filler-only."""
+    """One plant lock per PLC (plant_lock.py). Some held = the simulator was started with --no-labeler / --filler-only."""
     holders = {rt.label: plant_lock.is_held(config.PLC_HOST, rt.port) for rt in RUNTIMES}
     if all(holders.values()):
         report("PASS", "D6 simulator", "; ".join(f"{label}: {who}" for label, who in holders.items()))
     elif not any(holders.values()):
-        report("WARN", "D6 simulator", "no simulator running – start it: `uv run simulator` (panel, both PLCs) or "
+        report("WARN", "D6 simulator", "no simulator running – start it: `uv run simulator` (panel, all three PLCs) or "
                "`uv run simulator --headless`; without it the heartbeat alarms latch")
     else:
-        free = ", ".join(label for label, who in holders.items() if not who)
-        report("WARN", "D6 simulator", f"nobody writes the {free} sensors (simulator started with --filler-only?) – "
-               "restart `uv run simulator` without it; else that PLC's heartbeat alarm latches")
+        free = [label for label, who in holders.items() if not who]
+        report("WARN", "D6 simulator", f"nobody writes the {', '.join(free)} sensors{_d6_cause(free)}; else that PLC's "
+               "heartbeat alarm latches")
 
 
 def d7_ready(rt: Runtime, client: ModbusTcpClient) -> None:
