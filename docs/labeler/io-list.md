@@ -127,7 +127,12 @@ Internal only (no address): step bits, timers (`Gate_Empty_Timer`, …), `Spin_C
 
 ## Animation data
 
-Decided at the HMI step (decision 2026-11-15): probably `Anim_C3` (C3 slot bits, as the filler's `Anim_C1`/`Anim_C2`) and `Anim_Station` (pocket state code) in `%MW70–71`, written by the simulator.
+Decided with the HMI plan (2026-11-19, `docs/hmi/roadmap.md` section "Labeler screens"; built in stage L0). Written by the simulator, read by the HMI, ignored by the PLC (not declared in the program; Modbus serves the words anyway, as the filler's %MW70–75).
+
+| Name | Type | Address | Modbus | Meaning |
+| --- | --- | --- | --- | --- |
+| Anim_C3 | INT | %MW70 | HR 1094 | C3 slots: bit i = bottle in slot i (bit 0 = entry after the pusher, bit 7 = packer end) |
+| Anim_Station | INT | %MW71 | HR 1095 | Pocket: 0 empty, 1 bottle (no label), 2 labelling (part of a label), 3 labelled (≥ 90 % of a label, the simulator audit's "whole label") |
 
 ## Decisions on the open questions (2026-11-15)
 

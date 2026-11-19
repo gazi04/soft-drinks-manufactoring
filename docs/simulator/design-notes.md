@@ -196,6 +196,66 @@ The tank is emptied into the unpressurised buffer and the headspace goes with it
 
 **What does the model leave out?** Headspace expansion while the tank empties, CO2 solubility depending on the temperature ("warm product gives its CO2 back"), and a cooling speed that depends on the batch volume. None of them changes how the PLC logic is exercised.
 
+## Labeler physics (`machines/labeler.py`)
+
+**Why was stage 2 (label web + melt tank) built before stage 1 (pocket)?**
+They are independent: the web only needs the PLC outputs and "is a clamped bottle spinning", which the caller passes in. Stage 1 builds the pocket and stage 3 puts both into `Labeler`.
+
+**Why is `Label_Mark` a timed pulse, not a mark of fixed width on the web?**
+The PLC stops the feed one tick after it sees the edge, so the web runs on 20-40 mm. A mark with a width in mm could stay ON while the web stands, and the next WRAP would then see no rising edge and feed a whole extra label. A 0.3 s pulse (as S6) lasts at least one tick and is gone long before the next WRAP (PRESS takes 2 s). The marks stay every 210 mm of web, so the run-on of one label does not shift the next mark (tested over 20 labels).
+
+**Where is `Label_Present` kept?**
+On the bottle (`Bottle.label_mm`), like the filler's `level_ml`: a label glued by an E-stop half-way stays on the bottle, so the restart sees `Label_Present` and does not label it twice (`docs/labeler/state-diagram.md` rule 7).
+
+**When does a label stick?**
+Only when the web moves, the glue roller is ON, the glue is at least 150 degC with glue in the tank, and a clamped bottle spins. Otherwise the fed web is lost (`lost_mm`) and the audit names the reason. The roller uses glue whenever it runs with the web, also for a lost label.
+
+**Why heater 300 degC with tau 60 s?**
+With the room loss (tau 600 s) the balance is 274.5 degC: 20 -> 170 degC in 48.5 s (`HeatTimeout` 120 s); the PLC's 5 degC hysteresis cycles about 20 s off / 2.5 s on with 0.2 degC overshoot per tick; a heater stuck on reaches `GlueMax` (200 degC) 18 s after 170 degC, so the over-temperature scenario (stage 6) is reachable. 1 kg of cold glue into 1 kg at 170 degC gives 95 degC: `Glue_Ready` drops and the PLC goes back to WARM_UP (rule 4), as on a real machine.
+
+**When is the bottle free of the bell?**
+As soon as `Bell_Down` drops. The PLC has one bell sensor and leaves UNCLAMP on `NOT Bell_Down` (decision 2026-11-15), so it starts the pusher while the bell still rises. The physics blocks the pusher only while the bell is fully down; the first version waited until the bell was fully up and warned "pusher against the bell" on every bottle.
+
+**Why is `Spin_Pulse` timed, like `Label_Mark`?**
+A cam has a width in degrees and could stay ON when the turntable stops on it; the PLC's CTU counts edges and resets outside PRESS, so a pulse that stays ON would hide the first turn of the next PRESS. A 0.3 s pulse per whole turn is at least one tick and OFF for 0.7 s before the next.
+
+**Why does `Plant()` keep the stand-in and the CLI not get `--no-labeler` yet?**
+With the real labeler, C2's motor belongs to the labeler PLC. Until the simulator talks to that PLC (stages 4–5), no one would switch it on and the filler would block. So `Plant(with_labeler=True)` is used by the tests only; the stand-in moved to `plant.labeler_standin`, so `plant.labeler` names the real machine like `plant.filler` and `plant.syrup`.
+
+**What does the model leave out?** A heating speed that depends on the glue mass, roller inertia (the web stops at once) and a dangling uncut label (a missing cut is only reported).
+
+**Why does `LabelerPlc.write()` send three requests and not one?**
+The two extra sensors sit in `%MX4` (coils 8224–8225); between them and the first block lie the manual buttons (`%MX2`, HMI) and the conditioned bits (`%MX3`, PLC). One write over the whole range would overwrite both, so the one-writer guard refuses it. The cost is two more small requests per tick (about 1 ms each on localhost).
+
+**Why must a plant with the labeler have a labeler link (and why `--no-labeler`)?**
+C2's motor is a labeler PLC output. A plant with the real labeler but no link would leave C2 standing and the filler blocked without any message, so `loop.run` refuses it (`ValueError`). `--no-labeler` and `--filler-only` keep the stand-in, which drives C2 itself.
+
+**Why may a test never press a button between two loop runs?**
+The PLCs keep scanning while the simulator pauses. Found live: Stop pressed between the main run and the settle run let the labeler's gate pulse fire into a frozen plant; the bottle never moved, `Bottle_Entering` stayed set and the PLC raised `Alm_PocketJam`. Every press now happens while a loop runs (the operator task during the run, `stop_all()` during the settle run).
+
+**How are the labeler faults modelled?**
+As in the syrup room: one flag per broken part, set only by a command; the PLC sees nothing but the effect. A torn web lets the rollers turn without moving the web (no mark, no label); a stuck bell keeps its position; a jammed gate stops the bottle between gate and pocket, and `clear_gate` is the operator taking it out (a `removed` bottle, not a `lost` one); a failed heater heats nothing and a stuck one heats whatever the PLC says (a dead element wins over a welded contactor).
+
+**Why does the live scenario script start with warm glue?**
+Every scenario starts from a fresh plant; a cold melt tank would add 48 s of warm-up to each. The glue temperature of the new plant is set to 170 °C before the loop starts (a start state, not a change at runtime); `heater_failed` starts cold, because the warm-up is what it tests.
+
+**Why does the labeler panel tab show the label share of the pocket bottle?**
+A wrap can be interrupted (E-stop, torn web, the end of a roll). The PLC only knows `Label_Present` (any label at all); the share (`label_mm` / 210 mm) is the truth the audit judges, so a short label is visible on the tab before the bottle leaves.
+
+**Why does the roll have a tail after its last mark (`ROLL_TAIL_MM` 40 mm)?**
+The PLC stops the feed one or two ticks after the `Label_Mark` edge, so the web runs on 20–40 mm past every mark. In normal running that cancels out: each bottle gets the rest of its label up to the next mark plus the next run-on, 210 mm. At the end of a roll it did not: the web stopped dead at the last mark (no label left), the run-on was missing and the last label left with 169–190 mm, against the 189 mm "broken label" limit, so it failed or passed by timing luck (found 2026-11-18 in the panel check; the stage 6 test counted labels, not audit warnings). A real roll carries some web after its last registration mark; the model gives it 40 mm (the largest run-on). `Roll_Empty` still comes at the last mark. `LabelWeb.web_left_mm` = rest of the current label + the labels after it + the tail; the feed never moves more than that. The first label after a roll change still gets one run-on extra (about 250 mm); nothing judges a long label.
+
+**Why do the labeler's animation words (`Anim_C3`, `Anim_Station`) come so late?**
+The filler's words %MW70–75 were designed together with its FUXA screens, so the labeler's waited for its HMI plan (2026-11-19, `docs/hmi/roadmap.md` section "Labeler screens", stage L0). Words written earlier would have fixed a layout the screens might not want.
+
+**Labeler animation words: what and why (HMI L0)**
+- `Anim_C3` %MW70 = C3 slot bits, `Anim_Station` %MW71 = pocket code (0 empty, 1 bottle, 2 labelling, 3 labelled). Same addresses as the filler's `Anim_C1` / `Anim_C2`: each PLC has its own memory, and the same place for the same job keeps the FUXA generator simple.
+- **Not declared in the PLC program.** The Modbus server serves every %MW, declared or not (the filler's %MW70–75 aren't declared either), so no ladder change and no upload.
+- **"Labelled" = at least 90 % of a label** (`BROKEN_LABEL_SHARE`), the audit's limit for a whole label, so the screen and the event log never disagree about a bottle.
+- **A fourth write per tick**, not part of the GlueTemp write: %MW13–69 lie between them, and the PLC's status words %MW50–53 are among them, so the simulator must not write one block across them.
+- **Not read back by `verify_writes()`** (as for the filler): the PLC ignores the words, so a wrong value cannot change the machine, and the read-back stays one request smaller.
+- **Slots 0 and 7 of C3 are rarely seen at a tick end:** the pusher's tick also moves the belt (sub-steps), and the packer stand-in takes the bottle as soon as it reaches slot 7. On the screen a bottle appears in slot 1 and leaves after slot 6; the unit test checks slots 1–6.
+
 ## Syrup room in the plant (`plant.py`)
 
 **Where is the cable between the two PLCs?**
@@ -272,7 +332,7 @@ Its conditions (`in_step`, `alarm`, `in_state`, `plc_running`) look at one PLC's
 **What cannot be a scenario?** Reset and Start (the HMI writes them), and `buffer_starved` is not in the live test script because it needs the filler PLC running too; run it by hand with both PLCs.
 
 
-## Pre-demo check with two PLCs (`tests/demo_check.py`, stage 8)
+## Pre-demo check with three PLCs (`tests/demo_check.py`, stage 8; labeler 2026-11-18)
 
 **Why is the syrup room now a FAIL and not a WARN?**
 Since stage 5 the default `uv run simulator` drives both PLCs, and the filler only fills while the syrup room's real `Product_Available` is TRUE. Without the syrup runtime the demo line starves, so a missing container, program or Modbus server of `plc-syrup-carb` must stop the demo like the filler's does.
@@ -285,3 +345,12 @@ The plant lock is per PLC port. Filler lock held but syrup lock free means the s
 
 **Why was there a "Reset twice" hint, and why is it gone?**
 Both ladders computed `Master_Enable` above the watchdog's Reset rung. With `Alm_CommLost` and FAULT both latched, the Reset scan saw the old `Alm_CommLost` there, so `Seq_Enable` stayed FALSE, the FAULT → IDLE rung did not fire, and `Cmd` was already cleared for the next scan: a second Reset was needed, and D7 said so. Fixed in the Editor on 2026-11-14 (both PLCs): the `Master_Enable` rung now comes after the `Alm_CommLost` reset rung, so one Reset leaves FAULT. D7 no longer adds the hint.
+
+**Why is the labeler a FAIL like the others?**
+Since labeler stage 5 the default `uv run simulator` drives the labeler PLC, and that PLC drives C2. Without the labeler runtime C2 stands, C2 fills up and the filler blocks: the demo line stops after a few bottles. So a missing container, program or Modbus server of `plc-labeler` stops the demo like the other two (D1–D3); D7 reads its mode, step, state and 7 alarms with the labeler's names.
+
+**Why does D4 skip the labeler?**
+FUXA has no labeler device yet (the labeler HMI is not planned). A connection status tag that does not exist would read as "not connected" and fail D4 forever. `Runtime.fuxa = False` keeps the labeler out of D4 until its device exists; D7 then points to `tests/hmi.py --labeler` instead of the FUXA header.
+
+**Why does D6 name `--no-labeler` or `--filler-only`?**
+There is one plant lock per PLC port. The CLI can leave PLCs out in two ways: `--no-labeler` (labeler lock free) and `--filler-only` (syrup and labeler free). D6 names the option that fits the free locks, so the fix is one restart without it instead of a search; other combinations (cannot come from one simulator) get the generic text.
