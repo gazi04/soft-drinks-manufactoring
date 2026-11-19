@@ -1,6 +1,6 @@
 """All labeler PLC tests in one command (port 5023), in ladder-stage order.
 
-    uv run python tests/run_labeler.py              # all scripts, about 7.5 min (--quick: about 3 min, alarms without the long timeouts)
+    uv run python tests/run_labeler.py              # all scripts, about 8 min (--quick: about 3.5 min, alarms without the long timeouts)
     uv run python tests/run_labeler.py glue         # only the scripts whose name contains "glue"
     uv run python tests/run_labeler.py --fail-fast  # stop at the first failing script
     uv run python tests/run_labeler.py --list       # show the list
@@ -22,6 +22,7 @@ SCRIPTS = [
     Script("test_labeler_stop_state.py", "Stop at safe points (none in CLAMP / WRAP / PRESS), GoodCount + Cmd 4, Starved filter, State 0/1/2/3/9"),
     Script("test_labeler_alarms.py", "label / pocket / glue timeouts, over-temperature, FAULT, Reset only when the cause is gone, warnings",
            quick_args=("--quick",)),
+    Script("test_link_labeler.py", "simulator's LabelerPlc client: heartbeat, write + read back of both blocks, PLC reads the sensors"),
 ]
 
 if __name__ == "__main__":
