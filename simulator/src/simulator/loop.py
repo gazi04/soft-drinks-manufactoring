@@ -3,7 +3,8 @@
 One tick (report section 7.3):
     1. apply the queued commands (panel, scenario, test)   commands.CommandQueue.apply()
     2. read the PLC outputs                       plcs.FillerPlc.read_outputs()
-       (and the syrup room PLC's: plcs.SyrupPlc.read_signals(), when there is one)
+       (and the syrup room PLC's: plcs.SyrupPlc.read_signals(), when there is one;
+        and the labeler PLC's: plcs.LabelerPlc.read_outputs(), when there is one)
     3. move the world by the measured dt          plant.Plant.step()
     4. write sensors + wiring values to the PLC   plcs.FillerPlc.write()
     5. read the PLC status: watcher events, setpoints for the audit
@@ -33,14 +34,19 @@ from simulator.events import Event, EventLog
 from simulator.machines.filler import FillerOutputs
 from simulator.plant import Plant
 from simulator.scenarios import ScenarioRunner, ScenarioSlot
+from simulator.machines.labeler import LabelerOutputs
 from simulator.plant import SyrupSignals
 from simulator.plcs import (
+    LABELER_STATE_NAMES,
+    LABELER_STEP_NAMES,
     MODE_NAMES,
     STATE_NAMES,
     STEP_NAMES,
     SYRUP_STATE_NAMES,
     SYRUP_STEP_NAMES,
     FillerPlc,
+    LabelerPlc,
+    LabelerStatus,
     PlcCommError,
     PlcReplyError,
     PlcStatus,
@@ -155,6 +161,9 @@ class LoopStats:
     syrup_status: SyrupStatus | None = None  # same for the syrup room PLC (None without a syrup link)
     batch_count_start: int | None = None
     batch_count_end: int | None = None
+    labeler_status: LabelerStatus | None = None  # same for the labeler PLC (None without a labeler link)
+    labeler_count_start: int | None = None  # the labeler's GoodCount
+    labeler_count_end: int | None = None
     problems: set[str] = field(default_factory=set)  # distinct problems already logged
 
     def summary(self) -> str:
@@ -168,8 +177,13 @@ class LoopStats:
             if self.batch_count_start is not None and self.batch_count_end is not None
             else ""
         )
+        labelled = (
+            f", labeler GoodCount +{self.labeler_count_end - self.labeler_count_start}"
+            if self.labeler_count_start is not None and self.labeler_count_end is not None
+            else ""
+        )
         dt = f"dt {self.dt_min * 1000:.0f}-{self.dt_max * 1000:.0f} ms" if self.ticks else "no ticks"
-        return f"{self.ticks} ticks in {self.seconds:.1f} s, {dt}{made}{batches}"
+        return f"{self.ticks} ticks in {self.seconds:.1f} s, {dt}{made}{batches}{labelled}"
 
 
 async def run(
@@ -185,12 +199,17 @@ async def run(
     commands: CommandQueue | None = None,
     scenario: ScenarioRunner | ScenarioSlot | None = None,
     syrup_plc: SyrupPlc | None = None,
+    labeler_plc: LabelerPlc | None = None,
 ) -> LoopStats:
     """Run the loop until `seconds` have passed, `until()` is true or `stop` is set.
 
     `syrup_plc`: the second PLC. The plant must have a syrup room (Plant(with_syrup=True)). Each
     PLC has its own link: one that is down never stops the other. A syrup PLC that does not answer
     switches the syrup room's pumps off and drops Product_Available (a dead PLC drives no wire).
+
+    `labeler_plc`: the third PLC, needed exactly when the plant has the real labeler
+    (Plant(with_labeler=True)): it drives C2's motor, so without it the filler would block. A labeler
+    PLC that does not answer switches all its outputs off: C2 stands, the heater is off.
 
     `commands`: queue filled by the caller (panel, test); applied at the start of every
     tick, the only place where the world changes from outside the physics.
@@ -200,15 +219,23 @@ async def run(
     # one plant writer per PLC: a second simulator / test script stops here (plant_lock.py)
     if syrup_plc is not None and plant.syrup is None:
         raise ValueError("a syrup PLC link needs a plant with a syrup room: Plant(with_syrup=True)")
+    if labeler_plc is not None and plant.labeler is None:
+        raise ValueError("a labeler PLC link needs a plant with the labeler: Plant(with_labeler=True)")
+    if labeler_plc is None and plant.labeler is not None:
+        raise ValueError("a plant with the labeler needs its PLC link (labeler_plc=): nobody else drives C2")
     plant_lock.acquire(plc.host, plc.port, "simulator loop")
     if syrup_plc is not None:
         plant_lock.acquire(syrup_plc.host, syrup_plc.port, "simulator loop")
+    if labeler_plc is not None:
+        plant_lock.acquire(labeler_plc.host, labeler_plc.port, "simulator loop")
     stats = LoopStats()
     watcher = PlcWatcher()
     filler = LinkTrack(plc, "PLC")
     syrup = LinkTrack(syrup_plc, "syrup PLC") if syrup_plc is not None else None
     syrup_watcher = PlcWatcher(SYRUP_STEP_NAMES, SYRUP_STATE_NAMES, "syrup: ", "BatchCount",
                                lambda status: status.batch_count, log_count=True)
+    labeler = LinkTrack(labeler_plc, "labeler PLC") if labeler_plc is not None else None
+    labeler_watcher = PlcWatcher(LABELER_STEP_NAMES, LABELER_STATE_NAMES, "labeler: ")
     if scenario is not None and commands is None:
         commands = CommandQueue()
     start = last = time.monotonic()
@@ -222,7 +249,7 @@ async def run(
 
         # 1. Commands, before anything is read or moved
         if scenario is not None:
-            due, events = scenario.due(plant, stats.status, stats.syrup_status)
+            due, events = scenario.due(plant, stats.status, stats.syrup_status, stats.labeler_status)
             log.extend(events)
             for command in due:
                 commands.put_command(command)
@@ -256,8 +283,23 @@ async def run(
                               f"{syrup_plc.reconnect_s:g} s: the filler gets no Product_Available "
                               "(run with --filler-only to leave the syrup room out)")
 
+        # 2c. The labeler PLC: its outputs (link down: None = all OFF, C2 stands)
+        labeler_out: LabelerOutputs | None = None
+        if labeler is not None:
+            if await labeler_plc.ensure_connected():
+                try:
+                    labeler_out = await labeler_plc.read_outputs()
+                except PlcCommError as error:
+                    labeler.problem(stats, log, plant.now, f"read:{type(error).__name__}",
+                                    f"reading the labeler PLC outputs failed: {error}")
+            elif not labeler.was_ok:
+                labeler.problem(stats, log, plant.now, "connect",
+                                f"labeler PLC {labeler_plc.host}:{labeler_plc.port} not reachable, retrying every "
+                                f"{labeler_plc.reconnect_s:g} s: C2 stands, the filler will block "
+                                "(run with --no-labeler to keep the labeler stand-in)")
+
         # 3. Physics (the first tick has dt = 0: only the start state is written)
-        writes, events = plant.step(out, dt, signals)
+        writes, events = plant.step(out, dt, signals, labeler_out)
         log.extend(events)
 
         # 4.+5. Write sensors, read the status back
@@ -309,10 +351,35 @@ async def run(
             except PlcCommError:
                 syrup.last_writes = None
 
+        # 4c.+5c. The same for the labeler PLC, on its own
+        if labeler is not None and labeler_plc.connected:
+            labeler_writes = plant.labeler_writes()
+            try:
+                if labeler.last_writes is not None and stats.ticks % VERIFY_EVERY == 0:
+                    wrong = await labeler_plc.verify_writes(labeler.last_writes)
+                    if wrong:
+                        labeler.problem(stats, log, plant.now, f"foreign:{wrong}",
+                                        f"labeler PLC: written values changed by someone else: {', '.join(wrong)} "
+                                        "(debugger force or a second writer, e.g. a test script)")
+                await labeler_plc.write(labeler_writes)
+                labeler.last_writes = labeler_writes
+                labeler_status = await labeler_plc.read_status()
+                stats.labeler_status = labeler_status
+                log.extend(labeler_watcher.update(labeler_status, plant.now))
+                if stats.labeler_count_start is None:
+                    stats.labeler_count_start = labeler_status.good_count
+                stats.labeler_count_end = labeler_status.good_count
+            except PlcReplyError as error:
+                labeler.problem(stats, log, plant.now, f"reply:{error}", str(error))
+            except PlcCommError:
+                labeler.last_writes = None
+
         # 6. Link changes
         filler.report_link(stats, log, plant.now)
         if syrup is not None:
             syrup.report_link(stats, log, plant.now)
+        if labeler is not None:
+            labeler.report_link(stats, log, plant.now)
 
         stats.ticks += 1
         stats.seconds = time.monotonic() - start

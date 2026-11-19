@@ -1,7 +1,8 @@
-"""Plant simulator for the soft drink line: the filler and the syrup room.
+"""Plant simulator for the soft drink line: the filler, the syrup room and the labeler.
 
-    uv run simulator                                 # control panel (q quits), both PLCs
-    uv run simulator --filler-only                   # the filler alone, Product_Available held TRUE
+    uv run simulator                                 # control panel (q quits), all three PLCs
+    uv run simulator --no-labeler                    # filler + syrup room, a stand-in takes the bottles off C2
+    uv run simulator --filler-only                   # the filler alone, Product_Available held TRUE, labeler stand-in
     uv run simulator --headless                      # no panel: console + log, until Ctrl+C
     uv run simulator --headless --add 20 --rate 0    # exactly 20 bottles, no rate supply
     uv run simulator --headless --seconds 120 --log logs/run.log
@@ -10,7 +11,7 @@
 
 Panel and headless take the same options (--rate, --add, --scenario, --log, ...).
 Press Reset / Start with the HMI (tests/hmi.py until FUXA exists; `hmi.py --syrup ...` for the
-syrup room): the simulator never writes commands, modes or setpoints. A scenario waits until the PLC runs,
+syrup room, `hmi.py --labeler ...` for the labeler): the simulator never writes commands, modes or setpoints. A scenario waits until the PLC runs,
 so it does not matter whether Start is pressed before or after the simulator starts.
 """
 
@@ -30,8 +31,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--port", type=int, default=config.PLC_PORT)
     parser.add_argument("--syrup-host", default=None, help="syrup room PLC host (default: same as --host)")
     parser.add_argument("--syrup-port", type=int, default=config.SYRUP_PORT)
+    parser.add_argument("--labeler-host", default=None, help="labeler PLC host (default: same as --host)")
+    parser.add_argument("--labeler-port", type=int, default=config.LABELER_PORT)
     parser.add_argument("--filler-only", action="store_true",
-                        help="leave the syrup room out: only the filler PLC, Product_Available held TRUE")
+                        help="the filler alone: no syrup room (Product_Available held TRUE), labeler stand-in")
+    parser.add_argument("--no-labeler", action="store_true",
+                        help="keep the labeler stand-in (no labeler PLC): it drives C2 and takes its bottles")
     parser.add_argument("--seconds", type=float, help="stop after this many seconds (default: until Ctrl+C)")
     parser.add_argument("--rate", type=float, default=config.SUPPLY_PER_MIN, help="bottle supply per minute")
     parser.add_argument("--add", type=int, default=0, help="extra bottles put on C1 at the start")
@@ -41,6 +46,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     args = parser.parse_args(argv)
     if args.syrup_host is None:
         args.syrup_host = args.host
+    if args.labeler_host is None:
+        args.labeler_host = args.host
+    args.with_labeler = not (args.filler_only or args.no_labeler)
     return args
 
 
@@ -61,17 +69,23 @@ async def run_headless(args: argparse.Namespace) -> None:
     plant = _plant(args)
     plc = FillerPlc(args.host, args.port)
     syrup_plc = _syrup_plc(args)
+    labeler_plc = _labeler_plc(args)
 
     stop = asyncio.Event()
     asyncio.get_running_loop().add_signal_handler(signal.SIGINT, stop.set)  # Ctrl+C: clean stop
-    syrup_text = f" + syrup PLC {args.syrup_host}:{args.syrup_port}" if syrup_plc else " (filler only)"
-    print(f"Simulator headless -> PLC {args.host}:{args.port}{syrup_text}, log {log_path}. Ctrl+C to stop.")
+    syrup_text = f" + syrup PLC {args.syrup_host}:{args.syrup_port}" if syrup_plc else " (no syrup room)"
+    labeler_text = f" + labeler PLC {args.labeler_host}:{args.labeler_port}" if labeler_plc else " (labeler stand-in)"
+    print(f"Simulator headless -> PLC {args.host}:{args.port}{syrup_text}{labeler_text}, log {log_path}. "
+          "Ctrl+C to stop.")
     try:
-        stats = await loop.run(plc, plant, log, seconds=args.seconds, stop=stop, scenario=runner, syrup_plc=syrup_plc)
+        stats = await loop.run(plc, plant, log, seconds=args.seconds, stop=stop, scenario=runner, syrup_plc=syrup_plc,
+                               labeler_plc=labeler_plc)
     finally:
         plc.close()
         if syrup_plc is not None:
             syrup_plc.close()
+        if labeler_plc is not None:
+            labeler_plc.close()
         log.close()
     print(f"\n{_summary(stats, plant, log.warning_count)}")
 
@@ -85,7 +99,7 @@ def _log_path(args: argparse.Namespace) -> Path:
 def _plant(args: argparse.Namespace):
     from simulator.plant import Plant
 
-    plant = Plant(with_syrup=not args.filler_only)
+    plant = Plant(with_syrup=not args.filler_only, with_labeler=args.with_labeler)
     plant.supply.per_min = args.rate
     plant.supply.add(args.add)
     return plant
@@ -98,9 +112,20 @@ def _syrup_plc(args: argparse.Namespace):
     return None if args.filler_only else SyrupPlc(args.syrup_host, args.syrup_port)
 
 
+def _labeler_plc(args: argparse.Namespace):
+    """The third PLC link, or None when the labeler stand-in is used (--no-labeler, --filler-only)."""
+    from simulator.plcs import LabelerPlc
+
+    return LabelerPlc(args.labeler_host, args.labeler_port) if args.with_labeler else None
+
+
 def _summary(stats, plant, warnings: int) -> str:
-    return (f"{stats.summary()}, bottles out {plant.labeler.taken + plant.c2.count}, "
-            f"lost {len(plant.filler.lost)}, warnings {warnings}")
+    if plant.labeler is None:
+        return (f"{stats.summary()}, bottles out {plant.labeler_standin.taken + plant.c2.count}, "
+                f"lost {len(plant.filler.lost)}, warnings {warnings}")
+    lab = plant.labeler
+    return (f"{stats.summary()}, labelled {lab.labelled} of {lab.discharged} discharged, packed {plant.packer.taken}, "
+            f"lost filler {len(plant.filler.lost)} / labeler {len(lab.lost)}, warnings {warnings}")
 
 
 def run_panel(args: argparse.Namespace) -> None:
@@ -112,7 +137,8 @@ def run_panel(args: argparse.Namespace) -> None:
     logging.getLogger("pymodbus").setLevel(logging.CRITICAL)  # stderr lines would garble the screen
     log_path = _log_path(args)
     plant = _plant(args)
-    app = SimulatorApp(plant, FillerPlc(args.host, args.port), log_path, args.scenario, syrup_plc=_syrup_plc(args))
+    app = SimulatorApp(plant, FillerPlc(args.host, args.port), log_path, args.scenario, syrup_plc=_syrup_plc(args),
+                       labeler_plc=_labeler_plc(args))
     stats = app.run()  # returns after q: the loop has stopped and the log file is closed
     print(f"Log {log_path}")
     if stats is not None:
@@ -131,6 +157,12 @@ def main() -> None:
         raise SystemExit(f"unknown scenario {args.scenario!r} (known: {', '.join(SCENARIOS)})")
     if args.scenario and args.filler_only and SCENARIOS[args.scenario].target == "syrup":
         raise SystemExit(f"scenario {args.scenario!r} needs the syrup room: leave out --filler-only")
+    from simulator.scenarios import uses_command
+
+    if args.scenario and args.with_labeler and uses_command(SCENARIOS[args.scenario], "labeler_running"):
+        raise SystemExit(f"scenario {args.scenario!r} stops the labeler stand-in: add --no-labeler")
+    if args.scenario and not args.with_labeler and SCENARIOS[args.scenario].target == "labeler":
+        raise SystemExit(f"scenario {args.scenario!r} needs the real labeler: leave out --no-labeler / --filler-only")
     from simulator import plant_lock
 
     who = "simulator" + (" --headless" if args.headless else " (panel)")
@@ -138,6 +170,8 @@ def main() -> None:
         plant_lock.acquire(args.host, args.port, who)
         if not args.filler_only:
             plant_lock.acquire(args.syrup_host, args.syrup_port, who)
+        if args.with_labeler:
+            plant_lock.acquire(args.labeler_host, args.labeler_port, who)
     except plant_lock.PlantLockError as error:
         raise SystemExit(f"simulator: {error}") from None
     if args.headless:

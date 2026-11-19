@@ -4,6 +4,7 @@
     FillerPlc   the filler (port 502), described below
     SyrupPlc    the syrup room (port 5022): same pattern, own addresses (address_map_syrup.py);
                 its reads and writes are documented at the class
+    LabelerPlc  the labeler (port 5023): same pattern, own addresses (address_map_labeler.py)
 
     PLC (OpenPLC runtime, Modbus TCP server)
       coils 0-5            ── read_outputs() ──►  FillerOutputs   ──► plant.step()
@@ -74,10 +75,12 @@ from simulator.address_map import (
     STATUS_START,
     UNUSED_MX0_7,
 )
+from simulator import address_map_labeler as lm
 from simulator import address_map_syrup as sm
 from simulator.machines.filler import FillerOutputs
+from simulator.machines.labeler import LabelerOutputs
 from simulator.machines.syrup import SyrupOutputs
-from simulator.plant import SimWrites, SyrupSignals, SyrupWrites
+from simulator.plant import LabelerWrites, SimWrites, SyrupSignals, SyrupWrites
 
 RECONNECT_S = 2.0  # default: at most one connection attempt every 2 s while the PLC is away
 MAX_BACKOFF = 8  # a PLC that never answered is retried at most every RECONNECT_S x 8 (16 s by default)
@@ -284,6 +287,104 @@ def decode_syrup_status(regs: list[int], alarm_bits: list[bool], mode: int) -> S
     """regs = %MW50..%MW53 (State, Step, unused, BatchCount), alarm_bits = %MX5.0..5.5, mode = %MW1."""
     state, step, _unused, batch_count = regs[: sm.STATUS_COUNT]
     return SyrupStatus(state, step, batch_count, *alarm_bits[: sm.ALARMS_COUNT], mode)
+
+
+# === Labeler: pure mapping ============================================================
+LABELER_STEP_NAMES = {0: "IDLE", 5: "WARM_UP", 10: "WAIT_BOTTLE", 20: "CLAMP", 22: "WRAP", 24: "PRESS",
+                      26: "UNCLAMP", 35: "WAIT_OUTFEED", 40: "DISCHARGE", 900: "FAULT"}
+LABELER_STATE_NAMES = {0: "Stopped", 1: "Running", 2: "Starved", 3: "Blocked", 9: "Fault"}
+LABELER_ALARM_NAMES = ("Alm_LabelTimeout", "Alm_PocketJam", "Alm_OutfeedBlocked", "Alm_CommLost",
+                       "Alm_LabelEmpty", "Alm_GlueOverTemp", "Alm_GlueHeatTimeout")  # address order %MX5.0 .. %MX5.6
+
+# The coils the simulator writes, looked up BY ADDRESS (as the syrup room), so the order of a block can
+# never put a value on the wrong coil. First block %MX0.0-%MX1.2: the 8 sensors and the wiring; the unused
+# %MX1.0 (the filler's Product_Available input) is sent FALSE. Second block %MX4.0-4.1: the two extra sensors.
+LABELER_COIL_FIELDS = {
+    lm.BOTTLE_AT_GATE: ("bottle_at_gate", lambda w: w.sensors.bottle_at_gate),
+    lm.BOTTLE_IN_POCKET: ("bottle_in_pocket", lambda w: w.sensors.bottle_in_pocket),
+    lm.BELL_DOWN: ("bell_down", lambda w: w.sensors.bell_down),
+    lm.LABEL_PRESENT: ("label_present", lambda w: w.sensors.label_present),
+    lm.C3_FULL: ("c3_full", lambda w: w.sensors.c3_full),
+    lm.ROLL_EMPTY: ("roll_empty", lambda w: w.sensors.roll_empty),
+    lm.LABEL_MARK: ("label_mark", lambda w: w.sensors.label_mark),
+    lm.SPIN_PULSE: ("spin_pulse", lambda w: w.sensors.spin_pulse),
+    lm.E_STOP_OK: ("e_stop_ok", lambda w: w.e_stop_ok),
+    lm.HEARTBEAT: ("heartbeat", lambda w: w.heartbeat),
+}
+LABELER_EXTRA_FIELDS = {
+    lm.ROLL_LOW: ("roll_low", lambda w: w.sensors.roll_low),
+    lm.GLUE_LOW: ("glue_low", lambda w: w.sensors.glue_low),
+}
+
+assert set(LABELER_COIL_FIELDS) | {lm.UNUSED_MX1_0} == set(lm.SENSOR_BLOCK)
+assert set(LABELER_EXTRA_FIELDS) == set(lm.EXTRA_SENSOR_BLOCK)
+assert set(lm.SENSOR_BLOCK) | set(lm.EXTRA_SENSOR_BLOCK) <= lm.SIM_WRITE_COILS
+assert lm.ANALOG_COUNT == 1 and lm.SIM_WRITE_REGISTERS == {lm.GLUE_TEMP, lm.ANIM_C3, lm.ANIM_STATION}
+
+
+def decode_labeler_outputs(bits: list[bool]) -> LabelerOutputs:
+    """Coils 0-8 (%QX0.0-%QX1.0) -> LabelerOutputs. pymodbus pads bits to 16, so slice."""
+    return LabelerOutputs(*bits[: lm.OUTPUTS_COUNT])
+
+
+def encode_labeler_sensor_block(w: LabelerWrites) -> list[bool]:
+    """LabelerWrites -> the 11 coil values of the first bulk write, in lm.SENSOR_BLOCK order."""
+    return [bool(LABELER_COIL_FIELDS[a][1](w)) if a in LABELER_COIL_FIELDS else False for a in lm.SENSOR_BLOCK]
+
+
+def encode_labeler_extra_block(w: LabelerWrites) -> list[bool]:
+    """LabelerWrites -> the 2 coil values of the second bulk write (%MX4.0 Roll_Low, %MX4.1 Glue_Low)."""
+    return [bool(LABELER_EXTRA_FIELDS[a][1](w)) for a in lm.EXTRA_SENSOR_BLOCK]
+
+
+def encode_labeler_animation(w: LabelerWrites) -> list[int]:
+    """The 2 animation words %MW70..71 (C3 slots, pocket code)."""
+    words = [int(v) for v in w.anim]
+    assert len(words) == lm.ANIM_COUNT and all(0 <= v <= INT_MAX for v in words)
+    return words
+
+
+def foreign_labeler_writes(w: LabelerWrites, coils: list[bool], extra: list[bool], glue_raw: int) -> list[str]:
+    """Signals whose read-back value differs from what the simulator wrote (see foreign_writes)."""
+    wrong = []
+    for address, expected, actual in zip(lm.SENSOR_BLOCK, encode_labeler_sensor_block(w), coils):
+        if expected != actual:
+            wrong.append(LABELER_COIL_FIELDS[address][0] if address in LABELER_COIL_FIELDS else f"coil {address}")
+    for address, expected, actual in zip(lm.EXTRA_SENSOR_BLOCK, encode_labeler_extra_block(w), extra):
+        if expected != actual:
+            wrong.append(LABELER_EXTRA_FIELDS[address][0])
+    if glue_raw != to_register(w.sensors.glue_temp):
+        wrong.append("glue_temp")
+    return wrong
+
+
+@dataclass(frozen=True)
+class LabelerStatus:
+    """What the labeler PLC reports about itself (event log, panel)."""
+
+    state: int  # 0 Stopped, 1 Running, 2 Starved, 3 Blocked, 9 Fault
+    step: int  # 0 IDLE, 5 WARM_UP ... 40 DISCHARGE, 900 FAULT
+    good_count: int
+    alm_label_timeout: bool
+    alm_pocket_jam: bool
+    alm_outfeed_blocked: bool  # a warning
+    alm_comm_lost: bool
+    alm_label_empty: bool  # a warning, not latched
+    alm_glue_over_temp: bool
+    alm_glue_heat_timeout: bool
+    mode: int = 1  # ModeReq as the HMI set it: 0 Stop, 1 Auto, 2 Manual (default only for tests)
+
+    @property
+    def alarms(self) -> dict[str, bool]:
+        flags = (self.alm_label_timeout, self.alm_pocket_jam, self.alm_outfeed_blocked, self.alm_comm_lost,
+                 self.alm_label_empty, self.alm_glue_over_temp, self.alm_glue_heat_timeout)
+        return dict(zip(LABELER_ALARM_NAMES, flags))
+
+
+def decode_labeler_status(regs: list[int], alarm_bits: list[bool], mode: int) -> LabelerStatus:
+    """regs = %MW50..%MW53 (State, Step, unused, GoodCount), alarm_bits = %MX5.0..5.6, mode = %MW1."""
+    state, step, _unused, good_count = regs[: lm.STATUS_COUNT]
+    return LabelerStatus(state, step, good_count, *alarm_bits[: lm.ALARMS_COUNT], mode)
 
 
 # --- Async client ------------------------------------------------------------------
@@ -533,3 +634,70 @@ class SyrupPlc(PlcLink):
         client = self._live_client("read back analog")
         analog = await self._finish("read back analog", client.read_holding_registers(sm.ANALOG_START, count=sm.ANALOG_COUNT))
         return foreign_syrup_writes(w, coils.bits[: len(sm.SENSOR_BLOCK)], analog.registers[: sm.ANALOG_COUNT])
+
+
+class LabelerPlc(PlcLink):
+    """Async Modbus client of the labeler PLC (port 5023).
+
+        coils 0-8                       ── read_outputs() ──►  LabelerOutputs (plant.step)
+        coils 8192-8202, 8224-8225,
+        HR 1036 (GlueTemp),
+        HR 1094-1095 (animation)        ◄── write() ────────   LabelerWrites  (plant.labeler_writes)
+        HR 1074-1077, coils 8232-8238, HR 1025 ── read_status() ──► LabelerStatus
+
+    The same pattern as SyrupPlc. One difference: four writes per tick, because the two extra
+    sensors (%MX4) are not next to the others; the coils between them (%MX2 manual buttons,
+    %MX3 conditioned bits) belong to the HMI and the PLC. The animation words (%MW70-71) are for
+    FUXA only, the PLC ignores them; verify_writes() does not read them back (as for the filler).
+    """
+
+    write_coils = lm.SIM_WRITE_COILS
+    write_registers = lm.SIM_WRITE_REGISTERS
+
+    def __init__(
+        self,
+        host: str = config.PLC_HOST,
+        port: int = config.LABELER_PORT,
+        reconnect_s: float = RECONNECT_S,
+        timeout_s: float = TIMEOUT_S,
+    ) -> None:
+        super().__init__(host, port, reconnect_s, timeout_s)
+
+    async def read_outputs(self) -> LabelerOutputs:
+        client = self._live_client("read outputs")
+        result = await self._finish("read outputs", client.read_coils(lm.OUTPUTS_START, count=lm.OUTPUTS_COUNT))
+        return decode_labeler_outputs(result.bits)
+
+    async def write(self, w: LabelerWrites) -> None:
+        """The sensor block, the two extra sensors, GlueTemp and the 2 animation words: four requests."""
+        await self._write_coils(lm.SENSOR_BLOCK_START, encode_labeler_sensor_block(w))
+        await self._write_coils(lm.EXTRA_SENSOR_BLOCK_START, encode_labeler_extra_block(w))
+        await self._write_register(lm.GLUE_TEMP, to_register(w.sensors.glue_temp))
+        await self._write_registers(lm.ANIM_START, encode_labeler_animation(w))
+
+    async def write_heartbeat(self, value: bool) -> None:
+        """Only the heartbeat coil (first contact)."""
+        await self._write_coils(lm.HEARTBEAT, [value])
+
+    async def read_status(self) -> LabelerStatus:
+        client = self._live_client("read status")
+        regs = await self._finish("read status", client.read_holding_registers(lm.STATUS_START, count=lm.STATUS_COUNT))
+        client = self._live_client("read alarms")
+        alarms = await self._finish("read alarms", client.read_coils(lm.ALARMS_START, count=lm.ALARMS_COUNT))
+        client = self._live_client("read mode")
+        mode = await self._finish("read mode", client.read_holding_registers(lm.MODE_REQ, count=1))  # read only
+        return decode_labeler_status(regs.registers, alarms.bits, mode.registers[0])
+
+    async def verify_writes(self, w: LabelerWrites) -> list[str]:
+        """Read both coil blocks and GlueTemp back; names of the signals that differ.
+
+        Pass the values written LAST tick and call it before the next write (see FillerPlc).
+        """
+        n, n_extra = len(lm.SENSOR_BLOCK), len(lm.EXTRA_SENSOR_BLOCK)
+        client = self._live_client("read back sensors")
+        coils = await self._finish("read back sensors", client.read_coils(lm.SENSOR_BLOCK_START, count=n))
+        client = self._live_client("read back extra sensors")
+        extra = await self._finish("read back extra sensors", client.read_coils(lm.EXTRA_SENSOR_BLOCK_START, count=n_extra))
+        client = self._live_client("read back GlueTemp")
+        glue = await self._finish("read back GlueTemp", client.read_holding_registers(lm.GLUE_TEMP, count=1))
+        return foreign_labeler_writes(w, coils.bits[:n], extra.bits[:n_extra], glue.registers[0])
