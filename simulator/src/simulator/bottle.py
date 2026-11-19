@@ -18,6 +18,7 @@ class Bottle:
     level_ml: float = 0.0  # liquid in the bottle
     rinsed: bool = False
     capped: bool = False
+    label_mm: float = 0.0  # label glued onto the bottle by the labeler; > 0 = Label_Present
 
     @property
     def name(self) -> str:

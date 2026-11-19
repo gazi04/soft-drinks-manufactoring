@@ -13,6 +13,7 @@ file never changes while the simulator runs.
 PLC_HOST = "127.0.0.1"  # later "plc-filler" inside the Docker network
 PLC_PORT = 502  # the filler keeps 502 (report section 6.1, addresses in build order)
 SYRUP_PORT = 5022  # the syrup room's own runtime (plc-syrup-carb), same host
+LABELER_PORT = 5023  # the labeler's own runtime (plc-labeler), same host
 
 # --- Tick loop --------------------------------------------------------------------
 TICK_S = 0.1  # one simulator cycle; the PLC scans every 20 ms, so ~5 scans per tick
@@ -97,3 +98,42 @@ BUFFER_DRAW_SCALE = 30.0  # litres taken from the buffer per litre the filler fi
 #                           measured with the whole-line test (600 s): x50 starves the filler after 114 s,
 #                           x40 keeps only 24 L above Product_Available's reset, x30 keeps 113 L (lowest level
 #                           233 L, highest 1049 L, batches wait in WAIT_DEMAND now and then).
+
+# --- Labeler: melt tank (docs/labeler/state-diagram.md rule 4; PLC: GlueSetpoint 170.0 degC, GlueHyst 5.0,
+#     GlueBand 10.0, HeatTimeout 120 s, GlueMax 200.0 degC) ------------------------------------------------
+GLUE_HEATER_C = 300.0  # heater pulls toward this ...
+GLUE_HEAT_TAU_S = 60.0  # ... with this time constant; with the room loss the balance is 274.5 degC:
+#                         20 -> 170 degC in 48.5 s (HeatTimeout 120 s); a stuck heater reaches GlueMax
+#                         (200 degC) 18 s after 170 degC, so the over-temperature scenario is reachable
+GLUE_ROOM_TAU_S = 600.0  # heat loss to the room: 170 -> 165 degC in 20 s with the heater off
+GLUE_STICK_MIN_C = 150.0  # below this the glue does not hold a label (PLC window starts at 160 degC)
+GLUE_SMOKE_C = 200.0  # audit warning; the PLC faults at GlueMax 200.0 degC
+GLUE_TANK_KG = 5.0
+GLUE_START_KG = 4.0
+GLUE_LOW_KG = 1.0  # Glue_Low below this
+GLUE_PER_LABEL_G = 1.0  # glue on one label (both edges)
+
+# --- Labeler: label web (PLC: LabelTimeout 5 s, CutPulse 0.2 s) ---------------------------------------------
+LABEL_LENGTH_MM = 210.0  # one label: a 65 mm bottle (204 mm round) plus overlap
+LABEL_FEED_MM_S = 200.0  # web speed = bottle surface speed at about 1 turn/s: 1.05 s per label (LabelTimeout 5 s)
+LABEL_MARK_PULSE_S = 0.3  # Label_Mark pulse; at least one full tick, so the PLC sees the edge (as S6)
+ROLL_LABELS = 1000  # labels on a new roll
+ROLL_LOW_LABELS = 50  # Roll_Low at or below this
+ROLL_TAIL_MM = 40.0  # web after the roll's last mark: the PLC stops the feed 1-2 ticks after the Label_Mark edge
+# (20-40 mm run-on), so the last label needs this much web past its mark to be whole (Roll_Empty is ON at the mark)
+KNIFE_MISSED_FACTOR = 1.5  # audit: more than 1.5 label lengths without a cut = the knife did not cut
+
+# --- Labeler: pocket (PLC: GatePulse 0.5 s, ClampTimeout 2 s, LabelTimeout 5 s, OutTimeout 3 s, PressTurns 2) --
+GATE_PASS_S = 0.3  # a bottle needs this long in the open gate; the gate TP is 0.5 s and the next bottle needs a
+#                    0.5 s slot step to reach the gate, so one pulse admits exactly one bottle (as the filler door)
+GATE_TRAVEL_S = 0.5  # gate -> pocket sensor (Bottle_Entering); ClampTimeout 2 s
+BELL_MOVE_S = 0.5  # centering bell up <-> down; ClampTimeout 2 s
+SPIN_TURN_S = 1.0  # one turn of the turntable: a 65 mm bottle (204 mm round) at about the web speed (200 mm/s);
+#                    PressTurns 2 take at most 3 s with the phase (LabelTimeout 5 s)
+SPIN_PULSE_S = 0.3  # Spin_Pulse per turn: at least one tick, and a 0.7 s gap before the next one
+DISCHARGE_S = 0.5  # pusher: pocket -> C3 entry; OutTimeout 3 s
+BROKEN_LABEL_SHARE = 0.9  # audit: a bottle leaving with less than 90 % of a label has a broken label
+
+# --- Conveyor C3 and the packer stand-in -----------------------------------------------------------------
+C3_FULL_SLOT = 1  # C3 slot watched by C3_Full, same reason as S7_SLOT (2 s Outfeed_Full filter)
+PACKER_TAKE_S = 2.0  # the packer stand-in takes one bottle from the end of C3 every 2 s (the labeler needs ~6 s)

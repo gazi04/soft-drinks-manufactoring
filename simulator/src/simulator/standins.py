@@ -2,6 +2,7 @@
 
     Supply ──► C1 ──► FILLER ──► C2 ──► LabelerStandIn
     (blow moulder)                       (labeler)
+                     ... or, with the real labeler:  LABELER ──► C3 ──► PackerStandIn
 
     + wiring values from other machines: Product_Available (syrup room),
       E_Stop_OK (E-stop chain), Heartbeat (the simulator is alive)
@@ -77,8 +78,10 @@ class LabelerStandIn:
     accumulation conveyor in front of a stopped machine.
     """
 
+    WHO = "labeler"  # name in the event log
+
     def __init__(self, c2: Conveyor, take_s: float = config.LABELER_TAKE_S) -> None:
-        self.c2 = c2
+        self.conveyor = c2  # the conveyor it takes from (C2; C3 for the packer)
         self.take_s = take_s
         self.running = True
         self.taken = 0  # bottles taken off C2 since the start
@@ -92,12 +95,25 @@ class LabelerStandIn:
         if not self.running:
             return []
         self._timer = min(self._timer + dt, self.take_s)
-        if self._timer < self.take_s - _EPSILON or self.c2.exit_bottle is None:
+        if self._timer < self.take_s - _EPSILON or self.conveyor.exit_bottle is None:
             return []
-        bottle = self.c2.take_at_exit()
+        bottle = self.conveyor.take_at_exit()
         self._timer = 0.0
         self.taken += 1
-        return [Event.bottle(now, bottle.id, "taken by labeler")]
+        return [Event.bottle(now, bottle.id, f"taken by {self.WHO}")]
+
+
+class PackerStandIn(LabelerStandIn):
+    """Drives C3 and takes one bottle from its exit every `take_s` seconds (replaces the packer).
+
+    Same physics as LabelerStandIn, one conveyor further down: `running = False` lets C3 fill
+    up until the labeler's C3_Full sees the queue.
+    """
+
+    WHO = "packer"
+
+    def __init__(self, c3: Conveyor, take_s: float = config.PACKER_TAKE_S) -> None:
+        super().__init__(c3, take_s)
 
 
 class Heartbeat:

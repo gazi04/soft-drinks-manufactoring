@@ -1,12 +1,14 @@
 """Plant: the whole simulated world around the PLCs, in one step().
 
     Supply ─► C1 ─► Filler ─► C2 ─► LabelerStandIn
-                 ▲   │ product used
+                 ▲   │ product used    └─► Labeler ─► C3 ─► PackerStandIn   (only with_labeler=True)
     Product_Available│ ▼                          (only with_syrup=True)
     (wire)  ◄── SyrupRoom: syrup tank, mixing tank, buffer tank
                  + wiring: Product_Available, E_Stop_OK, Heartbeats
 
-    PLC outputs (FillerOutputs, SyrupSignals) ──► plant.step(out, dt, syrup) ──► SimWrites + events
+    PLC outputs (FillerOutputs, SyrupSignals, LabelerOutputs)
+        ──► plant.step(out, dt, syrup, labeler) ──► SimWrites + events
+        (SyrupWrites / LabelerWrites from syrup_writes() / labeler_writes())
 
 The plant is still pure physics: it gets the PLC outputs, moves the world by dt
 seconds and returns every value the simulator writes back to the PLC. It
@@ -16,15 +18,16 @@ address_map or pymodbus and can be unit-tested without a PLC.
 """
 
 import math
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 
 from simulator import config
 from simulator.bottle import BottleFactory
 from simulator.conveyor import Conveyor
 from simulator.events import Event
 from simulator.machines.filler import Filler, FillerOutputs
+from simulator.machines.labeler import Labeler, LabelerOutputs, LabelerSensors
 from simulator.machines.syrup import SyrupOutputs, SyrupRoom, SyrupSensors
-from simulator.standins import Heartbeat, LabelerStandIn, Supply
+from simulator.standins import Heartbeat, LabelerStandIn, PackerStandIn, Supply
 
 
 @dataclass(frozen=True)
@@ -62,15 +65,39 @@ class SyrupWrites:
     heartbeat: bool
 
 
+@dataclass(frozen=True)
+class LabelerWrites:
+    """Every value the simulator writes to the labeler PLC: sensors, wiring and HMI animation."""
+
+    sensors: LabelerSensors
+    e_stop_ok: bool
+    heartbeat: bool
+    anim: tuple[int, int] = (0, 0)  # HMI animation %MW70..71: C3 slots, pocket code
+
+
 class Plant:
-    def __init__(self, *, with_syrup: bool = False) -> None:
+    def __init__(self, *, with_syrup: bool = False, with_labeler: bool = False) -> None:
         self.now = 0.0  # simulation time in seconds
         self.factory = BottleFactory()
         self.c1 = Conveyor("C1")
         self.c2 = Conveyor("C2")
         self.filler = Filler(self.c1, self.c2)
         self.supply = Supply(self.c1, self.factory)
-        self.labeler = LabelerStandIn(self.c2)
+        # The labeler is optional: without it a stand-in drives C2 and takes its bottles (the old behaviour).
+        # With it, the labeler PLC drives C2, the labeler pushes onto C3 and a packer stand-in empties C3.
+        self.labeler: Labeler | None = None
+        self.c3: Conveyor | None = None
+        self.packer: PackerStandIn | None = None
+        self.labeler_standin: LabelerStandIn | None = None
+        if with_labeler:
+            self.c3 = Conveyor("C3")
+            self.labeler = Labeler(self.c2, self.c3)
+            self.packer = PackerStandIn(self.c3)
+        else:
+            self.labeler_standin = LabelerStandIn(self.c2)
+        self.labeler_heartbeat = Heartbeat()  # its own, as the syrup room's
+        # What the labeler PLC said in the last tick; None = no answer: all its outputs OFF, C2 stands
+        self.labeler_outputs: LabelerOutputs | None = None
         self.heartbeat = Heartbeat()
         # The syrup room is optional: without it Product_Available is a stand-in held at TRUE
         self.syrup: SyrupRoom | None = SyrupRoom() if with_syrup else None
@@ -89,14 +116,22 @@ class Plant:
         # Pulse sensors seen ON during the last tick (see step())
         self._s6_seen = False
         self._s8_seen = False
+        self._mark_seen = False  # Label_Mark and Spin_Pulse: the labeler's pulse sensors
+        self._spin_seen = False
 
     def step(
-        self, out: FillerOutputs, dt: float, syrup: SyrupSignals | None = None
+        self,
+        out: FillerOutputs,
+        dt: float,
+        syrup: SyrupSignals | None = None,
+        labeler: LabelerOutputs | None = None,
     ) -> tuple[SimWrites, list[Event]]:
         """Move the world by dt seconds with the given PLC outputs.
 
         `syrup` is what the syrup room PLC says; None = that PLC does not answer: its outputs are OFF
         and it drives no Product_Available wire. It is ignored when the plant has no syrup room.
+        `labeler` are the labeler PLC's outputs; None = that PLC does not answer: all OFF, so C2 stands.
+        It is ignored when the plant has no labeler (the stand-in drives C2).
 
         A late tick (dt longer than SUBSTEP_S) is split into equal smaller steps.
         One big step would let two things that happen one after the other happen at
@@ -115,40 +150,56 @@ class Plant:
         S6 = GoodCount too low). So S6/S8 are written ON if they were ON at ANY
         sub-step of the tick (report 7.3: every pulse lasts at least one tick).
         Presence sensors (S3-S5) are not stretched: a stale ON would let the PLC
-        open a valve over a bottle that has already moved on.
+        open a valve over a bottle that has already moved on. The labeler's pulse
+        sensors (Label_Mark, Spin_Pulse) are kept the same way.
         """
         events: list[Event] = []
         signals = syrup if self.syrup is not None else None
         self.syrup_signals = signals
         syrup_out = signals.outputs if signals is not None else SyrupOutputs()
+        self.labeler_outputs = labeler if self.labeler is not None else None
+        labeler_out = self.labeler_outputs or LabelerOutputs()
         if dt > config.SLOW_TICK_S:
             events.append(Event.sim(self.now + dt, f"slow tick: {dt:.2f} s (outputs were old for that long)", warning=True))
         # The heartbeats are stepped once per TICK, not per sub-step: the PLC only sees the value at the
         # end of the tick, and a late tick must not hide a toggle (see Heartbeat)
         self.heartbeat.step(dt)
         self.syrup_heartbeat.step(dt)
+        self.labeler_heartbeat.step(dt)
         n = max(1, math.ceil(dt / config.SUBSTEP_S - 1e-9))
-        self._s6_seen = self._s8_seen = False
+        self._s6_seen = self._s8_seen = self._mark_seen = self._spin_seen = False
         for _ in range(n):
-            events += self._advance(out, syrup_out, dt / n)
+            events += self._advance(out, syrup_out, labeler_out, dt / n)
             s = self.filler.sensors()
             self._s6_seen |= s.s6
             self._s8_seen |= s.s8
+            if self.labeler is not None:
+                ls = self.labeler.sensors()
+                self._mark_seen |= ls.label_mark
+                self._spin_seen |= ls.spin_pulse
         return self.writes(), events
 
-    def _advance(self, out: FillerOutputs, syrup_out: SyrupOutputs, dt: float) -> list[Event]:
+    def _advance(
+        self, out: FillerOutputs, syrup_out: SyrupOutputs, labeler_out: LabelerOutputs, dt: float
+    ) -> list[Event]:
         """One physics step of at most SUBSTEP_S."""
         self.now += dt
         events: list[Event] = []
-        # Bottles flow from left to right: supply -> C1 -> filler -> C2 -> labeler
+        # Bottles flow from left to right: supply -> C1 -> filler -> C2 -> labeler (-> C3 -> packer)
         events += self.supply.step(dt, self.now)
         self.c1.step(out.conveyor1, dt)
         if self.syrup is not None:
             events += self.syrup.step(syrup_out, dt, self.now)
         events += self.filler.step(out, self.product_flows, dt, self.now)
         events += self._draw_from_buffer()
-        self.c2.step(self.labeler.motor_on, dt)
-        events += self.labeler.step(dt, self.now)
+        if self.labeler is None:
+            self.c2.step(self.labeler_standin.motor_on, dt)
+            events += self.labeler_standin.step(dt, self.now)
+            return events
+        self.c2.step(labeler_out.conveyor_motor2, dt)
+        events += self.labeler.step(labeler_out, dt, self.now)
+        self.c3.step(self.packer.motor_on, dt)
+        events += self.packer.step(dt, self.now)
         return events
 
     @property
@@ -238,3 +289,15 @@ class Plant:
         if self.syrup is None:
             return None
         return SyrupWrites(self.syrup.sensors(), self.e_stop_ok, self.syrup_heartbeat.value)
+
+    def labeler_writes(self) -> LabelerWrites | None:
+        """Current sensor and wiring values for the labeler PLC (None without a labeler).
+
+        Label_Mark and Spin_Pulse are ON if they were ON at any sub-step of the last tick (see step()).
+        """
+        if self.labeler is None:
+            return None
+        s = self.labeler.sensors()
+        s = replace(s, label_mark=s.label_mark or self._mark_seen, spin_pulse=s.spin_pulse or self._spin_seen)
+        return LabelerWrites(s, self.e_stop_ok, self.labeler_heartbeat.value,
+                             anim=(self.c3.slot_bits(), self.labeler.pocket_code()))
