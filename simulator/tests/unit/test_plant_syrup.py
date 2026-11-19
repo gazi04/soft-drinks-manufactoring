@@ -255,11 +255,11 @@ def test_the_whole_line_runs_ten_minutes_with_both_machines():
         log.extend(events)
         buffer_min, buffer_max = min(buffer_min, plant.syrup.buffer_l), max(buffer_max, plant.syrup.buffer_l)
         available_lost |= not w.product_available
-    print(f"batches {syrup_ctrl.batches}, bottles {plant.labeler.taken}, "
+    print(f"batches {syrup_ctrl.batches}, bottles {plant.labeler_standin.taken}, "
           f"buffer {buffer_min:.0f}..{buffer_max:.0f} L, steps {syrup_ctrl.steps_seen[:9]}")
     assert syrup_ctrl.batches >= 2
     assert syrup_ctrl.steps_seen[1] == DOSE_WATER  # the first batch started at once (buffer 500 < 800)
-    assert plant.labeler.taken >= 20
+    assert plant.labeler_standin.taken >= 20
     assert set(discharged(log)) == {"left filler (500 ml)"}
     assert warnings(log) == []
     assert not available_lost  # the draw scale leaves the buffer well above the PLC's BufferMin

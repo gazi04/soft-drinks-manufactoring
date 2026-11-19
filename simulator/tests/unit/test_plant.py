@@ -124,8 +124,8 @@ def test_twenty_bottles_through_the_line():
     plant, ctrl, log = Plant(), TestController(), EventLog(max_events=10_000)
     plant.supply.per_min = 0
     plant.supply.add(20)
-    run(plant, ctrl, log, 600.0, until=lambda: plant.labeler.taken == 20)
-    assert plant.labeler.taken == 20
+    run(plant, ctrl, log, 600.0, until=lambda: plant.labeler_standin.taken == 20)
+    assert plant.labeler_standin.taken == 20
     assert discharged(log) == ["left filler (500 ml)"] * 20
     assert warnings(log) == []
     assert plant.filler.lost == []
@@ -141,7 +141,7 @@ def test_supply_faster_than_filler_c1_fills_up():
 
 def test_labeler_stopped_blocks_without_crash_and_resumes():
     plant, ctrl, log = Plant(), TestController(), EventLog(max_events=10_000)
-    plant.labeler.running = False
+    plant.labeler_standin.running = False
     run(plant, ctrl, log, 300.0)
     assert plant.c2.count == 7  # queue stands at the S7 slot ...
     assert not plant.c2.occupied(0)  # ... and slot 0 stays free: the reserve was not needed
@@ -149,7 +149,7 @@ def test_labeler_stopped_blocks_without_crash_and_resumes():
     assert warnings(log) == []  # no crash on C2: S7 at slot 1 leaves room
 
     out_before = len(discharged(log))
-    plant.labeler.running = True
+    plant.labeler_standin.running = True
     run(plant, ctrl, log, 60.0)
     assert len(discharged(log)) > out_before  # flows again by itself
     assert warnings(log) == []
@@ -167,7 +167,7 @@ def test_s7_slot_choice_short_work_cycle(monkeypatch):
 
     def scenario() -> tuple[TestController, EventLog]:
         plant, ctrl, log = Plant(), TestController(), EventLog()
-        plant.labeler.running = False
+        plant.labeler_standin.running = False
         plant.supply.per_min = 0
         for i in range(1, 8):
             plant.c2.slots[i] = Bottle(100 + i)
@@ -205,7 +205,7 @@ def test_uneven_ticks_no_false_warnings():
     plant, ctrl, log = Plant(), TestController(), EventLog(max_events=100_000)
     run_jittered(plant, ctrl, log, 600.0, lambda: rnd.uniform(0.08, 0.2))
     assert warnings(log) == []
-    assert plant.labeler.taken >= 80
+    assert plant.labeler_standin.taken >= 80
 
 
 @pytest.mark.parametrize("seed", [1, 2, 3])

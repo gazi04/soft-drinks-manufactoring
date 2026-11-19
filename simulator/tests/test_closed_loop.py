@@ -63,7 +63,7 @@ async def main() -> None:
         raise SystemExit(f"no connection to {config.PLC_HOST}:{config.PLC_PORT}")
 
     def all_out() -> bool:
-        return plant.labeler.taken + plant.c2.count >= N
+        return plant.labeler_standin.taken + plant.c2.count >= N
 
     async def operator() -> None:
         await asyncio.sleep(2.0)  # heartbeat running for a while -> Reset can clear Alm_CommLost
@@ -76,7 +76,7 @@ async def main() -> None:
     progress = {"last": -1}
 
     def on_tick(stats: loop.LoopStats) -> None:
-        done = plant.labeler.taken + plant.c2.count
+        done = plant.labeler_standin.taken + plant.c2.count
         if done != progress["last"]:
             progress["last"] = done
             print(f"      {stats.seconds:6.1f} s  bottles out {done}/{N}")

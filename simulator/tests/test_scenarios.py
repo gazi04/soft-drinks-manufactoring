@@ -138,7 +138,7 @@ class Run:
 
     @property
     def out(self) -> int:
-        return self.plant.labeler.taken + self.plant.c2.count
+        return self.plant.labeler_standin.taken + self.plant.c2.count
 
     @property
     def good(self) -> int:
