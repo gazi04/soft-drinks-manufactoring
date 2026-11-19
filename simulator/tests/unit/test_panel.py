@@ -65,7 +65,7 @@ def test_switches_follow_the_plant_without_sending_commands(tmp_path):
     async def test():
         app = make_app(tmp_path)
         async with app.run_test(size=SIZE) as pilot:
-            app.plant.labeler.running = False  # e.g. a scenario changed it
+            app.plant.labeler_standin.running = False  # e.g. a scenario changed it
             await pilot.pause(0.4)  # one redraw
             assert app.query_one("#sw-labeler", Switch).value is False
             assert not any(t.startswith("command: labeler_running") for t in texts(app))
@@ -109,10 +109,14 @@ def test_filler_only_has_no_syrup_tab_and_no_syrup_scenarios(tmp_path):
         app = make_app(tmp_path)
         async with app.run_test(size=SIZE) as pilot:
             assert not app.query("#tab-syrup") and not app.query("#sw-chiller")
+            assert not app.query("#tab-labeler") and not app.query("#sw-web-torn")  # the labeler stand-in runs
             values = [value for _, value in scenario_options(app.has_syrup)]
             assert "gaps" in values and "low_syrup" not in values
             assert ("low_syrup [syrup]", "low_syrup") in scenario_options(True)
             await pilot.press("2")  # only a notice, the filler tab stays
+            await pilot.pause(0.1)
+            assert app.query_one("#tabs", TabbedContent).active == "tab-filler"
+            await pilot.press("3")  # no labeler tab either
             await pilot.pause(0.1)
             assert app.query_one("#tabs", TabbedContent).active == "tab-filler"
             await pilot.press("q")

@@ -1,5 +1,6 @@
 """ui/view.py: panel text built from the plant and the PLC status (no terminal).  uv run pytest"""
 
+from simulator import config
 from simulator.bottle import Bottle
 from simulator.events import Event
 from simulator.loop import LoopStats
@@ -144,3 +145,53 @@ def test_syrup_world_without_an_answer_and_without_a_syrup_room():
     text = view.syrup_world_text(plant).plain
     assert "syrup PLC not answering" in text and "Agitator ○" in text
     assert "--filler-only" in view.syrup_world_text(Plant()).plain
+
+
+def _labeler_plant():
+    from simulator.machines.filler import FillerOutputs
+    from simulator.machines.labeler import LabelerOutputs
+
+    plant = Plant(with_labeler=True)
+    lab = plant.labeler
+    lab.pocket = Bottle(11, label_mm=config.LABEL_LENGTH_MM)  # a labelled bottle in the pocket
+    lab.tank.temp_c = 165.2
+    lab.web.labels_left = 998
+    plant.c3.slots[config.C3_FULL_SLOT] = Bottle(10)
+    plant.step(FillerOutputs(), 0.0, labeler=LabelerOutputs(conveyor_motor2=True, clamp_valve=True, glue_heater=True))
+    return plant
+
+
+def test_labeler_world_shows_sensor_values_and_output_lamps():
+    plant = _labeler_plant()
+    text = view.labeler_world_text(plant).plain
+    assert "Pocket   11  label 100%" in text and "Bottle_In_Pocket ●" in text and "Label_Present ●" in text
+    assert "165.2 °C" in text and "4.0 / 5 kg" in text and "998 / 1000 labels" in text
+    assert "ConveyorMotor2 ●" in text and "ClampValve ●" in text and "GlueHeater ●" in text
+    assert "SpinMotor ○" in text and "Cutter ○" in text and "C3_Full ●" in text  # C3 sensor slot taken
+    assert "Packer   running" in text and "Count    discharged 0" in text
+    assert "not answering" not in text
+    for marker in ("JAMMED", "STUCK", "TORN", "FAILED", "STOPPED", "FROZEN"):
+        assert marker not in text
+    assert max(len(line) for line in text.splitlines()) <= 86  # fits the world column at 140 columns
+
+
+def test_labeler_world_marks_every_injected_fault():
+    plant = _labeler_plant()
+    lab = plant.labeler
+    lab.web.torn = lab.bell_stuck = lab.gate_jammed = True
+    lab.tank.heater_failed = lab.tank.heater_stuck_on = True
+    plant.packer.running = False
+    plant.labeler_heartbeat.enabled = False
+    text = view.labeler_world_text(plant).plain
+    assert "GATE JAMMED" in text and "BELL STUCK" in text and "WEB TORN" in text
+    assert "HEATER FAILED  STUCK ON" in text and "Packer   STOPPED" in text and "FROZEN" in text
+    assert max(len(line) for line in text.splitlines()) <= 86
+    lab.tank.heater_failed = False
+    assert "HEATER STUCK ON" in view.labeler_world_text(plant).plain
+
+
+def test_labeler_world_without_an_answer_and_without_a_labeler():
+    plant = Plant(with_labeler=True)  # no step yet: the PLC never answered
+    text = view.labeler_world_text(plant).plain
+    assert "labeler PLC not answering" in text and "ConveyorMotor2 ○" in text
+    assert "--no-labeler" in view.labeler_world_text(Plant()).plain

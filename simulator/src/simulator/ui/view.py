@@ -6,6 +6,7 @@ and the screen code in app.py stays small.
 
     world_text(plant)            the physical truth: bottles, pockets, sensor lamps
     syrup_world_text(plant)      the syrup room's truth: tanks, temperature, pressure, outputs, faults
+    labeler_world_text(plant)    the labeler's truth: gate, pocket, label roll, glue tank, C3, outputs, faults
     header_text(stats, plc)      what the PLC reports: link, step, state, alarms
     scenario_text(slot)          which scenario runs and how far it is
     event_style(event)           colour of one log line
@@ -20,15 +21,19 @@ from simulator.conveyor import Conveyor
 from simulator.events import Event, Source
 from simulator.loop import LoopStats
 from simulator.machines.filler import CAP, ENTRY, FILL, RINSE
+from simulator.machines.labeler import LabelerOutputs
 from simulator.machines.syrup import SyrupOutputs
 from simulator.plant import Plant
 from simulator.plcs import (
+    LABELER_STATE_NAMES,
+    LABELER_STEP_NAMES,
     MODE_NAMES,
     STATE_NAMES,
     STEP_NAMES,
     SYRUP_STATE_NAMES,
     SYRUP_STEP_NAMES,
     FillerPlc,
+    LabelerPlc,
     SyrupPlc,
 )
 from simulator.scenarios import ScenarioSlot
@@ -89,8 +94,11 @@ def world_text(plant: Plant) -> Text:
     t.append(f"C2       {conveyor_text(plant.c2)}   ")
     t.append_text(lamp("S7", s.s7))
     t.append("\n")
-    labeler = "running" if plant.labeler.running else "STOPPED"
-    t.append(f"Labeler  {labeler}, taken {plant.labeler.taken}   lost {len(f.lost)}\n\n")
+    if plant.labeler_standin is not None:
+        labeler = "running" if plant.labeler_standin.running else "STOPPED"
+        t.append(f"Labeler  {labeler}, taken {plant.labeler_standin.taken}   lost {len(f.lost)}\n\n")
+    else:  # the real labeler: its own tab 3
+        t.append(f"Labeler  real machine (tab 3), discharged {plant.labeler.discharged}   lost {len(f.lost)}\n\n")
 
     t.append("Wires    ")
     t.append_text(lamp("Product", s.product_available))
@@ -184,6 +192,91 @@ def syrup_world_text(plant: Plant) -> Text:
     return t
 
 
+LABELER_LAMP_COL = 46  # "C2       " + a conveyor (35 characters) + 2 spaces
+
+
+def labeler_world_text(plant: Plant) -> Text:
+    """The labeler's physical truth: gate, pocket, label roll, glue tank, C3, PLC outputs, injected faults.
+
+    Lamps on the left of a pair are SENSORS as written to the labeler PLC (like the other tabs), the
+    others are the labeler PLC's OUTPUTS from the last tick; red markers for every injected fault.
+    """
+    lab = plant.labeler
+    if lab is None:
+        return Text("no real labeler (started with --no-labeler / --filler-only)", style="dim")
+    t = Text()
+    w = plant.labeler_writes()
+    s = w.sensors
+    out = plant.labeler_outputs if plant.labeler_outputs is not None else LabelerOutputs()  # no answer: OFF
+
+    def left(text: str) -> None:  # left part of a line; the lamps start in the same column on every line
+        t.append(text.ljust(LABELER_LAMP_COL))
+
+    def lamps(*pairs: tuple[str, bool]) -> None:
+        for i, (name, on) in enumerate(pairs):
+            t.append("  " if i else "")
+            t.append_text(lamp(name, on))
+
+    left(f"C2       {conveyor_text(plant.c2)}")
+    lamps(("Bottle_At_Gate", s.bottle_at_gate), ("ConveyorMotor2", out.conveyor_motor2))
+    t.append("\n")
+    left(f"Gate     entering {lab.entering.id if lab.entering else 'none'}")
+    lamps(("GateMotor", out.gate_motor))
+    _fault(t, lab.gate_jammed, "GATE JAMMED")
+    t.append("\n\n")
+
+    pocket = lab.pocket
+    share = f"label {pocket.label_mm / config.LABEL_LENGTH_MM:.0%}" if pocket else ""
+    left(f"Pocket   {pocket.id if pocket else 'empty'}  {share}")
+    lamps(("Bottle_In_Pocket", s.bottle_in_pocket), ("Label_Present", s.label_present))
+    t.append("\n")
+    left(f"         bell {'down' if s.bell_down else 'up'}  turns {lab.turns:.0f}")
+    lamps(("Bell_Down", s.bell_down), ("Spin_Pulse", s.spin_pulse))
+    _fault(t, lab.bell_stuck, "BELL STUCK")
+    t.append("\n")
+    left("")
+    lamps(("ClampValve", out.clamp_valve), ("SpinMotor", out.spin_motor))
+    t.append("\n\n")
+
+    web = lab.web
+    left(f"Roll     {level_bar(web.labels_left, config.ROLL_LABELS)} {web.labels_left:>5} / {config.ROLL_LABELS} labels")
+    lamps(("Roll_Low", s.roll_low), ("Roll_Empty", s.roll_empty))
+    _fault(t, web.torn, "WEB TORN")
+    t.append("\n")
+    left(f"         lost {web.lost_mm:.0f} mm of web")
+    lamps(("Label_Mark", s.label_mark), ("LabelFeed", out.label_feed), ("Cutter", out.cutter))
+    t.append("\n")
+    tank = lab.tank
+    left(f"Glue     {s.glue_temp / 10:>5.1f} °C {level_bar(tank.glue_kg, config.GLUE_TANK_KG)} "
+         f"{tank.glue_kg:.1f} / {config.GLUE_TANK_KG:g} kg")
+    lamps(("Glue_Low", s.glue_low), ("GlueHeater", out.glue_heater))
+    t.append("\n")
+    left("")
+    lamps(("GlueRoller", out.glue_roller))
+    _fault(t, tank.heater_failed, "HEATER FAILED")
+    _fault(t, tank.heater_stuck_on, "STUCK ON" if tank.heater_failed else "HEATER STUCK ON")  # both: fits 86
+    t.append("\n\n")
+
+    left(f"C3       {conveyor_text(plant.c3)}")
+    lamps(("C3_Full", s.c3_full), ("DischargeMotor", out.discharge_motor))
+    t.append("\n")
+    t.append("Packer   ")
+    if plant.packer.running:
+        t.append("running")
+    else:  # packer_running = False: C3 fills up
+        t.append("STOPPED", style="bold red")
+    t.append(f", taken {plant.packer.taken}\n\n")
+
+    t.append("Wires    ")
+    lamps(("E_Stop_OK", w.e_stop_ok), ("Heartbeat", w.heartbeat))
+    _fault(t, not plant.labeler_heartbeat.enabled, "FROZEN")
+    t.append(f"\nCount    discharged {lab.discharged}  labelled {lab.labelled}  lost {len(lab.lost)}  "
+             f"removed by hand {len(lab.removed)}")
+    if plant.labeler_outputs is None:
+        t.append("\nlabeler PLC not answering: outputs taken as OFF, C2 stands", style="bold red")
+    return t
+
+
 def syrup_header_text(stats: LoopStats | None, plc: SyrupPlc) -> Text:
     """The syrup room PLC's line under the filler's (link, mode, step, state, batches, alarms)."""
     t = Text()
@@ -208,12 +301,41 @@ def syrup_header_text(stats: LoopStats | None, plc: SyrupPlc) -> Text:
     return t
 
 
-def header_text(stats: LoopStats | None, plc: FillerPlc, syrup_plc: SyrupPlc | None = None) -> Text:
-    """The filler PLC's line, and under it the syrup room PLC's when there is one."""
+def labeler_header_text(stats: LoopStats | None, plc: LabelerPlc) -> Text:
+    """The labeler PLC's line (link, mode, step, state, GoodCount, alarms), like the syrup room's."""
+    t = Text()
+    link = "up" if plc.link_ok else "not connected"
+    t.append(f"labeler PLC {plc.host}:{plc.port} {link}", style="green" if plc.link_ok else "bold red")
+    status = stats.labeler_status if stats else None
+    if status is None:
+        return t
+    mode = MODE_NAMES.get(status.mode, status.mode)
+    t.append(f"  │  mode {mode}", style="" if status.mode == MODE_AUTO else "bold yellow")
+    t.append(f"  │  step {LABELER_STEP_NAMES.get(status.step, status.step)}"
+             f"  │  state {LABELER_STATE_NAMES.get(status.state, status.state)}"
+             f"  │  GoodCount {status.good_count}  │  ")
+    active = [name for name, on in status.alarms.items() if on]
+    t.append(f"alarms: {', '.join(active)}" if active else "alarms: none", style="bold red" if active else "")
+    if status.mode != MODE_AUTO:
+        t.append(f"\nlabeler mode {mode}: Start is ignored. Auto + start:  uv run python tests/hmi.py --labeler auto reset start",
+                 style="yellow")
+    elif status.step == IDLE:
+        t.append("\nlabeler PLC in IDLE: start it with  uv run python tests/hmi.py --labeler auto reset start",
+                 style="yellow")
+    return t
+
+
+def header_text(
+    stats: LoopStats | None, plc: FillerPlc, syrup_plc: SyrupPlc | None = None, labeler_plc: LabelerPlc | None = None
+) -> Text:
+    """The filler PLC's line, and under it the syrup room's and the labeler's when there are ones."""
     t = filler_header_text(stats, plc)
     if syrup_plc is not None:
         t.append("\n")
         t.append_text(syrup_header_text(stats, syrup_plc))
+    if labeler_plc is not None:
+        t.append("\n")
+        t.append_text(labeler_header_text(stats, labeler_plc))
     return t
 
 

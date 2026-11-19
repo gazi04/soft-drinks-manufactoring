@@ -3,7 +3,7 @@
 import pytest
 
 from simulator import config
-from simulator.commands import COMMANDS, SYRUP_COMMANDS, Command, CommandQueue
+from simulator.commands import COMMANDS, LABELER_COMMANDS, SYRUP_COMMANDS, Command, CommandQueue
 from simulator.events import Source
 from simulator.plant import Plant
 
@@ -25,7 +25,7 @@ def test_every_command_sets_its_attribute():
     assert applied("e_stop", True).e_stop_ok is False  # pressed = chain open
     assert applied("e_stop", False).e_stop_ok is True
     assert applied("index_jam", True).filler.index_jammed is True
-    assert applied("labeler_running", False).labeler.running is False
+    assert applied("labeler_running", False).labeler_standin.running is False
     assert applied("heartbeat", False).heartbeat.enabled is False
 
 
@@ -80,11 +80,56 @@ def test_a_syrup_command_without_a_syrup_room_is_ignored_with_a_warning():
     assert len(events) == 1 and events[0].is_warning and "ignored" in events[0].text
 
 
+LABELER_COMMANDS_TESTED = {
+    "web_torn", "bell_stuck", "heater_failed", "heater_stuck_on", "gate_jam", "clear_gate", "load_roll",
+    "glue_level", "add_glue", "packer_running", "labeler_heartbeat",
+}
+
+
+def applied_labeler(name, value) -> Plant:
+    plant = Plant(with_labeler=True)
+    q = CommandQueue()
+    q.put(name, value)
+    q.apply(plant)
+    return plant
+
+
+def test_every_labeler_command_sets_its_attribute():
+    from simulator.bottle import Bottle
+
+    assert applied_labeler("web_torn", True).labeler.web.torn is True
+    assert applied_labeler("bell_stuck", True).labeler.bell_stuck is True
+    assert applied_labeler("heater_failed", True).labeler.tank.heater_failed is True
+    assert applied_labeler("heater_stuck_on", True).labeler.tank.heater_stuck_on is True
+    assert applied_labeler("gate_jam", True).labeler.gate_jammed is True
+    assert applied_labeler("load_roll", 2).labeler.web.labels_left == 2
+    assert applied_labeler("glue_level", 0.9).labeler.tank.glue_kg == 0.9
+    assert applied_labeler("glue_level", 9.0).labeler.tank.glue_kg == config.GLUE_TANK_KG  # what fits
+    assert applied_labeler("add_glue", 0.5).labeler.tank.glue_kg == config.GLUE_START_KG + 0.5
+    assert applied_labeler("packer_running", False).packer.running is False
+    plant = applied_labeler("labeler_heartbeat", False)
+    assert plant.labeler_heartbeat.enabled is False and plant.heartbeat.enabled is True  # only the labeler PLC's
+    for value, kept in ((True, False), (False, True)):  # clear_gate is an action: False does nothing
+        plant, q = Plant(with_labeler=True), CommandQueue()
+        plant.labeler.entering = Bottle(id=3)
+        q.put("clear_gate", value)
+        q.apply(plant)
+        assert (plant.labeler.entering is not None) is kept and len(plant.labeler.removed) == (0 if kept else 1)
+
+
+def test_labeler_commands_are_marked_and_ignored_without_the_real_labeler():
+    assert LABELER_COMMANDS == LABELER_COMMANDS_TESTED
+    plant, q = Plant(), CommandQueue()  # the stand-in
+    q.put("web_torn", True)
+    events = q.apply(plant)
+    assert len(events) == 1 and events[0].is_warning and "--no-labeler" in events[0].text
+
+
 def test_every_command_is_tested_above():
     assert set(COMMANDS) == {
         "supply_rate", "add_bottles", "supply_paused", "fill_flow", "product_available",
         "e_stop", "index_jam", "labeler_running", "heartbeat",
-    } | SYRUP_COMMANDS_TESTED
+    } | SYRUP_COMMANDS_TESTED | LABELER_COMMANDS_TESTED
 
 
 @pytest.mark.parametrize(

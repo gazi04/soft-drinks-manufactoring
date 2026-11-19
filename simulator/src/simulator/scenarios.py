@@ -19,9 +19,10 @@ simulator never writes them (one-writer rule). A fault scenario therefore ends
 by removing the cause (jam cleared, heartbeat on) and prints a note saying what
 the operator has to press.
 
-A scenario has a `target`: "filler" (default) or "syrup". Its conditions look at the status of that
-PLC (both status types have .step / .state / .alarms). A syrup scenario needs the syrup room in the
-plant (not --filler-only); the operator presses Reset / Start with `tests/hmi.py --syrup ...`.
+A scenario has a `target`: "filler" (default), "syrup" or "labeler". Its conditions look at the status of
+that PLC (every status type has .step / .state / .alarms). A syrup scenario needs the syrup room in the
+plant (not --filler-only); the operator presses Reset / Start with `tests/hmi.py --syrup ...`. A labeler
+scenario needs the real labeler (not --no-labeler); Reset / Start with `tests/hmi.py --labeler ...`.
 Faults that leave a mark the PLC cannot clear itself (tank full of water, 7 bar in the headspace)
 end with the maintenance command (drain_mix_tank, vent_tank) before the note.
 """
@@ -30,16 +31,19 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from simulator import config
-from simulator.commands import SYRUP_COMMANDS, Command, check
+from simulator.commands import LABELER_COMMANDS, SYRUP_COMMANDS, Command, check
 from simulator.events import Event
 from simulator.plant import Plant
-from simulator.plcs import PlcStatus, SyrupStatus
+from simulator.plcs import LabelerStatus, PlcStatus, SyrupStatus
 
 # PLC step and state numbers (plcs.STEP_NAMES / STATE_NAMES)
 IDLE, INDEX, FAULT = 0, 20, 900
 BLOCKED = 3
 # Syrup room steps (plcs.SYRUP_STEP_NAMES)
 S_WAIT_DEMAND, S_DOSE_WATER, S_MIX, S_COOL, S_CARBONATE, S_TRANSFER = 5, 10, 30, 40, 50, 60
+# Labeler steps (plcs.LABELER_STEP_NAMES)
+L_WAIT_BOTTLE, L_PRESS, L_DISCHARGE = 10, 24, 40
+TARGETS = ("filler", "syrup", "labeler")
 
 
 @dataclass(frozen=True)
@@ -100,16 +104,23 @@ class Scenario:
     name: str
     description: str
     steps: tuple[Step, ...]
-    target: str = "filler"  # which PLC's status the conditions see: "filler" or "syrup"
+    target: str = "filler"  # which PLC's status the conditions see: "filler", "syrup" or "labeler"
 
     def __post_init__(self) -> None:
-        if self.target not in ("filler", "syrup"):
-            raise ValueError(f"scenario {self.name}: target must be 'filler' or 'syrup', got {self.target!r}")
+        if self.target not in TARGETS:
+            raise ValueError(f"scenario {self.name}: target must be one of {TARGETS}, got {self.target!r}")
         for step in self.steps:  # a typo in a scenario fails when it is defined, not mid-run
             if step.command is not None:
                 check(step.command)
-                if self.target == "filler" and step.command.name in SYRUP_COMMANDS:
+                if self.target != "syrup" and step.command.name in SYRUP_COMMANDS:
                     raise ValueError(f"scenario {self.name}: {step.command.name} needs target='syrup'")
+                if self.target != "labeler" and step.command.name in LABELER_COMMANDS:
+                    raise ValueError(f"scenario {self.name}: {step.command.name} needs target='labeler'")
+
+
+def uses_command(scenario: Scenario, name: str) -> bool:
+    """True if one of the scenario's steps sends the command `name` (e.g. labeler_running needs the stand-in)."""
+    return any(step.command is not None and step.command.name == name for step in scenario.steps)
 
 
 class ScenarioRunner:
@@ -125,13 +136,20 @@ class ScenarioRunner:
         return self.index >= len(self.scenario.steps)
 
     def due(
-        self, plant: Plant, status: PlcStatus | None, syrup_status: SyrupStatus | None = None
+        self,
+        plant: Plant,
+        status: PlcStatus | None,
+        syrup_status: SyrupStatus | None = None,
+        labeler_status: LabelerStatus | None = None,
     ) -> tuple[list[Command], list[Event]]:
         """Commands of every step that is due now (several if they follow at once).
 
-        Conditions see `syrup_status` in a syrup scenario, `status` (the filler) otherwise."""
+        Conditions see `syrup_status` in a syrup scenario, `labeler_status` in a labeler scenario,
+        `status` (the filler) otherwise."""
         if self.scenario.target == "syrup":
             status = syrup_status
+        elif self.scenario.target == "labeler":
+            status = labeler_status
         if self._since is None:
             self._since = plant.now  # the timeline starts with the first tick
         commands: list[Command] = []
@@ -167,11 +185,15 @@ class ScenarioSlot:
         self.runner = ScenarioRunner(scenario)
 
     def due(
-        self, plant: Plant, status: PlcStatus | None, syrup_status: SyrupStatus | None = None
+        self,
+        plant: Plant,
+        status: PlcStatus | None,
+        syrup_status: SyrupStatus | None = None,
+        labeler_status: LabelerStatus | None = None,
     ) -> tuple[list[Command], list[Event]]:
         if self.runner is None:
             return [], []
-        return self.runner.due(plant, status, syrup_status)
+        return self.runner.due(plant, status, syrup_status, labeler_status)
 
 
 # --- Built-in scenarios ------------------------------------------------------------
@@ -180,6 +202,7 @@ def _c(name: str, value) -> Command:
 
 
 RESET_START = "cause removed: press Reset + Start on the HMI (tests/hmi.py reset start)"
+RESET_START_LABELER = "cause removed: press Reset + Start on the labeler (tests/hmi.py --labeler reset start)"
 
 SCENARIOS: dict[str, Scenario] = {
     s.name: s
@@ -280,5 +303,51 @@ SCENARIOS: dict[str, Scenario] = {
             Step(0, _c("buffer_draw_scale", config.BUFFER_DRAW_SCALE)),
             Step(product_available()),
         ), target="syrup"),
+        # --- Labeler (target="labeler"): press Reset + Start with `tests/hmi.py --labeler ...` ----------
+        Scenario("web_torn", "label web torn before a bottle: WRAP sees no Label_Mark, Alm_LabelTimeout after 5 s, FAULT", (
+            Step(plc_running()),
+            Step(in_step(L_WAIT_BOTTLE), _c("web_torn", True)),  # between two bottles: no half label
+            Step(alarm("Alm_LabelTimeout")),
+            Step(2, _c("web_torn", False), RESET_START_LABELER + "; web threaded again, the bottle is labelled"),
+        ), target="labeler"),
+        Scenario("bell_stuck", "bell stuck down in PRESS: UNCLAMP sees Bell_Down, Alm_PocketJam after 2 s, FAULT", (
+            Step(plc_running()),
+            Step(in_step(L_PRESS), _c("bell_stuck", True)),
+            Step(alarm("Alm_PocketJam")),
+            Step(2, _c("bell_stuck", False), RESET_START_LABELER + "; bell freed, the labelled bottle is discharged"),
+        ), target="labeler"),
+        Scenario("heater_failed", "glue heater burnt out: WARM_UP never ready, Alm_GlueHeatTimeout after 120 s, FAULT", (
+            Step(plc_running(), _c("heater_failed", True)),
+            Step(alarm("Alm_GlueHeatTimeout")),
+            Step(2, _c("heater_failed", False), RESET_START_LABELER + "; heater replaced, warm-up again"),
+        ), target="labeler"),
+        Scenario("heater_stuck_on", "glue heater stuck on: GlueTemp reaches 200 degC, Alm_GlueOverTemp, FAULT", (
+            Step(plc_running()),
+            Step(in_step(L_WAIT_BOTTLE), _c("heater_stuck_on", True)),
+            Step(alarm("Alm_GlueOverTemp")),
+            Step(2, _c("heater_stuck_on", False),
+                 RESET_START_LABELER + " once GlueTemp < 200 degC; WARM_UP until the glue is back in the window"),
+        ), target="labeler"),
+        Scenario("roll_empty", "label roll runs empty: Starved + Alm_LabelEmpty, no FAULT, continues after the roll change", (
+            Step(plc_running(), _c("load_roll", 2)),  # a roll with 2 labels left
+            Step(alarm("Alm_LabelEmpty")),
+            Step(5, _c("load_roll", config.ROLL_LABELS), "new roll loaded: the labeler continues by itself, no Reset"),
+        ), target="labeler"),
+        Scenario("glue_refill", "glue low, then cold glue blocks: Glue_Low warning, WARM_UP after the bottle, no FAULT", (
+            Step(plc_running(), _c("glue_level", 0.9)),  # below GLUE_LOW_KG: Glue_Low
+            Step(in_step(L_DISCHARGE), _c("add_glue", 1.0)),  # the label is on: the cold glue hits no wrap
+        ), target="labeler"),
+        Scenario("gate_jam", "bottle stuck in the gate: Bottle_Entering 2 s, Alm_PocketJam, FAULT", (
+            Step(plc_running()),
+            Step(in_step(L_WAIT_BOTTLE), _c("gate_jam", True)),
+            Step(alarm("Alm_PocketJam")),
+            Step(2, _c("clear_gate", True)),  # the operator takes the stuck bottle away
+            Step(0, _c("gate_jam", False), RESET_START_LABELER + "; gate cleared, the next bottle comes"),
+        ), target="labeler"),
+        Scenario("packer_stopped", "packer stops: C3 fills, WAIT_OUTFEED (Blocked), warning after 2 min, continues by itself", (
+            Step(plc_running()),
+            Step(5, _c("packer_running", False)),
+            Step(alarm("Alm_OutfeedBlocked"), _c("packer_running", True)),
+        ), target="labeler"),
     )
 }

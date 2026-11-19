@@ -1,11 +1,11 @@
 """The control panel: the engineer's test bench (report section 7.5).
 
     ┌ header: filler PLC line, syrup PLC line (link, step, state, alarms, counter, dt) ─┐
-    │ [1 Filler] [2 Syrup room]   one tab per machine, same layout in each:             │
+    │ [1 Filler] [2 Syrup room] [3 Labeler]   one tab per machine, same layout in each: │
     │   world: the physical truth                 │ controls: values, faults, switches  │
     ├ scenario: [select] Run  status   (one row for every machine) ──────────────────────┤
     ├ event log (filter with l) ───────────────────────────────────────────────────────┤
-    └ footer: q quit, l log filter, 1 / 2 tabs ──────────────────────────────────────────┘
+    └ footer: q quit, l log filter, 1 / 2 / 3 tabs ──────────────────────────────────────┘
 
 How it runs:
 - The tick loop (loop.run) is a Textual worker. Textual and the loop share one
@@ -16,7 +16,8 @@ How it runs:
 - The panel only CHANGES THE WORLD (supply, faults, stand-in signals, tank
   actions). It never writes Cmd, mode or setpoints: Start / Stop / Reset belong
   to the HMI (tests/hmi.py until FUXA exists).
-- The syrup room tab exists only when the plant has a syrup room (not --filler-only).
+- The syrup room tab exists only when the plant has a syrup room (not --filler-only), the labeler
+  tab only with the real labeler (not --no-labeler / --filler-only).
 """
 
 import asyncio
@@ -43,8 +44,8 @@ from simulator import config, loop
 from simulator.commands import CommandQueue
 from simulator.events import Event, EventLog
 from simulator.plant import Plant
-from simulator.plcs import FillerPlc, SyrupPlc
-from simulator.scenarios import SCENARIOS, ScenarioSlot
+from simulator.plcs import FillerPlc, LabelerPlc, SyrupPlc
+from simulator.scenarios import SCENARIOS, ScenarioSlot, uses_command
 from simulator.ui import view
 
 # switch id -> (command, the plant value the switch shows, label)
@@ -54,7 +55,7 @@ SWITCHES: Switches = {
     "sw-product": ("product_available", lambda p: p.product_available, "Product available"),
     "sw-estop": ("e_stop", lambda p: not p.e_stop_ok, "E-stop pressed"),
     "sw-jam": ("index_jam", lambda p: p.filler.index_jammed, "Index belt jam"),
-    "sw-labeler": ("labeler_running", lambda p: p.labeler.running, "Labeler running"),
+    "sw-labeler": ("labeler_running", lambda p: p.labeler_standin is not None and p.labeler_standin.running, "Labeler running"),
     "sw-heartbeat": ("heartbeat", lambda p: p.heartbeat.enabled, "Heartbeat"),
 }
 # Syrup room tab: only used when plant.syrup exists (the lambdas read plant.syrup)
@@ -65,6 +66,16 @@ SYRUP_SWITCHES: Switches = {
     "sw-co2": ("co2_valve_stuck", lambda p: p.syrup.co2_valve_stuck, "CO2 valve stuck"),
     "sw-level": ("mix_level_stuck", lambda p: p.syrup.mix_level_frozen is not None, "Level sensor stuck"),
     "sw-syrup-hb": ("syrup_heartbeat", lambda p: p.syrup_heartbeat.enabled, "Heartbeat"),
+}
+# Labeler tab: only used when plant.labeler exists (the lambdas read plant.labeler / plant.packer)
+LABELER_SWITCHES: Switches = {
+    "sw-web-torn": ("web_torn", lambda p: p.labeler.web.torn, "Label web torn"),
+    "sw-bell": ("bell_stuck", lambda p: p.labeler.bell_stuck, "Bell stuck"),
+    "sw-heater-failed": ("heater_failed", lambda p: p.labeler.tank.heater_failed, "Heater failed"),
+    "sw-heater-on": ("heater_stuck_on", lambda p: p.labeler.tank.heater_stuck_on, "Heater stuck on"),
+    "sw-gate-jam": ("gate_jam", lambda p: p.labeler.gate_jammed, "Gate jam"),
+    "sw-packer": ("packer_running", lambda p: p.packer.running, "Packer running"),
+    "sw-labeler-hb": ("labeler_heartbeat", lambda p: p.labeler_heartbeat.enabled, "Heartbeat"),
 }
 
 # button id -> (input id, command, type of the value)
@@ -78,20 +89,34 @@ VALUE_BUTTONS: dict[str, tuple[str, str, type]] = {
     "bt-draw": ("in-draw", "draw_buffer", float),
     "bt-fill": ("in-fill", "fill_buffer", float),
     "bt-scale": ("in-scale", "buffer_draw_scale", float),
+    # labeler
+    "bt-roll": ("in-roll", "load_roll", int),
+    "bt-glue-level": ("in-glue-level", "glue_level", float),
+    "bt-add-glue": ("in-add-glue", "add_glue", float),
 }
 
 # button id -> command sent with True: one-off hand actions, not states (nothing to show on a switch)
 ACTION_BUTTONS: dict[str, str] = {
     "bt-vent": "vent_tank",
     "bt-drain-mix": "drain_mix_tank",
+    "bt-clear-gate": "clear_gate",
 }
 
 REFRESH_S = 0.25
 
 
-def scenario_options(with_syrup: bool) -> list[tuple[str, str]]:
-    """(label, name) for the scenario select; without a syrup room its scenarios are not offered."""
-    return [(f"{s.name} [{s.target}]", s.name) for s in SCENARIOS.values() if s.target == "filler" or with_syrup]
+def scenario_options(with_syrup: bool, with_labeler: bool = False) -> list[tuple[str, str]]:
+    """(label, name) for the scenario select. Only what the plant can run is offered: syrup scenarios need
+    the syrup room, labeler scenarios the real labeler, and a scenario that stops the labeler stand-in
+    (labeler_stopped) needs the stand-in."""
+    def offered(s) -> bool:
+        if s.target == "syrup":
+            return with_syrup
+        if s.target == "labeler":
+            return with_labeler
+        return not (with_labeler and uses_command(s, "labeler_running"))
+
+    return [(f"{s.name} [{s.target}]", s.name) for s in SCENARIOS.values() if offered(s)]
 
 
 class SimulatorApp(App):
@@ -122,16 +147,18 @@ class SimulatorApp(App):
         ("l", "next_filter", "Log filter"),
         ("1", "tab('tab-filler')", "Filler"),
         ("2", "tab('tab-syrup')", "Syrup room"),
+        ("3", "tab('tab-labeler')", "Labeler"),
     ]
 
     def __init__(
         self, plant: Plant, plc: FillerPlc, log_path: Path | None, scenario: str | None = None,
-        syrup_plc: SyrupPlc | None = None,
+        syrup_plc: SyrupPlc | None = None, labeler_plc: LabelerPlc | None = None,
     ) -> None:
         super().__init__()
         self.plant = plant
         self.plc = plc
         self.syrup_plc = syrup_plc  # the second PLC (None = filler only)
+        self.labeler_plc = labeler_plc  # the third PLC (None = labeler stand-in, no labeler tab)
         self.queue = CommandQueue()
         self.slot = ScenarioSlot()
         if scenario:
@@ -148,9 +175,18 @@ class SimulatorApp(App):
     def has_syrup(self) -> bool:
         return self.plant.syrup is not None
 
+    @property
+    def has_labeler(self) -> bool:
+        return self.plant.labeler is not None
+
     def _switches(self) -> Switches:
-        """The switches that exist on this panel (the syrup ones only with a syrup room)."""
-        return {**SWITCHES, **SYRUP_SWITCHES} if self.has_syrup else SWITCHES
+        """The switches that exist on this panel (syrup ones only with a syrup room, labeler ones only with the labeler)."""
+        switches = dict(SWITCHES)
+        if self.has_syrup:
+            switches |= SYRUP_SWITCHES
+        if self.has_labeler:
+            switches |= LABELER_SWITCHES
+        return switches
 
     # --- Layout ----------------------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -184,10 +220,26 @@ class SimulatorApp(App):
                                 classes="row switch-row",
                             )
                             yield from self._switch_rows(SYRUP_SWITCHES)
+            if self.has_labeler:
+                with TabPane("3 Labeler", id="tab-labeler"):
+                    with Horizontal(classes="main"):
+                        yield Static(id="labeler-world", classes="world")
+                        with VerticalScroll(classes="controls"):
+                            yield self._value_row("Load roll labels", "in-roll", f"{config.ROLL_LABELS}", "integer",
+                                                  "bt-roll", "Load")
+                            yield self._value_row("Glue level kg", "in-glue-level", f"{config.GLUE_START_KG:g}",
+                                                  "number", "bt-glue-level", "Set")
+                            yield self._value_row("Add glue kg", "in-add-glue", "1", "number", "bt-add-glue", "Add")
+                            yield Horizontal(
+                                Button("Clear gate", id="bt-clear-gate", compact=True),
+                                classes="row switch-row",
+                            )
+                            yield from self._switch_rows(LABELER_SWITCHES)
         # One scenario row for every machine
         yield Horizontal(
             Label("Scenario"),
-            Select(scenario_options(self.has_syrup), id="in-scenario", compact=True, prompt="choose"),
+            Select(scenario_options(self.has_syrup, self.has_labeler), id="in-scenario", compact=True,
+                   prompt="choose"),
             Button("Run", id="bt-scenario", compact=True),
             Static(id="scenario-status"),
             id="scenario-row",
@@ -221,7 +273,7 @@ class SimulatorApp(App):
         self.stats = await loop.run(
             self.plc, self.plant, self.events,
             stop=self._stop, on_tick=self._on_tick, commands=self.queue, scenario=self.slot,
-            syrup_plc=self.syrup_plc,
+            syrup_plc=self.syrup_plc, labeler_plc=self.labeler_plc,
         )
 
     def _on_tick(self, stats: loop.LoopStats) -> None:
@@ -229,10 +281,12 @@ class SimulatorApp(App):
 
     # --- Redraw ----------------------------------------------------------------------
     def refresh_view(self) -> None:
-        self.query_one("#header", Static).update(view.header_text(self.stats, self.plc, self.syrup_plc))
+        self.query_one("#header", Static).update(view.header_text(self.stats, self.plc, self.syrup_plc, self.labeler_plc))
         self.query_one("#world", Static).update(view.world_text(self.plant))
         if self.has_syrup:
             self.query_one("#syrup-world", Static).update(view.syrup_world_text(self.plant))
+        if self.has_labeler:
+            self.query_one("#labeler-world", Static).update(view.labeler_world_text(self.plant))
         self.query_one("#scenario-status", Static).update(view.scenario_text(self.slot))
         # A queued command is applied at the next tick: until then the plant still has the
         # old value, and syncing now would flip the switch back for a moment.
@@ -289,9 +343,12 @@ class SimulatorApp(App):
 
     # --- Tabs ------------------------------------------------------------------------
     def action_tab(self, tab_id: str) -> None:
-        """Keys 1 / 2: show a machine's tab (the syrup tab only exists with a syrup room)."""
+        """Keys 1 / 2 / 3: show a machine's tab (syrup tab only with a syrup room, labeler tab only with the labeler)."""
         if tab_id == "tab-syrup" and not self.has_syrup:
             self.notify("no syrup room tab (started with --filler-only)", severity="warning")
+            return
+        if tab_id == "tab-labeler" and not self.has_labeler:
+            self.notify("no labeler tab (started with --no-labeler / --filler-only)", severity="warning")
             return
         self.query_one("#tabs", TabbedContent).active = tab_id
 
@@ -324,5 +381,7 @@ class SimulatorApp(App):
         self.plc.close()
         if self.syrup_plc is not None:
             self.syrup_plc.close()
+        if self.labeler_plc is not None:
+            self.labeler_plc.close()
         self.events.close()
         self.exit(self.stats)

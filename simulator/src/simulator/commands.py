@@ -39,6 +39,8 @@ class _Spec:
     setter: Callable[[Plant, bool | int | float], None]
     help: str
     syrup: bool = False  # needs the syrup room; on a plant without one the command is ignored with a warning
+    standin: bool = False  # needs the labeler stand-in; with the real labeler the command is ignored with a warning
+    labeler: bool = False  # needs the real labeler; with the stand-in the command is ignored with a warning
 
 
 def _set_supply_rate(plant: Plant, v) -> None:
@@ -70,7 +72,7 @@ def _set_index_jam(plant: Plant, v) -> None:
 
 
 def _set_labeler_running(plant: Plant, v) -> None:
-    plant.labeler.running = v
+    plant.labeler_standin.running = v
 
 
 def _set_heartbeat(plant: Plant, v) -> None:
@@ -136,6 +138,52 @@ def _set_syrup_heartbeat(plant: Plant, v) -> None:
     plant.syrup_heartbeat.enabled = v  # its own bit: a comm fault can hit the syrup PLC alone
 
 
+# --- Labeler: world faults and hand actions (every one only sets physics, never the PLC) ---
+def _web_torn(plant: Plant, v) -> None:
+    plant.labeler.web.torn = v
+
+
+def _bell_stuck(plant: Plant, v) -> None:
+    plant.labeler.bell_stuck = v
+
+
+def _heater_failed(plant: Plant, v) -> None:
+    plant.labeler.tank.heater_failed = v
+
+
+def _heater_stuck_on(plant: Plant, v) -> None:
+    plant.labeler.tank.heater_stuck_on = v
+
+
+def _gate_jam(plant: Plant, v) -> None:
+    plant.labeler.gate_jammed = v
+
+
+def _clear_gate(plant: Plant, v) -> None:
+    if v:  # an action, not a state: False does nothing
+        plant.labeler.clear_gate()
+
+
+def _load_roll(plant: Plant, v) -> None:
+    plant.labeler.web.load_roll(v)
+
+
+def _glue_level(plant: Plant, v) -> None:
+    plant.labeler.tank.glue_kg = min(v, config.GLUE_TANK_KG)
+
+
+def _add_glue(plant: Plant, v) -> None:
+    plant.labeler.tank.add_glue(v)
+
+
+def _packer_running(plant: Plant, v) -> None:
+    plant.packer.running = v
+
+
+def _labeler_heartbeat(plant: Plant, v) -> None:
+    plant.labeler_heartbeat.enabled = v  # its own bit: a comm fault can hit the labeler PLC alone
+
+
 COMMANDS: dict[str, _Spec] = {
     "supply_rate": _Spec(float, _set_supply_rate, "bottles per minute put on C1 (0 = none)"),
     "add_bottles": _Spec(int, _add_bottles, "put n extra bottles on C1"),
@@ -144,7 +192,7 @@ COMMANDS: dict[str, _Spec] = {
     "product_available": _Spec(bool, _set_product_available, "Product_Available wire from the syrup room (FALSE = pipe cut)"),
     "e_stop": _Spec(bool, _set_e_stop, "TRUE = E-stop pressed (E_Stop_OK FALSE)"),
     "index_jam": _Spec(bool, _set_index_jam, "TRUE = index belt blocked (motor ON, belt stands)"),
-    "labeler_running": _Spec(bool, _set_labeler_running, "FALSE = labeler takes no bottles, C2 fills up"),
+    "labeler_running": _Spec(bool, _set_labeler_running, "FALSE = labeler takes no bottles, C2 fills up", standin=True),
     "heartbeat": _Spec(bool, _set_heartbeat, "FALSE = heartbeat frozen (PLC: Alm_CommLost after 3 s)"),
     # syrup room
     "deliver_syrup": _Spec(float, _deliver_syrup, "syrup delivery: n litres into the syrup tank (what fits)", True),
@@ -161,9 +209,23 @@ COMMANDS: dict[str, _Spec] = {
     "fill_buffer_to": _Spec(float, _fill_buffer_to, "product put into the buffer tank by hand until it holds n litres", True),
     "buffer_draw_scale": _Spec(float, _buffer_draw_scale, "litres drawn from the buffer per litre the filler fills (normal 30)", True),
     "syrup_heartbeat": _Spec(bool, _set_syrup_heartbeat, "FALSE = syrup PLC heartbeat frozen (its Alm_CommLost after 3 s)", True),
+    # labeler (only with the real labeler, not with --no-labeler)
+    "web_torn": _Spec(bool, _web_torn, "TRUE = label web torn: rollers turn, no label, no Label_Mark", labeler=True),
+    "bell_stuck": _Spec(bool, _bell_stuck, "TRUE = centering bell stuck where it is", labeler=True),
+    "heater_failed": _Spec(bool, _heater_failed, "TRUE = glue heater burnt out: heats nothing", labeler=True),
+    "heater_stuck_on": _Spec(bool, _heater_stuck_on, "TRUE = glue heater contactor welded: heats always", labeler=True),
+    "gate_jam": _Spec(bool, _gate_jam, "TRUE = a bottle through the gate sticks before the pocket", labeler=True),
+    "clear_gate": _Spec(bool, _clear_gate, "TRUE = the operator takes a stuck bottle out of the gate", labeler=True),
+    "load_roll": _Spec(int, _load_roll, "roll change: a new label roll with n labels (1000 = full)", labeler=True),
+    "glue_level": _Spec(float, _glue_level, "glue in the melt tank set to n kg (Glue_Low below 1 kg)", labeler=True),
+    "add_glue": _Spec(float, _add_glue, "n kg of cold glue blocks put into the melt tank", labeler=True),
+    "packer_running": _Spec(bool, _packer_running, "FALSE = packer takes no bottles, C3 fills up", labeler=True),
+    "labeler_heartbeat": _Spec(bool, _labeler_heartbeat, "FALSE = labeler PLC heartbeat frozen (its Alm_CommLost after 3 s)",
+                               labeler=True),
 }
 
 SYRUP_COMMANDS = frozenset(name for name, spec in COMMANDS.items() if spec.syrup)
+LABELER_COMMANDS = frozenset(name for name, spec in COMMANDS.items() if spec.labeler)
 
 
 def check(command: Command) -> None:
@@ -206,6 +268,14 @@ class CommandQueue:
             if spec.syrup and plant.syrup is None:
                 events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "
                                         "no syrup room (run without --filler-only)", warning=True))
+                continue
+            if spec.standin and plant.labeler_standin is None:
+                events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "
+                                        "the real labeler runs (its PLC decides when it stops)", warning=True))
+                continue
+            if spec.labeler and plant.labeler is None:
+                events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "
+                                        "no real labeler (run without --no-labeler / --filler-only)", warning=True))
                 continue
             spec.setter(plant, command.value)
             events.append(Event.sim(plant.now, f"command: {command.name} = {command.value}"))

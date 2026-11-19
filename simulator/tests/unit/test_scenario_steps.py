@@ -138,7 +138,7 @@ def test_syrup_commands_need_a_syrup_scenario_and_the_target_is_checked():
     with pytest.raises(ValueError):
         Scenario("bad", "", (Step(0, Command("chiller_failed", True)),))  # filler target
     with pytest.raises(ValueError):
-        Scenario("bad", "", (), target="labeler")
+        Scenario("bad", "", (), target="packer")  # no such PLC
     Scenario("ok", "", (Step(0, Command("product_available", False)),), target="syrup")  # shared command
 
 
@@ -180,3 +180,67 @@ def test_buffer_full_numbers_block_without_an_overflow_alarm():
     assert level <= plc_buffer_max  # no Alm_Overflow
     assert level - filler_draw_l + plc_dose_target > plc_buffer_max  # Blocked even with the filler running
     assert level - drawn + plc_dose_target <= plc_buffer_max  # TRANSFER after the draw (no filler: worst case)
+
+
+# --- Labeler scenarios --------------------------------------------------------------
+LABELER_SCENARIOS = [name for name, sc in SCENARIOS.items() if sc.target == "labeler"]
+
+
+def labeler_status(step=0, state=0, **alarms):
+    from simulator.plcs import LabelerStatus
+
+    flags = dict(alm_label_timeout=False, alm_pocket_jam=False, alm_outfeed_blocked=False, alm_comm_lost=False,
+                 alm_label_empty=False, alm_glue_over_temp=False, alm_glue_heat_timeout=False) | alarms
+    return LabelerStatus(state, step, 0, **flags)
+
+
+def test_the_labeler_scenarios_exist():
+    assert set(LABELER_SCENARIOS) == {
+        "web_torn", "bell_stuck", "heater_failed", "heater_stuck_on", "roll_empty", "glue_refill", "gate_jam",
+        "packer_stopped",
+    }
+
+
+def test_a_labeler_scenario_sees_the_labeler_status():
+    sc = Scenario("l", "", (Step(in_step(24), Command("bell_stuck", True)),), target="labeler")
+    runner = ScenarioRunner(sc)
+    plant = Plant(with_labeler=True)
+    assert runner.due(plant, status(step=24), None, None)[0] == []  # the filler's step is not the labeler's
+    assert runner.due(plant, None, None, labeler_status(step=24))[0] == [Command("bell_stuck", True)]
+    from simulator.scenarios import ScenarioSlot
+
+    slot = ScenarioSlot()
+    slot.start(Scenario("l2", "", (Step(alarm("Alm_PocketJam"), Command("bell_stuck", False)),), target="labeler"))
+    assert slot.due(plant, None, None, labeler_status(alm_pocket_jam=True))[0] == [Command("bell_stuck", False)]
+
+
+def test_labeler_commands_need_a_labeler_scenario():
+    for target in ("filler", "syrup"):
+        with pytest.raises(ValueError, match="target='labeler'"):
+            Scenario("bad", "", (Step(0, Command("web_torn", True)),), target=target)
+    with pytest.raises(ValueError, match="target='syrup'"):
+        Scenario("bad", "", (Step(0, Command("chiller_failed", True)),), target="labeler")
+
+
+@pytest.mark.parametrize("name", LABELER_SCENARIOS)
+def test_every_labeler_scenario_waits_for_the_labeler_plc_and_removes_its_fault(name):
+    steps = SCENARIOS[name].steps
+    assert steps[0].wait.name == "PLC started"
+    names = [(s.command.name, s.command.value) for s in steps if s.command]
+    for fault in ("web_torn", "bell_stuck", "heater_failed", "heater_stuck_on", "gate_jam"):
+        if (fault, True) in names:
+            assert (fault, False) in names  # the scenario ends with the cause removed
+    if ("packer_running", False) in names:
+        assert ("packer_running", True) in names
+
+
+def test_labeler_scenario_numbers_fit_the_plc():
+    from simulator import config
+
+    steps = {s.command.name: s.command.value for name in LABELER_SCENARIOS for s in SCENARIOS[name].steps if s.command}
+    assert 0 < steps["glue_level"] < config.GLUE_LOW_KG  # Glue_Low, but glue left for some labels
+    # the cold blocks pull the tank out of the Glue_Ready window (160.0 degC at the defaults): rule 4, WARM_UP
+    mixed = (steps["glue_level"] * 170.0 + steps["add_glue"] * config.ROOM_C) / (steps["glue_level"] + steps["add_glue"])
+    assert mixed < 160.0 and steps["glue_level"] + steps["add_glue"] >= config.GLUE_LOW_KG  # Glue_Low gone
+    rolls = [s.command.value for s in SCENARIOS["roll_empty"].steps if s.command and s.command.name == "load_roll"]
+    assert rolls[0] >= 1 and rolls[-1] == config.ROLL_LABELS  # a short roll with some labels, then a full roll
