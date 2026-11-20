@@ -551,6 +551,9 @@ def h12_labeler() -> bool:
         p = prop(items, f"lab_c3_slot{i}")
         if p.get("variableId") != L("Anim_C3") or p.get("bitmask") != 1 << i:
             problems.append(f"C3 slot {i} not on bit {i} of Anim_C3")
+        p = prop(items, f"lab_c3_label{i}")  # every bottle on C3 is labelled: white band with the same bit
+        if p.get("variableId") != L("Anim_C3") or p.get("bitmask") != 1 << i:
+            problems.append(f"C3 label {i} not on bit {i} of Anim_C3")
     acts = prop(items, "turntable").get("actions", [])
     if {(a["type"], a["range"]["min"], a["variableId"]) for a in acts} != {("clockwise", 1, L("SpinMotor")),
                                                                            ("stop", 0, L("SpinMotor"))}:
@@ -656,6 +659,10 @@ def h7_labeler(view: dict) -> list[str]:
                          ("lamp_labeler_Outfeed_Full", L("Outfeed_Full")), ("lamp_labeler_C3_Full", L("C3_Full"))):
         if prop(items, lamp_id).get("variableId") != tag:
             problems.append(f"{lamp_id} not on {tag}")
+    for i in range(8):  # C3 bottles wear their label (Anim_C3 of the labeler PLC, same bit as the slot)
+        p = prop(items, f"c3_label{i}")
+        if p.get("variableId") != L("Anim_C3") or p.get("bitmask") != 1 << i:
+            problems.append(f"c3_label{i} not on bit {i} of the labeler's Anim_C3")
     ids = re.findall(r'\sid="([^"]+)"', svg)
     twice = sorted({i for i in ids if ids.count(i) > 1})
     if twice:

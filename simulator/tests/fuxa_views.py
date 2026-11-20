@@ -621,6 +621,15 @@ RESET_COUNTER = 4  # Cmd value: GoodCount -> 0 (labeler only; Reset = 3 keeps th
 C3_X, C3_PITCH = 530, 22  # first C3 slots on the screen (all 8; the Line view shows C3 too, L4)
 
 
+def slot_label(element_id: str, tag_id: str, x: float, y: float, w: float, h: float, bit: int) -> fs.Shape:
+    """White label band over a conveyor slot's bottle, shown with the same slot bit (bitmask): every
+    bottle on C3 left the labeler labelled (no inspection, no reject), so a bottle there always wears
+    its label. Drawn after the slot, so it lies on top; transparent while the slot is empty."""
+    return fs.rect_ranges(element_id, tag_id, x, y + h * 0.3, w, h * 0.35,
+                          [fs.colour_range(0, 0, "none", "none"), fs.colour_range(1, 1, POCKET_LABEL[lm.POCKET_LABELLED], MUTED)],
+                          default="none", bitmask=1 << bit)
+
+
 def labeler_process(b: Builder) -> None:
     """C2 end and gate -> pocket on the turntable (bell above, disc below) -> pusher -> C3; label roll and
     web from the top left; melt tank as a temperature bar on the right."""
@@ -670,6 +679,7 @@ def labeler_process(b: Builder) -> None:
         b.add(fs.rect_ranges(f"lab_c3_slot{i}", L("Anim_C3"), C3_X + i * C3_PITCH, 290, 16, 40,
                              [fs.colour_range(0, 0, BG), fs.colour_range(1, 1, PRODUCT, "#333333")],
                              default=BG, bitmask=1 << i))
+        b.add(slot_label(f"lab_c3_label{i}", L("Anim_C3"), C3_X + i * C3_PITCH, 290, 16, 40, i))
     b.add(fs.rect(C3_X - 4, 332, 8 * C3_PITCH + 4, 6, "#555555", rx=2))
     lamp(b, "DischargeMotor", C3_X, 356, "pusher", m)
     lamp(b, "C3_Full", C3_X, 380, "C3 full", m)
@@ -795,10 +805,11 @@ def click_through(svg: str) -> str:
 
 
 def conveyor(b: Builder, key: str, x: float, label: str, anim: str, motor: str | None, bottle: str,
-             anim_m: ft.Machine = ft.FILLER, motor_m: ft.Machine = ft.FILLER) -> None:
+             anim_m: ft.Machine = ft.FILLER, motor_m: ft.Machine = ft.FILLER, labelled: bool = False) -> None:
     """8 slots + belt + 3 rollers. motor None = driven by a machine that is not built (static rollers).
     anim_m / motor_m: the PLC whose memory holds the slot word (the simulator writes it there) and the
     PLC that drives the motor; for C2 they differ (slots in the filler PLC, motor from the labeler).
+    labelled: every bottle wears a white label band (C3, after the labeler).
     One call per conveyor, so a later machine's conveyor is one more call (issue I11)."""
     b.add(fs.text(x, BELT_Y - 90, label, size=13, bold=True))
     b.add(fs.rect(x - 4, BELT_Y, 8 * SLOT_PITCH + 4, 10, "#555555", rx=2))
@@ -806,6 +817,9 @@ def conveyor(b: Builder, key: str, x: float, label: str, anim: str, motor: str |
         b.add(fs.rect_ranges(f"{key}_slot{i}", anim_m.tag_id(anim), x + i * SLOT_PITCH, BELT_Y - SLOT_H - 2,
                              SLOT_W, SLOT_H, [fs.colour_range(0, 0, BG), fs.colour_range(1, 1, bottle, "#333333")],
                              default=BG, bitmask=1 << i))
+        if labelled:
+            b.add(slot_label(f"{key}_label{i}", anim_m.tag_id(anim), x + i * SLOT_PITCH, BELT_Y - SLOT_H - 2,
+                             SLOT_W, SLOT_H, i))
     for k in range(3):
         b.add(fs.roller(f"{key}_roller{k}", x + 14 + k * 105, BELT_Y + 24, 11,
                         motor_m.tag_id(motor) if motor else None))
@@ -891,7 +905,8 @@ def line_view(view_id: str = LINE_ID) -> dict:
     b.add((click_through(svg), items))
     b.add(fs.text(lx + LABELER_W / 2 + 48, fy + 96, "°C", size=12, click_through=True))
     # C3 (driven by the packer stand-in, no PLC output: static rollers) -> packer (stand-in)
-    conveyor(b, "c3", C3_LINE_X, "C3 (driven by the packer)", "Anim_C3", None, PRODUCT, anim_m=ft.LABELER)
+    conveyor(b, "c3", C3_LINE_X, "C3 (driven by the packer)", "Anim_C3", None, PRODUCT, anim_m=ft.LABELER,
+             labelled=True)
     lamp(b, "C3_Full", C3_LINE_X + 6, BELT_Y + 56, "C3 full", ft.LABELER, "lamp_labeler_C3_Full")
     lamp(b, "Outfeed_Full", C3_LINE_X + 96, BELT_Y + 56, "outfeed full", ft.LABELER, "lamp_labeler_Outfeed_Full")
     standin_block(b, PACKER_X, 450, 1264 - PACKER_X, 84, ("Packer", "simulated", "(takes bottles)"))
