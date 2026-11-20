@@ -554,6 +554,13 @@ def h12_labeler() -> bool:
         p = prop(items, f"lab_c3_label{i}")  # every bottle on C3 is labelled: white band with the same bit
         if p.get("variableId") != L("Anim_C3") or p.get("bitmask") != 1 << i:
             problems.append(f"C3 label {i} not on bit {i} of Anim_C3")
+        p = prop(items, f"lab_c3_cap{i}")  # every bottle after the filler is capped: cap with the same bit
+        if p.get("variableId") != L("Anim_C3") or p.get("bitmask") != 1 << i:
+            problems.append(f"C3 cap {i} not on bit {i} of Anim_C3")
+    p = prop(items, "pocket_cap")  # the pocket bottle came capped: cap on every code except empty
+    capped = {r["min"] for r in p.get("ranges", []) if r.get("color") == fv.CAP_COLOUR}
+    if p.get("variableId") != L("Anim_Station") or capped != set(fv.LABELER_POCKET_WORDS) - {lm.POCKET_EMPTY}:
+        problems.append(f"pocket cap not on every non-empty Anim_Station code: {sorted(capped)}")
     acts = prop(items, "label_roll").get("actions", [])
     if {(a["type"], a["range"]["min"], a["variableId"]) for a in acts} != {("clockwise", 1, L("LabelFeed")),
                                                                            ("stop", 0, L("LabelFeed"))}:
@@ -663,6 +670,11 @@ def h7_labeler(view: dict) -> list[str]:
                          ("lamp_labeler_Outfeed_Full", L("Outfeed_Full")), ("lamp_labeler_C3_Full", L("C3_Full"))):
         if prop(items, lamp_id).get("variableId") != tag:
             problems.append(f"{lamp_id} not on {tag}")
+    for key, m in (("c2", ft.FILLER), ("c3", ft.LABELER)):  # bottles after the filler wear their cap
+        for i in range(8):
+            p = prop(items, f"{key}_cap{i}")
+            if p.get("variableId") != m.tag_id(f"Anim_{key.upper()}") or p.get("bitmask") != 1 << i:
+                problems.append(f"{key}_cap{i} not on bit {i} of Anim_{key.upper()}")
     for i in range(8):  # C3 bottles wear their label (Anim_C3 of the labeler PLC, same bit as the slot)
         p = prop(items, f"c3_label{i}")
         if p.get("variableId") != L("Anim_C3") or p.get("bitmask") != 1 << i:

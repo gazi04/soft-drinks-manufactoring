@@ -293,6 +293,7 @@ def row2(b: Builder, p: str, ui: MachineUi, current: str) -> None:
 # --- Filler detail screen (stage 3) ----------------------------------------------
 BG = "#e6e6e6"  # page background
 LAMP_OFF, LAMP_ON = "#7a7a7a", "#ffffff"  # ISA-101: no colour for normal equipment states
+CAP_COLOUR = "#2b2b2b"  # a screwed-on cap (filler pocket CAPPED and every bottle after the filler)
 POCKET_COLOURS = {  # state code -> (body fill, outline); the simulator writes the codes
     am.POCKET_EMPTY: (BG, "#9e9e9e"),
     am.POCKET_BOTTLE: ("#ffffff", "#555555"),
@@ -344,7 +345,7 @@ def machine_row(b: Builder) -> None:
         ranges = [fs.colour_range(code, code, fill, line) for code, (fill, line) in POCKET_COLOURS.items()]
         b.add(fs.rect_ranges(f"pocket_{name.lower()}", T(anim), cx - 22, 170, 44, 80, ranges, default=BG))
         b.add(fs.rect_ranges(f"cap_{name.lower()}", T(anim), cx - 12, 160, 24, 9,
-                             [fs.colour_range(am.POCKET_CAPPED, am.POCKET_CAPPED, "#2b2b2b"),
+                             [fs.colour_range(am.POCKET_CAPPED, am.POCKET_CAPPED, CAP_COLOUR),
                               fs.colour_range(am.POCKET_EMPTY, am.POCKET_FILLED, BG)], default=BG))
         b.add(fs.enum_texts(f"pocket_{name.lower()}_word", T(anim), POCKET_WORDS, cx, 278, size=13,
                             anchor="middle", color=MUTED))
@@ -630,6 +631,16 @@ def slot_label(element_id: str, tag_id: str, x: float, y: float, w: float, h: fl
                           default="none", bitmask=1 << bit)
 
 
+def slot_cap(element_id: str, tag_id: str, x: float, y: float, w: float, bit: int) -> fs.Shape:
+    """Cap on top of a conveyor slot's bottle (y = top of the bottle), shown with the same slot bit:
+    every bottle on C2 and C3 left the filler capped (it only discharges a CAPPED pocket), so a bottle
+    there always wears its cap. Transparent while the slot is empty."""
+    cw, ch = w * 0.6, 6
+    return fs.rect_ranges(element_id, tag_id, x + (w - cw) / 2, y - ch, cw, ch,
+                          [fs.colour_range(0, 0, "none"), fs.colour_range(1, 1, CAP_COLOUR)],
+                          default="none", bitmask=1 << bit)
+
+
 def labeler_process(b: Builder) -> None:
     """C2 end and gate -> pocket on the turntable (bell above, disc below) -> pusher -> C3; label roll and
     web from the top left; melt tank as a temperature bar on the right."""
@@ -665,6 +676,10 @@ def labeler_process(b: Builder) -> None:
     b.add(fs.rect_ranges("pocket_label", L("Anim_Station"), 330, 274, 44, 30,
                          [fs.colour_range(c, c, colour, "#555555" if colour != "none" else "none")
                           for c, colour in POCKET_LABEL.items()], default="none"))
+    # cap on the pocket bottle (every bottle came capped from the filler), under the bell that clamps it
+    b.add(fs.rect_ranges("pocket_cap", L("Anim_Station"), 340, 240, 24, 8,
+                         [fs.colour_range(c, c, "none" if c == lm.POCKET_EMPTY else CAP_COLOUR)
+                          for c in LABELER_POCKET_WORDS], default="none"))
     b.add(fs.impeller("turntable", 352, 352, 16, L("SpinMotor")))
     b.add(fs.enum_texts("pocket_word", L("Anim_Station"), LABELER_POCKET_WORDS, 352, 392, size=13, bold=True,
                         anchor="middle"))
@@ -679,6 +694,7 @@ def labeler_process(b: Builder) -> None:
                              [fs.colour_range(0, 0, BG), fs.colour_range(1, 1, PRODUCT, "#333333")],
                              default=BG, bitmask=1 << i))
         b.add(slot_label(f"lab_c3_label{i}", L("Anim_C3"), C3_X + i * C3_PITCH, 290, 16, 40, i))
+        b.add(slot_cap(f"lab_c3_cap{i}", L("Anim_C3"), C3_X + i * C3_PITCH, 290, 16, i))
     b.add(fs.rect(C3_X - 4, 332, 8 * C3_PITCH + 4, 6, "#555555", rx=2))
     lamp(b, "DischargeMotor", C3_X, 356, "pusher", m)
     lamp(b, "C3_Full", C3_X, 380, "C3 full", m)
@@ -804,10 +820,12 @@ def click_through(svg: str) -> str:
 
 
 def conveyor(b: Builder, key: str, x: float, label: str, anim: str, motor: str | None, bottle: str,
-             anim_m: ft.Machine = ft.FILLER, motor_m: ft.Machine = ft.FILLER, labelled: bool = False) -> None:
+             anim_m: ft.Machine = ft.FILLER, motor_m: ft.Machine = ft.FILLER, capped: bool = False,
+             labelled: bool = False) -> None:
     """8 slots + belt + 3 rollers. motor None = driven by a machine that is not built (static rollers).
     anim_m / motor_m: the PLC whose memory holds the slot word (the simulator writes it there) and the
     PLC that drives the motor; for C2 they differ (slots in the filler PLC, motor from the labeler).
+    capped: every bottle wears a cap (C2 and C3, after the filler).
     labelled: every bottle wears a white label band (C3, after the labeler).
     One call per conveyor, so a later machine's conveyor is one more call (issue I11)."""
     b.add(fs.text(x, BELT_Y - 90, label, size=13, bold=True))
@@ -816,6 +834,8 @@ def conveyor(b: Builder, key: str, x: float, label: str, anim: str, motor: str |
         b.add(fs.rect_ranges(f"{key}_slot{i}", anim_m.tag_id(anim), x + i * SLOT_PITCH, BELT_Y - SLOT_H - 2,
                              SLOT_W, SLOT_H, [fs.colour_range(0, 0, BG), fs.colour_range(1, 1, bottle, "#333333")],
                              default=BG, bitmask=1 << i))
+        if capped:
+            b.add(slot_cap(f"{key}_cap{i}", anim_m.tag_id(anim), x + i * SLOT_PITCH, BELT_Y - SLOT_H - 2, SLOT_W, i))
         if labelled:
             b.add(slot_label(f"{key}_label{i}", anim_m.tag_id(anim), x + i * SLOT_PITCH, BELT_Y - SLOT_H - 2,
                              SLOT_W, SLOT_H, i))
@@ -890,7 +910,7 @@ def line_view(view_id: str = LINE_ID) -> dict:
     lamp(b, "Product_Available", fx + 20, top + 24, "filler input")
     # C2: its slots are written into the filler PLC, its motor is the labeler's ConveyorMotor2 (L4)
     conveyor(b, "c2", C2_X, "C2 (driven by the labeler)", "Anim_C2", "ConveyorMotor2", PRODUCT,
-             motor_m=ft.LABELER)
+             motor_m=ft.LABELER, capped=True)
     lamp(b, "S7", C2_X + 6, BELT_Y + 56, "S7 C2 full")
     lamp(b, "Outfeed_Full", C2_X + 120, BELT_Y + 56, "outfeed full")
     # labeler (L4): the real labeler PLC as a block, coloured by its State, with its step and glue
@@ -905,7 +925,7 @@ def line_view(view_id: str = LINE_ID) -> dict:
     b.add(fs.text(lx + LABELER_W / 2 + 48, fy + 96, "°C", size=12, click_through=True))
     # C3 (driven by the packer stand-in, no PLC output: static rollers) -> packer (stand-in)
     conveyor(b, "c3", C3_LINE_X, "C3 (driven by the packer)", "Anim_C3", None, PRODUCT, anim_m=ft.LABELER,
-             labelled=True)
+             capped=True, labelled=True)
     lamp(b, "C3_Full", C3_LINE_X + 6, BELT_Y + 56, "C3 full", ft.LABELER, "lamp_labeler_C3_Full")
     lamp(b, "Outfeed_Full", C3_LINE_X + 96, BELT_Y + 56, "outfeed full", ft.LABELER, "lamp_labeler_Outfeed_Full")
     standin_block(b, PACKER_X, 450, 1264 - PACKER_X, 84, ("Packer", "simulated", "(takes bottles)"))
