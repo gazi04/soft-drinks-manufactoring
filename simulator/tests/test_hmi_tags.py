@@ -554,6 +554,10 @@ def h12_labeler() -> bool:
         p = prop(items, f"lab_c3_label{i}")  # every bottle on C3 is labelled: white band with the same bit
         if p.get("variableId") != L("Anim_C3") or p.get("bitmask") != 1 << i:
             problems.append(f"C3 label {i} not on bit {i} of Anim_C3")
+    acts = prop(items, "label_roll").get("actions", [])
+    if {(a["type"], a["range"]["min"], a["variableId"]) for a in acts} != {("clockwise", 1, L("LabelFeed")),
+                                                                           ("stop", 0, L("LabelFeed"))}:
+        problems.append("label roll does not turn with LabelFeed")
     acts = prop(items, "turntable").get("actions", [])
     if {(a["type"], a["range"]["min"], a["variableId"]) for a in acts} != {("clockwise", 1, L("SpinMotor")),
                                                                            ("stop", 0, L("SpinMotor"))}:

@@ -129,6 +129,23 @@ def impeller(element_id: str, cx: float, cy: float, r: float, motor_tag: str | N
     return svg, {element_id: spinning_path_item(element_id, motor_tag)}
 
 
+def label_roll(element_id: str, cx: float, cy: float, r: float, motor_tag: str | None, marks: int = 3) -> Shape:
+    """Label roll seen from the side: the wound labels as a disc with a hole for the core and `marks`
+    radial lines (a plain disc would look the same at every angle, so the turning would not show).
+    fill-rule evenodd leaves the core hole empty; the disc is centred on (cx, cy), so FUXA turns it in place.
+    Clockwise = the web leaves the top of the roll to the right, as drawn on the Labeler screen."""
+    core = r / 4
+    parts = [f"M{cx - r},{cy} a{r},{r} 0 1,0 {2 * r},0 a{r},{r} 0 1,0 {-2 * r},0",
+             f"M{cx - core},{cy} a{core},{core} 0 1,0 {2 * core},0 a{core},{core} 0 1,0 {-2 * core},0"]
+    for k in range(marks):
+        a = 2 * math.pi * k / marks
+        parts.append(f"M{cx + core * math.cos(a):.1f},{cy + core * math.sin(a):.1f} "
+                     f"L{cx + r * math.cos(a):.1f},{cy + r * math.sin(a):.1f}")
+    svg = (f'<path id="{element_id}" d="{" ".join(parts)}" fill="#e2e2e2" fill-rule="evenodd" '
+           f'stroke="#1d1d1d" stroke-width="1.5"/>')
+    return svg, {element_id: spinning_path_item(element_id, motor_tag)}
+
+
 def show_hide_actions(tag_id: str, lo: int, hi: int) -> list[dict]:
     """Show while lo <= value <= hi, hide for every other INT16 value (two hide ranges)."""
     actions = [{"variableId": tag_id, "type": "show", "range": {"min": lo, "max": hi}, "options": {}}]
