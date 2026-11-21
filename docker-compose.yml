@@ -38,6 +38,17 @@ services:
       - labeler-build:/workdir/build
     restart: unless-stopped
 
+  plc-packer:
+    image: ghcr.io/autonomy-logic/openplc-runtime@sha256:2ca9fc611f25c3ad0471b996a4bf27507ac112612292426ca6d5ca4bf06e97e6
+    ports:
+      - "127.0.0.4:8443:8443"
+      - "5024:502"
+    cap_add: [SYS_NICE, SYS_RESOURCE]
+    volumes:
+      - packer-data:/var/run/runtime
+      - packer-build:/workdir/build
+    restart: unless-stopped
+
   fuxa:
     image: frangoteam/fuxa:1.3.5
     ports:
@@ -55,5 +66,7 @@ volumes:
   syrup-build:
   labeler-data:
   labeler-build:
+  packer-data:
+  packer-build:
   fuxa-plugins:
   fuxa-daq:
