@@ -96,7 +96,7 @@ Each machine owns and drives its **infeed conveyor** motor. The conveyor's **ful
 | 2 | `plc-syrup-carb` | Syrup room, mixer, carbonator | Mains water, syrup tank | Tank levels (L), product temperature (0.1 °C), CO2 pressure (0.01 bar) |
 | 3 | `plc-filler` | Rinser, filler, capper (monobloc) | C1 | Fill level (ml) |
 | 4 | `plc-labeler` | Labeler | C2 | Hot-melt glue temperature (0.1 °C) |
-| 5 | `plc-packer` | Multipack shrink-wrapper | C3 | Shrink tunnel temperature (°C) |
+| 5 | `plc-packer` | Multipack shrink-wrapper | C3 | Oven (shrink tunnel) temperature |
 
 ### 4.1 Blow moulder (`plc-blowmolder`)
 
@@ -150,13 +150,15 @@ Labels bottles. A **roll-fed hot-melt labeler** with one pocket on a turntable, 
 
 ### 4.5 Multipack packer (`plc-packer`)
 
-Groups bottles into 6-packs (the "drink set") and shrink-wraps them.
+Groups single bottles into 6-packs (2×3, the "drink set"), wraps each group in shrink film and shrinks the film in a hot-air **oven** (the shrink tunnel). Concept and paper design 2026-11-21: `docs/packer/` (progress, I/O list, state diagram; ladder roadmap still to write).
 
-- **Inputs:** bottle counted, group complete, film present, tunnel temperature, pack at outfeed.
-- **Outputs:** C3 motor, group stop gate, pusher, film wrapper, tunnel heaters, tunnel conveyor.
-- **Sequence:** Idle → Count bottles (CTU to 6) → Push group → Wrap film → Shrink in tunnel (TON at temperature) → Pack out → Idle.
-- **Counters:** bottles in current group (CTU, reset at 6), finished packs, shift total.
-- **Alarms:** film empty, tunnel temperature low or high, pack jam at outfeed.
+- **Zones:** C3 (the packer drives the motor) → infeed gate and bottle count → collation table (2×3) → group pusher → wrap conveyor with a film slot (film roll, feed, knife, wrap bar) → oven (heater, blower, oven conveyor) → outfeed table (palletizer stand-in in the simulator).
+- **Inputs:** bottle at the gate, bottle counted (pulse), group pusher home / out, pack at the film stop, film in the slot, film pulse (encoder, 50 mm), wrap bar home, film empty / low, pack at the oven entry / exit, outfeed table full, airflow OK, oven temperature (INT, 0.1 °C).
+- **Outputs:** C3 motor, infeed gate, group pusher, wrap conveyor, film feed, knife, wrap bar, oven heater, oven blower, oven conveyor.
+- **Two sequencers in parallel (pipelining):** *collation*: count bottles (CTU to 6) → gate shut → wait for a clear wrap conveyor → push group → count the next group; *wrap*: wait for the pack at the film stop → feed film to the operator's `FilmLength` (pulses counted) → cut → wait for oven and outfeed → the pack drives onto the sheet → wrap bar lays the film over the top → into the oven. The film is cut **before** the pack arrives, and the pack only moves forward, so a restart never wraps it twice.
+- **Oven (continuous, separate from the sequences, only in Auto):** hysteresis on the heater; the heater only with airflow, and the blower keeps running after the oven switches off (**TOF** run-on) to cool it. The oven conveyor runs while the oven is on or packs are inside; a **CTUD** counts the packs inside (up at the entry, down at the exit).
+- **Counters:** bottles in the current group (CTU, reset per group), film pulses per sheet (CTU), packs in the oven (CTUD), finished packs.
+- **Alarms:** film fault, pack jam, wrap timeout, oven over-temperature, oven heat-up timeout, oven jam, airflow lost → Fault; film empty, outfeed blocked too long → warning; film low as an early warning in the HMI.
 
 ## 5. Line integration: how the machines work together
 
@@ -278,21 +280,23 @@ Every PLC uses the **same register layout**. The simulator and the HMI can then 
 
 | Address | Content | Written by | Read by |
 | --- | --- | --- | --- |
-| %MW0 | Command: 1 = Start, 2 = Stop, 3 = Reset; 4 = Reset counters (labeler) | HMI | PLC |
+| %MW0 | Command: 1 = Start, 2 = Stop, 3 = Reset; 4 = Reset counters (labeler, packer) | HMI | PLC |
 | %MW1 | Mode request: 0 = Stop, 1 = Auto, 2 = Manual | HMI | PLC |
 | %MX0.0–%MX0.7 | Digital sensors (one BOOL each) | Simulator | PLC |
 | %MX1.0–%MX1.2 | Interface in: `Product_Available` (filler only), `E_Stop_OK`, heartbeat bit | Simulator (wiring) | PLC |
 | %MX2.0–%MX2.7 | Manual hold-to-run buttons (one BOOL per actuator) | HMI | PLC |
 | %MX3.0–%MX3.7 | Conditioned signals (filtered sensors, hysteresis bits, jog watchdog) | PLC | Tests, HMI |
-| %MX4.0–%MX4.7 | More digital sensors, for a machine with more than 8 (labeler: 12) | Simulator | PLC |
+| %MX4.0–%MX4.7 | More digital sensors, for a machine with more than 8 (labeler: 10, packer: 14) | Simulator | PLC |
 | %MX5.0–%MX5.7 | Alarms, one BOOL each; **`Alm_CommLost` is `%MX5.3` in every PLC**, the other bits are per machine | PLC | HMI |
 | %MX6.0 | Interface out: `Product_Available` (syrup room only) | PLC | Simulator (wiring) |
+| %MX7.0–%MX7.7 | More alarms, for a machine with more than 8 (packer: 10) | PLC | HMI |
 | %MW12–%MW19 | Analog sensors (level, temperature, pressure), INT with fixed-point units | Simulator | PLC, HMI |
 | %MW30–%MW39 | Setpoints and recipe values | HMI | PLC |
 | %MW40–%MW49 | Computed values (e.g. syrup target) | PLC | Tests, HMI |
 | %MW50 | Machine state: 0 Stopped, 1 Running, 2 Starved, 3 Blocked, 9 Fault | PLC | HMI |
 | %MW51 | Current sequencer step | PLC | HMI |
-| %MW53 | Main counter (filler: good bottles, syrup room: batches, labeler: good bottles) | PLC | HMI |
+| %MW52 | Second sequencer step, for a machine with two sequencers in parallel (packer: wrap) | PLC | HMI |
+| %MW53 | Main counter (filler: good bottles, syrup room: batches, labeler: good bottles, packer: finished packs) | PLC | HMI |
 | %MW70–%MW79 | Animation data (conveyor slots, filler pocket states), ignored by the PLC; filler layout in `docs/filler/io-list.md` | Simulator | HMI |
 | %QX0.0–%QX1.7 | Actuator outputs (motors, valves, heaters) | PLC | Simulator, HMI |
 
@@ -438,9 +442,9 @@ FUXA is the operator's single window onto the whole line. It connects to all fiv
 | Syrup room and carbonator | Tanks with live levels, pipes with flow animation, pumps and valves, temperature and CO2 pressure, recipe ratio |
 | Filler | Bottle at station, fill level, cap status, current step, manual controls |
 | Labeler | Pocket and current step, glue temperature, label roll and glue warnings, labelled bottles counter and its reset |
-| Packer | Bottles in current group (0–6), tunnel temperature, finished packs |
+| Packer | Bottles in current group (0–6), film sheet and wrap, oven temperature and packs inside, finished packs |
 | Alarms | Active alarms and history from all PLCs, with acknowledge |
-| Trends | Tank levels, product temperature, CO2 pressure, oven and tunnel temperature over time |
+| Trends | Tank levels, product temperature, CO2 pressure, blow moulder and packer oven temperatures over time |
 
 Clicking a machine block on the overview opens that machine's detail screen. Because every PLC uses the same interface (section 6.2), all detail screens share the same layout for state, step, alarms and mode.
 
@@ -574,8 +578,8 @@ The line is built **one machine at a time, end to end**: paper design, PLC proje
 1. **Foundation:** process description, I/O lists, standard machine interface, Docker Compose with five runtimes.
 2. **Filler** (done): first complete machine, since it has a sequence and an analog value. Includes `FB_Motor`, `FB_Valve` and the mode and alarm template.
 3. **Syrup room and carbonator** (done): the process-control machine; links to the filler through `Product_Available`.
-4. *(stretch, in progress since 2026-11-15)* **Labeler:** adds a heated glue tank, a turn counter and the first real conveyor link (C2). PLC program complete (ladder stages 0–7, 2026-11-18, all tests pass); simulator complete (stages 0–8, 2026-11-18); HMI stages L0–L5 built 2026-11-19, trends (L6) and the wrap-up (L7) still to do (`docs/labeler/progress.md`).
-5. *(stretch)* **Packer:** adds the 6-pack counter and shrink tunnel.
+4. *(stretch, in progress since 2026-11-15)* **Labeler:** adds a heated glue tank, a turn counter and the first real conveyor link (C2). PLC program complete (ladder stages 0–7, 2026-11-18, all tests pass); simulator complete (stages 0–8, 2026-11-18); HMI complete (stages L0–L7, 2026-11-19; `docs/labeler/progress.md`).
+5. *(stretch, started 2026-11-21)* **Packer:** adds the 6-pack counter, two sequencers in parallel (collation, film-slot wrapper), the oven with a TOF blower run-on and a CTUD for the packs inside; built in three parts (PLC, simulator, HMI; `docs/packer/progress.md`). Paper design complete 2026-11-21 (I/O list, state diagram, ladder roadmap stages 0–9).
 6. *(stretch)* **Blow moulder:** completes the start of the line.
 7. **Line overview and integration tests:** full line run, starved and blocked situations (e.g. the filler-stop scenario in section 5.5), E-stop, communication loss (simulator stopped), fault injection.
 8. **Documentation and presentation.**
