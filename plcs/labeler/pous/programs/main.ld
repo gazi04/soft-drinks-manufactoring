@@ -88583,7 +88583,7 @@ PROGRAM main
                   "name": "Sec_Timer",
                   "class": "local",
                   "type": {
-                    "definition": "derived",
+                    "definition": "user-data-type",
                     "value": "TON"
                   }
                 },
@@ -89038,7 +89038,7 @@ PROGRAM main
                   "name": "Sec_Timer",
                   "class": "local",
                   "type": {
-                    "definition": "derived",
+                    "definition": "user-data-type",
                     "value": "TON"
                   }
                 },
@@ -89529,7 +89529,7 @@ PROGRAM main
                   "name": "Open_Timer",
                   "class": "local",
                   "type": {
-                    "definition": "derived",
+                    "definition": "user-data-type",
                     "value": "TON"
                   }
                 },
@@ -91833,7 +91833,7 @@ PROGRAM main
                   "name": "Sec_Timer",
                   "class": "local",
                   "type": {
-                    "definition": "derived",
+                    "definition": "user-data-type",
                     "value": "TON"
                   }
                 },
@@ -92279,7 +92279,7 @@ PROGRAM main
                   "name": "Sec_Timer",
                   "class": "local",
                   "type": {
-                    "definition": "derived",
+                    "definition": "user-data-type",
                     "value": "TON"
                   }
                 },
@@ -92725,7 +92725,7 @@ PROGRAM main
                   "name": "Sec_Timer",
                   "class": "local",
                   "type": {
-                    "definition": "derived",
+                    "definition": "user-data-type",
                     "value": "TON"
                   }
                 },
@@ -94952,7 +94952,7 @@ PROGRAM main
                   "name": "Open_Timer",
                   "class": "local",
                   "type": {
-                    "definition": "derived",
+                    "definition": "user-data-type",
                     "value": "TON"
                   }
                 },
@@ -95406,7 +95406,7 @@ PROGRAM main
                   "name": "Sec_Timer",
                   "class": "local",
                   "type": {
-                    "definition": "derived",
+                    "definition": "user-data-type",
                     "value": "TON"
                   }
                 },
@@ -95852,7 +95852,7 @@ PROGRAM main
                   "name": "Sec_Timer",
                   "class": "local",
                   "type": {
-                    "definition": "derived",
+                    "definition": "user-data-type",
                     "value": "TON"
                   }
                 },
@@ -122583,6 +122583,351 @@ PROGRAM main
       ],
       "selectedNodes": [],
       "handleBranches": []
+    },
+    {
+      "id": "rung_main_3b1c4f5e-7fd0-4510-ae66-fac1291ba0a0",
+      "comment": "",
+      "defaultBounds": [
+        300,
+        100
+      ],
+      "reactFlowViewport": [
+        300,
+        120
+      ],
+      "nodes": [
+        {
+          "id": "left-rail-rung_main_3b1c4f5e-7fd0-4510-ae66-fac1291ba0a0",
+          "type": "powerRail",
+          "position": {
+            "x": 0,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 3,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "left-rail",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "right": -3
+              }
+            },
+            "numericId": "4032081",
+            "variant": "left",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_4399a525-bd99-4a79-82dd-2363b2fbed73",
+          "type": "contact",
+          "position": {
+            "x": 68,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 68,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 92,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "default",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 68,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 92,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 68,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 92,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "4209012",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "right-rail-rung_main_3b1c4f5e-7fd0-4510-ae66-fac1291ba0a0",
+          "type": "powerRail",
+          "position": {
+            "x": 297,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 297,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                },
+                "x": 297
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 297,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 297,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "right-rail",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "left": -3
+              }
+            },
+            "numericId": "9570908",
+            "variant": "right",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_left-rail-rung_main_3b1c4f5e-7fd0-4510-ae66-fac1291ba0a0_CONTACT_4399a525-bd99-4a79-82dd-2363b2fbed73__left-rail_input",
+          "source": "left-rail-rung_main_3b1c4f5e-7fd0-4510-ae66-fac1291ba0a0",
+          "target": "CONTACT_4399a525-bd99-4a79-82dd-2363b2fbed73",
+          "sourceHandle": "left-rail",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_4399a525-bd99-4a79-82dd-2363b2fbed73_right-rail-rung_main_3b1c4f5e-7fd0-4510-ae66-fac1291ba0a0__output_right-rail",
+          "source": "CONTACT_4399a525-bd99-4a79-82dd-2363b2fbed73",
+          "target": "right-rail-rung_main_3b1c4f5e-7fd0-4510-ae66-fac1291ba0a0",
+          "sourceHandle": "output",
+          "targetHandle": "right-rail"
+        }
+      ],
+      "selectedNodes": []
     }
   ]
 }
