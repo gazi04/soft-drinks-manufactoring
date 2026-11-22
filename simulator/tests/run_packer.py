@@ -17,6 +17,9 @@ SCRIPTS = [
     Script("test_packer_stage1.py", "defaults, Cmd 1-4 clear, heartbeat watchdog frozen at FALSE and TRUE"),
     Script("test_packer_values.py", "Oven_Ready window, Heat_Demand hysteresis, both follow the setpoints, FeedPulses with LIMIT + DIV"),
     Script("test_packer_conditioning.py", "Outfeed_Full filter on Table_Full: 2 s on, 3 s off, blinking ignored"),
+    Script("test_packer_collation.py", "collation sequencer: one group 0->5->10->15->20->25->10, Wrap_Clear, restart, Start cases, abort"),
+    Script("test_packer_wrap.py", "wrap sequencer: one pack 10->20->22->24->30->32->34->10, film empty, restart cases, READY waits, FilmLength 600"),
+    Script("test_packer_oven_outputs.py", "oven: heater interlocks (airflow, hysteresis, OvenMax), blower TOF run-on 30 s, CTUD packs inside, oven conveyor, FAULT, E-stop"),
 ]
 
 if __name__ == "__main__":
