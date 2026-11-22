@@ -147,7 +147,7 @@ Section 7, in this order (as the labeler):
 - `Starved` (%MX3.5) := `Wrap_WaitPack AND ((Step_Count AND Gate_Empty_Timer.Q AND NOT Pack_At_Film) OR Film_Empty)` (rule 10).
 - `State` (%MW50): mutually exclusive MOVE rungs in the priority of rule 10: Fault (`Step_Fault`), Stopped (both idle, or Mode Stop / Manual), Blocked (`Wrap_Ready AND Outfeed_Full`), Starved, Running.
 
-**Test** (`test_packer_stop_state.py`): Stop in COUNT → `Step` 0 at once, `GroupCount` kept, Start counts on; Stop in PUSH → RETRACT, then 0; Stop in FEED → 0 with `FeedCount` kept, Start feeds the rest; Stop in WRAP → RUN_OUT, `WrapStep` 0 at `Oven_Entry`; Stop in READY → 0, the sheet stays, Start → 10 → 24; two `Oven_Exit` → `PackCount` +2, `Cmd` 4 → 0, `Cmd` 3 does not touch it; gate gap of 1 s → State 1, of 3 s (no pack at the film) → 2; gap of 3 s while a pack is wrapped → 1; `Film_Empty` with a pack at the film → 2; `Outfeed_Full` in READY → 3; Mode Stop / Manual → 0.
+**Test** (`test_packer_stop_state.py`, S1–S14 / P1–P3 / T1–T10, done 2026-11-22, 28 checks): Stop in COUNT → `Step` 0 at once, `GroupCount` kept, Start counts on; Stop in PUSH → RETRACT, then 0; Stop in FEED → 0 with `FeedCount` kept, Start feeds the rest; Stop in WRAP → RUN_OUT, `WrapStep` 0 at `Oven_Entry`; Stop in READY → 0, the sheet stays, Start → 10 → 24; two `Oven_Exit` → `PackCount` +2, `Cmd` 4 → 0, `Cmd` 3 does not touch it; gate gap of 1 s → State 1, of 3 s (no pack at the film) → 2; gap of 3 s while a pack is wrapped → 1; `Film_Empty` with a pack at the film → 2; `Outfeed_Full` in READY → 3; Mode Stop / Manual → 0.
 
 ## Stage 9 – Alarms and FAULT  *(week VII: timers as timeouts, week VIII: compare)*
 

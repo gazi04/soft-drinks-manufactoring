@@ -21,6 +21,7 @@ SCRIPTS = [
     Script("test_packer_wrap.py", "wrap sequencer: one pack 10->20->22->24->30->32->34->10, film empty, restart cases, READY waits, FilmLength 600"),
     Script("test_packer_oven_outputs.py", "oven: heater interlocks (airflow, hysteresis, OvenMax), blower TOF run-on 30 s, CTUD packs inside, oven conveyor, FAULT, E-stop"),
     Script("test_packer_outputs.py", "outputs per step of both sequencers, gate / feed / conveyor interlocks, bar > feed > knife lock-out, Manual, jog watchdog, E-stop"),
+    Script("test_packer_stop_state.py", "Stop at safe points of both sequencers (none in PUSH / CUT / RUN_ON / WRAP), restart cases, PackCount with Cmd 4, Starved, State 0/1/2/3/9"),
 ]
 
 if __name__ == "__main__":
