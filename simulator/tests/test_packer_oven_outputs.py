@@ -11,7 +11,8 @@ off at 1900), writes OvenTemp / Airflow_OK / Oven_Entry / Oven_Exit and reads th
     O3  Airflow_OK FALSE -> heater OFF, blower ON (airflow interlock)
     O4  air back, OvenTemp 190.0 -> heater OFF (Heat_Demand reset);  O5  187.0 -> still OFF (hysteresis)
     O6  184.0 -> heater ON again
-    O7  OvenSetpoint 2500 (Heat_Demand set), OvenTemp 235.0 -> heater OFF (Oven_BelowMax);  O8  229.0 -> ON
+    O7  OvenSetpoint 2500 (Heat_Demand set), OvenTemp 235.0 -> Alm_OvenOverTemp, FAULT: heater + conveyor OFF,
+        blower ON (run-on);  O8  229.0 + Reset in Auto -> FAULT cleared, heater ON again
     O9  Mode Stop -> heater OFF at once, blower still ON (run-on), conveyor OFF (oven empty)
     O10 2 Oven_Entry pulses -> PacksInOven 2, conveyor ON in Mode Stop
     O11 1 Oven_Exit -> 1, still ON;  O12 2nd -> 0, conveyor OFF
@@ -41,6 +42,7 @@ COIL_OVEN_ENTRY = 8226  # %MX4.2
 COIL_OVEN_EXIT = 8227  # %MX4.3
 COIL_AIRFLOW_OK = 8229  # %MX4.5
 COIL_COMMLOST = 8235  # %MX5.3
+COIL_OVER_TEMP = 8237  # %MX5.5 Alm_OvenOverTemp
 COIL_HEATER = 7  # %QX0.7 OvenHeater
 COIL_BLOWER = 8  # %QX1.0 OvenBlower
 COIL_OVEN_CONV = 9  # %QX1.1 OvenConveyor
@@ -129,9 +131,12 @@ def main() -> int:
         expect("O6", (True, True, True), "OvenTemp 184.0 degC (below 185.0)")
         plc.write(HR_OVEN_SETPOINT, 2500)
         temp(2350)
-        expect("O7", (False, True, True), "OvenSetpoint 250.0, OvenTemp 235.0 degC (>= OvenMax 230.0)")
+        steps, over = plc.steps(), plc.coil(COIL_OVER_TEMP)
+        expect("O7", (False, True, False), f"OvenSetpoint 250.0, OvenTemp 235.0 degC (>= OvenMax 230.0): "
+                                           f"Alm_OvenOverTemp {over}, steps {steps} (FAULT, blower on its run-on)")
         temp(2290)
-        expect("O8", (True, True, True), "OvenTemp 229.0 degC (below OvenMax again)")
+        plc.cmd(RESET)
+        expect("O8", (True, True, True), "OvenTemp 229.0 degC (below OvenMax again), Reset in Auto")
         plc.write(HR_OVEN_SETPOINT, OVEN_SETPOINT)
         temp(1800)
 

@@ -37,7 +37,7 @@ import sys
 import time
 
 from hmi_guard import claim_plant, warn_if_fuxa
-from test_packer_collation import (COIL_E_STOP_OK, COIL_FILM_IN_SLOT, COIL_FILM_PULSE, COIL_PACK_AT_FILM,
+from test_packer_collation import (COIL_AIRFLOW_OK, COIL_E_STOP_OK, COIL_FILM_IN_SLOT, COIL_FILM_PULSE, COIL_PACK_AT_FILM,
                                    COIL_PUSHER_HOME, COIL_WRAP_HOME, HR_MODE_REQ, HR_OVEN_BAND, HR_OVEN_HYST,
                                    HR_OVEN_SETPOINT, HR_OVEN_TEMP, HR_STEP, HR_WRAP_STEP, MODE_AUTO, MODE_STOP,
                                    OVEN_BAND, OVEN_COLD, OVEN_HOT, OVEN_HYST, OVEN_SETPOINT, RESET, SETTLE, START,
@@ -51,6 +51,7 @@ HR_FEED_PULSES = 1066  # %MW42
 HR_FEED_COUNT = 1067  # %MW43
 COIL_FILM_EMPTY = 8224  # %MX4.0
 COIL_OVEN_ENTRY = 8226  # %MX4.2
+COIL_OVEN_EXIT = 8227  # %MX4.3
 COIL_TABLE_FULL = 8228  # %MX4.4
 COIL_OUTFEED_FULL = 8216  # %MX3.0
 COIL_COMMLOST = 8235  # %MX5.3
@@ -123,6 +124,7 @@ def main() -> int:
         plc.coil(COIL_WRAP_HOME, True)
         must(34)
         plc.pulse(COIL_OVEN_ENTRY)
+        plc.pulse(COIL_OVEN_EXIT)  # the pack leaves the oven again: no Alm_OvenJam (20 s) later in the script
         must(10)
 
     try:
@@ -135,6 +137,7 @@ def main() -> int:
                                (HR_OVEN_HYST, OVEN_HYST), (HR_OVEN_BAND, OVEN_BAND), (HR_FILM_LENGTH, FILM_LENGTH)):
             plc.write(address, value)
         plc.coil(COIL_E_STOP_OK, True)
+        plc.coil(COIL_AIRFLOW_OK, True)  # the blower runs in Auto: without air Alm_AirflowLost trips after 3 s
         plc.coil(COIL_FILM_PULSE, True)  # the sensor writes must reach the PLC: a debugger force would block them
         time.sleep(SETTLE)
         if not plc.coil(COIL_FILM_PULSE):
@@ -191,6 +194,7 @@ def main() -> int:
         plc.coil(COIL_WRAP_HOME, True)
         reach("W10", 34, 1, "Wrap_Home back on (one turn)")
         plc.pulse(COIL_OVEN_ENTRY)
+        plc.pulse(COIL_OVEN_EXIT)  # the pack leaves the oven again: no Alm_OvenJam (20 s) later in the script
         reach("W11", 10, 1, "Oven_Entry pulse")
 
         # ---------- W12/W13 film roll empty ----------
@@ -261,6 +265,7 @@ def main() -> int:
         plc.coil(COIL_WRAP_HOME, True)
         reach("W25", 34, 1, "Wrap_Home rising (turn finished)")
         plc.pulse(COIL_OVEN_ENTRY)
+        plc.pulse(COIL_OVEN_EXIT)  # the pack leaves the oven again: no Alm_OvenJam (20 s) later in the script
         must(10)
 
         # ---------- W26 shorter sheet ----------

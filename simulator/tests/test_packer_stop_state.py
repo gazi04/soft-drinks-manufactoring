@@ -35,7 +35,7 @@ import sys
 import time
 
 from hmi_guard import claim_plant, warn_if_fuxa
-from test_packer_collation import (COIL_BOTTLE_AT_GATE, COIL_BOTTLE_COUNTED, COIL_E_STOP_OK, COIL_FILM_IN_SLOT,
+from test_packer_collation import (COIL_AIRFLOW_OK, COIL_BOTTLE_AT_GATE, COIL_BOTTLE_COUNTED, COIL_E_STOP_OK, COIL_FILM_IN_SLOT,
                                    COIL_FILM_PULSE, COIL_PACK_AT_FILM, COIL_PUSHER_HOME, COIL_PUSHER_OUT,
                                    COIL_WRAP_HOME, HR_GROUP_COUNT, HR_MODE_REQ, HR_OVEN_BAND, HR_OVEN_HYST,
                                    HR_OVEN_SETPOINT, HR_OVEN_TEMP, HR_STEP, HR_WRAP_STEP, MODE_AUTO, MODE_STOP,
@@ -103,6 +103,7 @@ def main() -> int:
                                (HR_OVEN_HYST, OVEN_HYST), (HR_OVEN_BAND, OVEN_BAND), (HR_FILM_LENGTH, FILM_LENGTH)):
             plc.write(address, value)
         plc.coil(COIL_E_STOP_OK, True)
+        plc.coil(COIL_AIRFLOW_OK, True)  # the blower runs in Auto: without air Alm_AirflowLost trips after 3 s
         plc.coil(COIL_FILM_PULSE, True)  # the sensor writes must reach the PLC: a debugger force would block them
         time.sleep(SETTLE)
         if not plc.coil(COIL_FILM_PULSE):

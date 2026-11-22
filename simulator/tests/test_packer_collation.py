@@ -67,6 +67,7 @@ COIL_GROUP_COMPLETE = 8217  # %MX3.1
 COIL_WRAP_CLEAR = 8222  # %MX3.6
 COIL_OVEN_ON = 8223  # %MX3.7
 COIL_COMMLOST = 8235  # %MX5.3
+COIL_AIRFLOW_OK = 8229  # %MX4.5
 
 SENSOR_COILS = (COIL_BOTTLE_AT_GATE, COIL_BOTTLE_COUNTED, COIL_PUSHER_HOME, COIL_PUSHER_OUT,
                 COIL_PACK_AT_FILM, COIL_FILM_IN_SLOT, COIL_FILM_PULSE, COIL_WRAP_HOME)
@@ -239,6 +240,7 @@ def main() -> int:
                                (HR_OVEN_HYST, OVEN_HYST), (HR_OVEN_BAND, OVEN_BAND)):
             plc.write(address, value)
         plc.coil(COIL_E_STOP_OK, True)
+        plc.coil(COIL_AIRFLOW_OK, True)  # the blower runs in Auto: without air Alm_AirflowLost trips after 3 s
         # film roll empty for the whole script: the wrap sequencer then waits in WAIT_PACK (10) with a
         # pack at the film stop instead of feeding (its transitions exist from stage 5)
         plc.coil(COIL_FILM_EMPTY, True)

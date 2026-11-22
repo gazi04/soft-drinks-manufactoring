@@ -41,7 +41,7 @@ import sys
 import time
 
 from hmi_guard import claim_plant, warn_if_fuxa
-from test_packer_collation import (COIL_BOTTLE_COUNTED, COIL_E_STOP_OK, COIL_FILM_IN_SLOT, COIL_FILM_PULSE,
+from test_packer_collation import (COIL_AIRFLOW_OK, COIL_BOTTLE_COUNTED, COIL_E_STOP_OK, COIL_FILM_IN_SLOT, COIL_FILM_PULSE,
                                    COIL_PACK_AT_FILM, COIL_PUSHER_HOME, COIL_PUSHER_OUT, COIL_WRAP_HOME,
                                    HR_GROUP_COUNT, HR_MODE_REQ, HR_OVEN_BAND, HR_OVEN_HYST, HR_OVEN_SETPOINT,
                                    HR_OVEN_TEMP, HR_STEP, HR_WRAP_STEP, MODE_AUTO, MODE_STOP, OVEN_BAND, OVEN_HOT,
@@ -126,6 +126,7 @@ def main() -> int:
                                (HR_OVEN_HYST, OVEN_HYST), (HR_OVEN_BAND, OVEN_BAND), (HR_FILM_LENGTH, FILM_LENGTH)):
             plc.write(address, value)
         plc.coil(COIL_E_STOP_OK, True)
+        plc.coil(COIL_AIRFLOW_OK, True)  # the blower runs in Auto: without air Alm_AirflowLost trips after 3 s
         plc.coil(COIL_FILM_PULSE, True)  # the sensor writes must reach the PLC: a debugger force would block them
         time.sleep(SETTLE)
         if not plc.coil(COIL_FILM_PULSE):
@@ -200,7 +201,7 @@ def main() -> int:
         plc.pulse(COIL_FILM_PULSE, FEED_PULSES - 1)
         samples: list[tuple[int, set[str]]] = []
         plc.c.write_coil(COIL_FILM_PULSE, True)
-        end = time.monotonic() + 1.0
+        end = time.monotonic() + 0.6  # READY is reached after about 0.35 s; no sheet for 1 s = Alm_FilmFault
         while time.monotonic() < end:  # FEED -> CUT (0.3 s) -> READY: sample faster than the step changes
             out = on(plc)
             samples.append((plc.steps()[1], out))

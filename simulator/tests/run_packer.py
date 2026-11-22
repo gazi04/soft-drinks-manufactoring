@@ -1,6 +1,7 @@
 """All packer PLC tests in one command (port 5024), in ladder-stage order.
 
-    uv run python tests/run_packer.py              # all scripts
+    uv run python tests/run_packer.py              # all scripts (about 11 min)
+    uv run python tests/run_packer.py --quick      # alarms without the two 2 min timeouts (about 7 min)
     uv run python tests/run_packer.py stage0       # only the scripts whose name contains "stage0"
     uv run python tests/run_packer.py --fail-fast  # stop at the first failing script
     uv run python tests/run_packer.py --list       # show the list
@@ -22,6 +23,8 @@ SCRIPTS = [
     Script("test_packer_oven_outputs.py", "oven: heater interlocks (airflow, hysteresis, OvenMax), blower TOF run-on 30 s, CTUD packs inside, oven conveyor, FAULT, E-stop"),
     Script("test_packer_outputs.py", "outputs per step of both sequencers, gate / feed / conveyor interlocks, bar > feed > knife lock-out, Manual, jog watchdog, E-stop"),
     Script("test_packer_stop_state.py", "Stop at safe points of both sequencers (none in PUSH / CUT / RUN_ON / WRAP), restart cases, PackCount with Cmd 4, Starved, State 0/1/2/3/9"),
+    Script("test_packer_alarms.py", "film fault, pack jam, wrap timeout, over-temperature with blower run-on, airflow, oven jam, warnings, FAULT, Reset only when the cause is gone",
+           quick_args=("--quick",)),
 ]
 
 if __name__ == "__main__":

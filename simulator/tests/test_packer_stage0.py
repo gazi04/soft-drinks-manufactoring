@@ -38,7 +38,7 @@ HR_WRAPSTEP = 1076  # %MW52
 COIL_ESTOP = 8201  # %MX1.1
 COIL_FILM_LOW = 8225  # %MX4.1
 COIL_WRAP_TIMEOUT = 8249  # %MX7.1
-TEST_TEMP = 4343  # unusual value, so it cannot be in another PLC by chance
+TEST_TEMP = 2222  # unusual value, so it cannot be in another PLC by chance; below OvenMax 2300 (no over-temperature FAULT)
 
 
 def check(name: str, ok: bool, detail: str) -> bool:
@@ -119,7 +119,7 @@ def main() -> int:
             ))
 
         if sys.stdin.isatty():
-            input("Debugger (127.0.0.4): OvenTemp = 4343, E_Stop_OK = TRUE, Film_Low = TRUE? "
+            input("Debugger (127.0.0.4): OvenTemp = 2222, E_Stop_OK = TRUE, Film_Low = TRUE? "
                   "Press Enter to reset them ... ")
 
         packer.write_register(HR_OVENTEMP, 0)
