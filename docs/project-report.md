@@ -150,7 +150,7 @@ Labels bottles. A **roll-fed hot-melt labeler** with one pocket on a turntable, 
 
 ### 4.5 Multipack packer (`plc-packer`)
 
-Groups single bottles into 6-packs (2×3, the "drink set"), wraps each group in shrink film and shrinks the film in a hot-air **oven** (the shrink tunnel). Concept and paper design 2026-11-21: `docs/packer/` (progress, I/O list, state diagram; ladder roadmap still to write).
+Groups single bottles into 6-packs (2×3, the "drink set"), wraps each group in shrink film and shrinks the film in a hot-air **oven** (the shrink tunnel). Concept and paper design 2026-11-21: `docs/packer/` (progress, I/O list, state diagram, ladder roadmap). PLC program in progress: modes and safety, oven window and heater hysteresis, film pulse count (`LIMIT` + `DIV`) and sensor conditioning built and tested 2026-11-22 (`run_packer.py` 50/50); the two sequencers, oven, outputs, stop / state and alarms follow.
 
 - **Zones:** C3 (the packer drives the motor) → infeed gate and bottle count → collation table (2×3) → group pusher → wrap conveyor with a film slot (film roll, feed, knife, wrap bar) → oven (heater, blower, oven conveyor) → outfeed table (palletizer stand-in in the simulator).
 - **Inputs:** bottle at the gate, bottle counted (pulse), group pusher home / out, pack at the film stop, film in the slot, film pulse (encoder, 50 mm), wrap bar home, film empty / low, pack at the oven entry / exit, outfeed table full, airflow OK, oven temperature (INT, 0.1 °C).
@@ -579,7 +579,7 @@ The line is built **one machine at a time, end to end**: paper design, PLC proje
 2. **Filler** (done): first complete machine, since it has a sequence and an analog value. Includes `FB_Motor`, `FB_Valve` and the mode and alarm template.
 3. **Syrup room and carbonator** (done): the process-control machine; links to the filler through `Product_Available`.
 4. *(stretch, in progress since 2026-11-15)* **Labeler:** adds a heated glue tank, a turn counter and the first real conveyor link (C2). PLC program complete (ladder stages 0–7, 2026-11-18, all tests pass); simulator complete (stages 0–8, 2026-11-18); HMI complete (stages L0–L7, 2026-11-19; `docs/labeler/progress.md`).
-5. *(stretch, started 2026-11-21)* **Packer:** adds the 6-pack counter, two sequencers in parallel (collation, film-slot wrapper), the oven with a TOF blower run-on and a CTUD for the packs inside; built in three parts (PLC, simulator, HMI; `docs/packer/progress.md`). Paper design complete 2026-11-21 (I/O list, state diagram, ladder roadmap stages 0–9).
+5. *(stretch, started 2026-11-21)* **Packer:** adds the 6-pack counter, two sequencers in parallel (collation, film-slot wrapper), the oven with a TOF blower run-on and a CTUD for the packs inside; built in three parts (PLC, simulator, HMI; `docs/packer/progress.md`). Paper design complete 2026-11-21 (I/O list, state diagram, ladder roadmap stages 0–9); ladder stages 0–3 built and tested 2026-11-22 (setup, modes and safety, oven and film values, conditioning), stages 4–9 next.
 6. *(stretch)* **Blow moulder:** completes the start of the line.
 7. **Line overview and integration tests:** full line run, starved and blocked situations (e.g. the filler-stop scenario in section 5.5), E-stop, communication loss (simulator stopped), fault injection.
 8. **Documentation and presentation.**
