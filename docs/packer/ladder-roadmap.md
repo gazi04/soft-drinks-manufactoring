@@ -138,7 +138,7 @@ Section 7, in this order (as the labeler):
 - Every Auto branch carries `Seq_Enable`; every Manual branch is `Mode_Manual AND Man_… AND NOT Jog_Block`; interlocks in series **after** the OR.
 - 7.6 **FB instances**, `Enable` = `Master_Enable`, one writer per `%QX`: FB_Motor `Mot_C3`, `Mot_Gate`, `Mot_WrapConv`, `Mot_FilmFeed`, `Mot_WrapBar`; FB_Valve `Vlv_Push`, `Vlv_Knife`.
 
-**Test** (`test_packer_outputs.py`): each step of both sequencers switches exactly its outputs (one group and one pack driven through by writing the sensors); the gate shuts in the scan of the 6th count; gate blocked while the pusher is out; FEED stops at `Feed_Counter.Q`; wrap conveyor stops when `Pack_At_Film` rises in WAIT_PACK; feed blocked with the bar not home. Manual: hold-to-run; `Man_FilmFeed` + `Man_WrapBar` together → only the bar runs; `Man_Knife` while feeding → off; `Man_WrapConveyor` while the knife is held → off; button held 11 s → `Jog_Block`. E-stop → all off.
+**Test** (`test_packer_outputs.py`, A1–A18 / M1–M15 / J1–J3, done 2026-11-22, 43 checks): each step of both sequencers switches exactly its outputs (one group and one pack driven through by writing the sensors); the gate shuts in the scan of the 6th count; gate blocked while the pusher is out; FEED stops at `Feed_Counter.Q`; wrap conveyor stops when `Pack_At_Film` rises in WAIT_PACK; feed blocked with the bar not home. Manual: hold-to-run; `Man_FilmFeed` + `Man_WrapBar` together → only the bar runs; `Man_Knife` while feeding → off; `Man_WrapConveyor` while the knife is held → off; button held 11 s → `Jog_Block`. E-stop → all off.
 
 ## Stage 8 – Stop, counter, State  *(weeks IV, VII: latch, CTU)*
 
