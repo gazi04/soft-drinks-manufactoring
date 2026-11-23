@@ -137,3 +137,13 @@ BROKEN_LABEL_SHARE = 0.9  # audit: a bottle leaving with less than 90 % of a lab
 # --- Conveyor C3 and the packer stand-in -----------------------------------------------------------------
 C3_FULL_SLOT = 1  # C3 slot watched by C3_Full, same reason as S7_SLOT (2 s Outfeed_Full filter)
 PACKER_TAKE_S = 2.0  # the packer stand-in takes one bottle from the end of C3 every 2 s (the labeler needs ~6 s)
+
+# --- Packer: collation (PLC: PackSize 6, PushTimeout 3 s; the gate is HELD open, not a pulse) -----------
+PACKER_GATE_S = 0.4  # a bottle from C3's exit through the gate onto the collation table; the next bottle of a
+#                      queue needs a full slot step (0.5 s) to reach the exit, so one bottle is in the gate at a time
+BOTTLE_COUNTED_S = 0.2  # Bottle_Counted ON while the bottle passes the count sensor: 2 ticks ON, >= 3 ticks OFF
+#                         before the next bottle (the CTU needs both edges); the PLC shuts the gate 0.1-0.2 s after
+#                         the 6th edge, before the 7th bottle reaches the exit (0.5 s)
+PUSH_OUT_S = 1.0  # group pusher home -> out (valve ON); PushTimeout 3 s
+PUSH_RETURN_S = 0.8  # out -> home on the spring (valve OFF); PushTimeout 3 s
+PACK_BOTTLES = 6  # places on the collation table (2 x 3 lane dividers): physical, the PLC's PackSize must match

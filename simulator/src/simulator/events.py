@@ -73,6 +73,30 @@ class Event:
         return f"{self.time_s:7.1f} s {mark} {who:<12} {self.text}"
 
 
+class Audit:
+    """One warning per period: logged when the condition starts, re-armed when it ends.
+
+    Used by the machines' physics (labeler, packer): call start(now) at the beginning of a step,
+    warn(key, condition, text) for every check, and return `events` at the end of the step.
+    """
+
+    def __init__(self) -> None:
+        self._active: set[str] = set()
+        self.events: list[Event] = []
+        self.now = 0.0
+
+    def start(self, now: float) -> None:
+        self.now = now
+        self.events = []
+
+    def warn(self, key: str, condition: bool, text: str) -> None:
+        if not condition:
+            self._active.discard(key)
+        elif key not in self._active:
+            self._active.add(key)
+            self.events.append(Event.sim(self.now, text, warning=True))
+
+
 class EventLog:
     """Collects events: the last `max_events` in memory, optionally all in a file.
 

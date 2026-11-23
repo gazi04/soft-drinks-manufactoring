@@ -43,7 +43,7 @@ from simulator import config
 from simulator.address_map_labeler import POCKET_BOTTLE, POCKET_EMPTY, POCKET_LABELLED, POCKET_LABELLING
 from simulator.bottle import Bottle
 from simulator.conveyor import Conveyor
-from simulator.events import Event
+from simulator.events import Audit, Event
 
 _EPSILON = 1e-9
 
@@ -63,26 +63,6 @@ class LabelerOutputs:
     discharge_motor: bool = False
 
 
-class _Audit:
-    """One warning per period: logged when the condition starts, re-armed when it ends."""
-
-    def __init__(self) -> None:
-        self._active: set[str] = set()
-        self.events: list[Event] = []
-        self.now = 0.0
-
-    def start(self, now: float) -> None:
-        self.now = now
-        self.events = []
-
-    def warn(self, key: str, condition: bool, text: str) -> None:
-        if not condition:
-            self._active.discard(key)
-        elif key not in self._active:
-            self._active.add(key)
-            self.events.append(Event.sim(self.now, text, warning=True))
-
-
 class MeltTank:
     """Hot-melt tank with its heater. The operator adds solid glue blocks; the roller takes glue."""
 
@@ -93,7 +73,7 @@ class MeltTank:
         # Injected faults (commands.py / scenarios.py). The PLC is never told: it can only see the effect.
         self.heater_failed = False  # the heater output heats nothing (element burnt out)
         self.heater_stuck_on = False  # the heater heats whatever the PLC says (contactor welded)
-        self._audit = _Audit()
+        self._audit = Audit()
 
     def step(self, heater_on: bool, dt: float, now: float) -> list[Event]:
         """dT/dt = -heater (T - heater) / tau_heat - (T - room) / tau_room, solved exactly.
@@ -165,7 +145,7 @@ class LabelWeb:
         self.torn = False  # injected fault: the web is torn, the rollers turn but nothing moves
         self._mark_timer = 0.0  # remaining time of the Label_Mark pulse
         self._cutter_was_on = False
-        self._audit = _Audit()
+        self._audit = Audit()
 
     def step(
         self,
@@ -308,7 +288,7 @@ class Labeler:
         self._push_timer = 0.0  # how long the pusher has pushed the pocket bottle
         self._spin_timer = 0.0  # remaining time of the Spin_Pulse
         self._now = 0.0
-        self._audit = _Audit()
+        self._audit = Audit()
 
     def step(self, out: LabelerOutputs, dt: float, now: float) -> list[Event]:
         self._now = now
