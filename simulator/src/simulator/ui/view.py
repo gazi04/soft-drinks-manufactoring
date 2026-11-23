@@ -368,7 +368,8 @@ def scenario_text(slot: ScenarioSlot) -> str:
     if runner is None:
         return "no scenario"
     n = len(runner.scenario.steps)
-    return f"{runner.scenario.name}: done" if runner.done else f"{runner.scenario.name}: step {runner.index + 1}/{n}"
+    name = f"{runner.scenario.name} ({runner.scenario.target})"  # the machine: readable from every tab
+    return f"{name}: done" if runner.done else f"{name}: step {runner.index + 1}/{n}"
 
 
 def event_style(event: Event) -> str:

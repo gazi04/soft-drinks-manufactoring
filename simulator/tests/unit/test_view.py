@@ -67,7 +67,7 @@ def test_scenario_text():
     slot = ScenarioSlot()
     assert view.scenario_text(slot) == "no scenario"
     slot.start(SCENARIOS["gaps"])
-    assert view.scenario_text(slot) == "gaps: step 1/5"
+    assert view.scenario_text(slot) == "gaps (filler): step 1/5"
 
 
 def test_event_style_and_filters():

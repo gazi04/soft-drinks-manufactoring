@@ -89,7 +89,7 @@ def test_a_syrup_scenario_starts_from_the_shared_row(tmp_path):
             await pilot.click("#bt-scenario")
             await pilot.pause(0.3)
             assert app.slot.runner is not None and app.slot.runner.scenario.name == "buffer_full"
-            assert "buffer_full: step 1/" in str(app.query_one("#scenario-status", Static).render())  # waits: PLC not running
+            assert "buffer_full (syrup): step 1/" in str(app.query_one("#scenario-status", Static).render())  # waits: PLC not running
             await pilot.press("q")
 
     run(test)

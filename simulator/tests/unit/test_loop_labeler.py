@@ -231,8 +231,21 @@ def test_cli_refuses_a_labeler_scenario_without_the_real_labeler(monkeypatch):
 def test_panel_offers_only_the_scenarios_the_plant_can_run():
     from simulator.ui.app import scenario_options
 
-    full = [name for _, name in scenario_options(True, True)]
-    assert "web_torn" in full and "low_syrup" in full and "labeler_stopped" not in full  # no stand-in to stop
-    stand_in = [name for _, name in scenario_options(True, False)]
-    assert "labeler_stopped" in stand_in and "web_torn" not in stand_in
-    assert "index_jam" in full and "index_jam" in stand_in
+    def names(target, with_labeler):
+        return [name for _, name in scenario_options(target, True, with_labeler)]
+
+    assert "web_torn" in names("labeler", True) and names("labeler", False) == []
+    assert "labeler_stopped" not in names("filler", True)  # no stand-in to stop
+    assert "labeler_stopped" in names("filler", False)
+    assert "index_jam" in names("filler", True) and "index_jam" in names("filler", False)
+
+
+def test_each_tab_offers_only_its_own_machines_scenarios():
+    from simulator.scenarios import SCENARIOS
+    from simulator.ui.app import scenario_options
+
+    for target in ("filler", "syrup", "labeler"):
+        offered = [name for _, name in scenario_options(target, True, True)]
+        assert offered and all(SCENARIOS[name].target == target for name in offered)
+    assert "low_syrup" in [name for _, name in scenario_options("syrup", True, True)]
+    assert "gaps" not in [name for _, name in scenario_options("syrup", True, True)]

@@ -99,8 +99,40 @@ def test_a_labeler_scenario_starts_from_the_shared_row(tmp_path):
             await pilot.click("#bt-scenario")
             await pilot.pause(0.3)
             assert app.slot.runner is not None and app.slot.runner.scenario.name == "roll_empty"
-            assert "roll_empty: step 1/" in str(app.query_one("#scenario-status", Static).render())  # waits: PLC not running
+            assert "roll_empty (labeler): step 1/" in str(app.query_one("#scenario-status", Static).render())  # waits: PLC not running
             assert app.plant.labeler.web.labels_left == config.ROLL_LABELS  # step 1 waits for the PLC first
+            await pilot.press("q")
+
+    run(test)
+
+
+def test_the_scenario_select_follows_the_tab(tmp_path):
+    async def test():
+        app = make_app(tmp_path)
+        async with app.run_test(size=SIZE) as pilot:
+            def offered() -> set[str]:
+                return {value for _, value in app.query_one("#in-scenario", Select)._options if isinstance(value, str)}
+
+            assert "gaps" in offered() and "web_torn" not in offered()  # filler tab at start
+            await open_labeler_tab(app, pilot)
+            assert "web_torn" in offered() and "gaps" not in offered()
+            await pilot.press("1")
+            await pilot.pause(0.1)
+            assert "gaps" in offered() and "web_torn" not in offered()
+            await pilot.press("q")
+
+    run(test)
+
+
+def test_a_running_scenario_stays_visible_on_another_tab(tmp_path):
+    async def test():
+        app = make_app(tmp_path)
+        async with app.run_test(size=SIZE) as pilot:
+            app.query_one("#in-scenario", Select).value = "gaps"
+            await pilot.click("#bt-scenario")
+            await open_labeler_tab(app, pilot)
+            await pilot.pause(0.3)  # one redraw
+            assert "gaps (filler): step" in str(app.query_one("#scenario-status", Static).render())
             await pilot.press("q")
 
     run(test)

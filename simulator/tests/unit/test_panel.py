@@ -110,9 +110,10 @@ def test_filler_only_has_no_syrup_tab_and_no_syrup_scenarios(tmp_path):
         async with app.run_test(size=SIZE) as pilot:
             assert not app.query("#tab-syrup") and not app.query("#sw-chiller")
             assert not app.query("#tab-labeler") and not app.query("#sw-web-torn")  # the labeler stand-in runs
-            values = [value for _, value in scenario_options(app.has_syrup)]
+            values = [value for _, value in scenario_options("filler", app.has_syrup)]
             assert "gaps" in values and "low_syrup" not in values
-            assert ("low_syrup [syrup]", "low_syrup") in scenario_options(True)
+            assert scenario_options("syrup", app.has_syrup) == []  # no syrup room: no syrup scenarios
+            assert ("low_syrup", "low_syrup") in scenario_options("syrup", True)
             await pilot.press("2")  # only a notice, the filler tab stays
             await pilot.pause(0.1)
             assert app.query_one("#tabs", TabbedContent).active == "tab-filler"

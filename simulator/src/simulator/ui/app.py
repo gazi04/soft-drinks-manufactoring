@@ -3,7 +3,7 @@
     ┌ header: filler PLC line, syrup PLC line (link, step, state, alarms, counter, dt) ─┐
     │ [1 Filler] [2 Syrup room] [3 Labeler]   one tab per machine, same layout in each: │
     │   world: the physical truth                 │ controls: values, faults, switches  │
-    ├ scenario: [select] Run  status   (one row for every machine) ──────────────────────┤
+    ├ scenario: [select] Run  status   (select: the active tab's scenarios) ─────────────┤
     ├ event log (filter with l) ───────────────────────────────────────────────────────┤
     └ footer: q quit, l log filter, 1 / 2 / 3 tabs ──────────────────────────────────────┘
 
@@ -105,18 +105,24 @@ ACTION_BUTTONS: dict[str, str] = {
 REFRESH_S = 0.25
 
 
-def scenario_options(with_syrup: bool, with_labeler: bool = False) -> list[tuple[str, str]]:
-    """(label, name) for the scenario select. Only what the plant can run is offered: syrup scenarios need
-    the syrup room, labeler scenarios the real labeler, and a scenario that stops the labeler stand-in
-    (labeler_stopped) needs the stand-in."""
+# tab id -> the scenario target its select shows
+TAB_TARGETS = {"tab-filler": "filler", "tab-syrup": "syrup", "tab-labeler": "labeler"}
+
+
+def scenario_options(target: str, with_syrup: bool, with_labeler: bool = False) -> list[tuple[str, str]]:
+    """(label, name) for the scenario select of one machine's tab: only scenarios with that target, and only
+    what the plant can run: syrup scenarios need the syrup room, labeler scenarios the real labeler, and a
+    scenario that stops the labeler stand-in (labeler_stopped) needs the stand-in."""
     def offered(s) -> bool:
+        if s.target != target:
+            return False
         if s.target == "syrup":
             return with_syrup
         if s.target == "labeler":
             return with_labeler
         return not (with_labeler and uses_command(s, "labeler_running"))
 
-    return [(f"{s.name} [{s.target}]", s.name) for s in SCENARIOS.values() if offered(s)]
+    return [(s.name, s.name) for s in SCENARIOS.values() if offered(s)]
 
 
 class SimulatorApp(App):
@@ -235,10 +241,10 @@ class SimulatorApp(App):
                                 classes="row switch-row",
                             )
                             yield from self._switch_rows(LABELER_SWITCHES)
-        # One scenario row for every machine
+        # One scenario row under the tabs; its select shows the active tab's scenarios (filler at start)
         yield Horizontal(
             Label("Scenario"),
-            Select(scenario_options(self.has_syrup, self.has_labeler), id="in-scenario", compact=True,
+            Select(scenario_options("filler", self.has_syrup, self.has_labeler), id="in-scenario", compact=True,
                    prompt="choose"),
             Button("Run", id="bt-scenario", compact=True),
             Static(id="scenario-status"),
@@ -318,13 +324,15 @@ class SimulatorApp(App):
 
     def _start_scenario(self) -> None:
         name = self.query_one("#in-scenario", Select).value
-        if name in SCENARIOS and SCENARIOS[name].target == "syrup" and not self.has_syrup:
-            self.notify(f"{name} needs the syrup room (started with --filler-only)", severity="warning")
-        elif name in SCENARIOS:
-            self.slot.start(SCENARIOS[name])
-            self.notify(f"scenario {name} started")
-        else:
+        if name not in SCENARIOS:
             self.notify("choose a scenario first", severity="warning")
+            return
+        old = self.slot.runner
+        self.slot.start(SCENARIOS[name])  # one slot: a running scenario is replaced and stops where it was
+        if old is not None and not old.done:
+            self.notify(f"scenario {name} started, {old.scenario.name} ({old.scenario.target}) stopped")
+        else:
+            self.notify(f"scenario {name} started")
 
     def _put_value(self, input_id: str, command: str, kind: type) -> None:
         text = self.query_one(f"#{input_id}", Input).value
@@ -351,6 +359,13 @@ class SimulatorApp(App):
             self.notify("no labeler tab (started with --no-labeler / --filler-only)", severity="warning")
             return
         self.query_one("#tabs", TabbedContent).active = tab_id
+
+    def on_tabbed_content_tab_activated(self, message: TabbedContent.TabActivated) -> None:
+        """Keys 1 / 2 / 3 and mouse clicks: the scenario select shows only the new tab's machine."""
+        target = TAB_TARGETS.get(message.pane.id)
+        if target is not None:
+            self.query_one("#in-scenario", Select).set_options(
+                scenario_options(target, self.has_syrup, self.has_labeler))
 
     # --- Event log -------------------------------------------------------------------
     def _show_event(self, event: Event) -> None:
