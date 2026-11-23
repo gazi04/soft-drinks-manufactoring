@@ -4,7 +4,8 @@ One tick (report section 7.3):
     1. apply the queued commands (panel, scenario, test)   commands.CommandQueue.apply()
     2. read the PLC outputs                       plcs.FillerPlc.read_outputs()
        (and the syrup room PLC's: plcs.SyrupPlc.read_signals(), when there is one;
-        and the labeler PLC's: plcs.LabelerPlc.read_outputs(), when there is one)
+        the labeler PLC's: plcs.LabelerPlc.read_outputs(), when there is one;
+        the packer PLC's: plcs.PackerPlc.read_outputs(), when there is one)
     3. move the world by the measured dt          plant.Plant.step()
     4. write sensors + wiring values to the PLC   plcs.FillerPlc.write()
     5. read the PLC status: watcher events, setpoints for the audit
@@ -35,11 +36,15 @@ from simulator.machines.filler import FillerOutputs
 from simulator.plant import Plant
 from simulator.scenarios import ScenarioRunner, ScenarioSlot
 from simulator.machines.labeler import LabelerOutputs
+from simulator.machines.packer import PackerOutputs
 from simulator.plant import SyrupSignals
 from simulator.plcs import (
     LABELER_STATE_NAMES,
     LABELER_STEP_NAMES,
     MODE_NAMES,
+    PACKER_STATE_NAMES,
+    PACKER_STEP_NAMES,
+    PACKER_WRAP_STEP_NAMES,
     STATE_NAMES,
     STEP_NAMES,
     SYRUP_STATE_NAMES,
@@ -47,6 +52,8 @@ from simulator.plcs import (
     FillerPlc,
     LabelerPlc,
     LabelerStatus,
+    PackerPlc,
+    PackerStatus,
     PlcCommError,
     PlcReplyError,
     PlcStatus,
@@ -66,6 +73,7 @@ class PlcWatcher:
     The same class watches every PLC: the names, a text prefix ("syrup: ") and the counter
     that is shown in the first line differ. `log_count` also reports every increase of that
     counter (the syrup room's batches; the filler's GoodCount would flood the log).
+    `wrap_step_names`: the packer's second sequencer (WrapStep), reported like the step.
     """
 
     def __init__(
@@ -76,6 +84,7 @@ class PlcWatcher:
         count_label: str = "GoodCount",
         count=lambda status: status.good_count,
         log_count: bool = False,
+        wrap_step_names: dict[int, str] | None = None,
     ) -> None:
         self.step_names = step_names
         self.state_names = state_names
@@ -83,6 +92,7 @@ class PlcWatcher:
         self.count_label = count_label
         self.count = count
         self.log_count = log_count
+        self.wrap_step_names = wrap_step_names
         self.last = None
 
     def update(self, status, now: float) -> list[Event]:
@@ -95,8 +105,10 @@ class PlcWatcher:
             events.append(Event.plc(now, self.prefix + text, warning=warning))
 
         if last is None:
+            wrap = self.wrap_step_names
+            wrap_text = f"wrap step {wrap.get(status.wrap_step, status.wrap_step)}, " if wrap is not None else ""
             plc(f"status: mode {MODE_NAMES.get(status.mode, status.mode)}, "
-                f"step {step.get(status.step, status.step)}, "
+                f"step {step.get(status.step, status.step)}, {wrap_text}"
                 f"state {state.get(status.state, status.state)}, {self.count_label} {self.count(status)}")
             for name, on in status.alarms.items():
                 if on:
@@ -106,6 +118,9 @@ class PlcWatcher:
             plc(f"mode {MODE_NAMES.get(last.mode, last.mode)} -> {MODE_NAMES.get(status.mode, status.mode)}")
         if status.step != last.step:
             plc(f"step {step.get(last.step, last.step)} -> {step.get(status.step, status.step)}")
+        if self.wrap_step_names is not None and status.wrap_step != last.wrap_step:
+            wrap = self.wrap_step_names
+            plc(f"wrap step {wrap.get(last.wrap_step, last.wrap_step)} -> {wrap.get(status.wrap_step, status.wrap_step)}")
         if status.state != last.state:
             plc(f"state {state.get(last.state, last.state)} -> {state.get(status.state, status.state)}")
         if self.log_count and self.count(status) > self.count(last):
@@ -164,6 +179,9 @@ class LoopStats:
     labeler_status: LabelerStatus | None = None  # same for the labeler PLC (None without a labeler link)
     labeler_count_start: int | None = None  # the labeler's GoodCount
     labeler_count_end: int | None = None
+    packer_status: PackerStatus | None = None  # same for the packer PLC (None without a packer link)
+    packer_count_start: int | None = None  # the packer's PackCount
+    packer_count_end: int | None = None
     problems: set[str] = field(default_factory=set)  # distinct problems already logged
 
     def summary(self) -> str:
@@ -182,8 +200,13 @@ class LoopStats:
             if self.labeler_count_start is not None and self.labeler_count_end is not None
             else ""
         )
+        packed = (
+            f", PackCount +{self.packer_count_end - self.packer_count_start}"
+            if self.packer_count_start is not None and self.packer_count_end is not None
+            else ""
+        )
         dt = f"dt {self.dt_min * 1000:.0f}-{self.dt_max * 1000:.0f} ms" if self.ticks else "no ticks"
-        return f"{self.ticks} ticks in {self.seconds:.1f} s, {dt}{made}{batches}{labelled}"
+        return f"{self.ticks} ticks in {self.seconds:.1f} s, {dt}{made}{batches}{labelled}{packed}"
 
 
 async def run(
@@ -200,6 +223,7 @@ async def run(
     scenario: ScenarioRunner | ScenarioSlot | None = None,
     syrup_plc: SyrupPlc | None = None,
     labeler_plc: LabelerPlc | None = None,
+    packer_plc: PackerPlc | None = None,
 ) -> LoopStats:
     """Run the loop until `seconds` have passed, `until()` is true or `stop` is set.
 
@@ -210,6 +234,10 @@ async def run(
     `labeler_plc`: the third PLC, needed exactly when the plant has the real labeler
     (Plant(with_labeler=True)): it drives C2's motor, so without it the filler would block. A labeler
     PLC that does not answer switches all its outputs off: C2 stands, the heater is off.
+
+    `packer_plc`: the fourth PLC, needed exactly when the plant has the real packer
+    (Plant(with_packer=True)): it drives C3's motor, so without it the labeler would block. A packer
+    PLC that does not answer switches all its outputs off: C3 stands, the oven is off.
 
     `commands`: queue filled by the caller (panel, test); applied at the start of every
     tick, the only place where the world changes from outside the physics.
@@ -223,11 +251,17 @@ async def run(
         raise ValueError("a labeler PLC link needs a plant with the labeler: Plant(with_labeler=True)")
     if labeler_plc is None and plant.labeler is not None:
         raise ValueError("a plant with the labeler needs its PLC link (labeler_plc=): nobody else drives C2")
+    if packer_plc is not None and plant.packer is None:
+        raise ValueError("a packer PLC link needs a plant with the packer: Plant(with_labeler=True, with_packer=True)")
+    if packer_plc is None and plant.packer is not None:
+        raise ValueError("a plant with the packer needs its PLC link (packer_plc=): nobody else drives C3")
     plant_lock.acquire(plc.host, plc.port, "simulator loop")
     if syrup_plc is not None:
         plant_lock.acquire(syrup_plc.host, syrup_plc.port, "simulator loop")
     if labeler_plc is not None:
         plant_lock.acquire(labeler_plc.host, labeler_plc.port, "simulator loop")
+    if packer_plc is not None:
+        plant_lock.acquire(packer_plc.host, packer_plc.port, "simulator loop")
     stats = LoopStats()
     watcher = PlcWatcher()
     filler = LinkTrack(plc, "PLC")
@@ -236,6 +270,9 @@ async def run(
                                lambda status: status.batch_count, log_count=True)
     labeler = LinkTrack(labeler_plc, "labeler PLC") if labeler_plc is not None else None
     labeler_watcher = PlcWatcher(LABELER_STEP_NAMES, LABELER_STATE_NAMES, "labeler: ")
+    packer = LinkTrack(packer_plc, "packer PLC") if packer_plc is not None else None
+    packer_watcher = PlcWatcher(PACKER_STEP_NAMES, PACKER_STATE_NAMES, "packer: ", "PackCount",
+                                lambda status: status.pack_count, wrap_step_names=PACKER_WRAP_STEP_NAMES)
     if scenario is not None and commands is None:
         commands = CommandQueue()
     start = last = time.monotonic()
@@ -249,7 +286,8 @@ async def run(
 
         # 1. Commands, before anything is read or moved
         if scenario is not None:
-            due, events = scenario.due(plant, stats.status, stats.syrup_status, stats.labeler_status)
+            due, events = scenario.due(plant, stats.status, stats.syrup_status, stats.labeler_status,
+                                       stats.packer_status)
             log.extend(events)
             for command in due:
                 commands.put_command(command)
@@ -298,8 +336,23 @@ async def run(
                                 f"{labeler_plc.reconnect_s:g} s: C2 stands, the filler will block "
                                 "(run with --no-labeler to keep the labeler stand-in)")
 
+        # 2d. The packer PLC: its outputs (link down: None = all OFF, C3 stands, the oven is off)
+        packer_out: PackerOutputs | None = None
+        if packer is not None:
+            if await packer_plc.ensure_connected():
+                try:
+                    packer_out = await packer_plc.read_outputs()
+                except PlcCommError as error:
+                    packer.problem(stats, log, plant.now, f"read:{type(error).__name__}",
+                                   f"reading the packer PLC outputs failed: {error}")
+            elif not packer.was_ok:
+                packer.problem(stats, log, plant.now, "connect",
+                               f"packer PLC {packer_plc.host}:{packer_plc.port} not reachable, retrying every "
+                               f"{packer_plc.reconnect_s:g} s: C3 stands, the labeler will block "
+                               "(run with --no-packer to keep the packer stand-in)")
+
         # 3. Physics (the first tick has dt = 0: only the start state is written)
-        writes, events = plant.step(out, dt, signals, labeler_out)
+        writes, events = plant.step(out, dt, signals, labeler_out, packer_out)
         log.extend(events)
 
         # 4.+5. Write sensors, read the status back
@@ -374,12 +427,37 @@ async def run(
             except PlcCommError:
                 labeler.last_writes = None
 
+        # 4d.+5d. The same for the packer PLC, on its own
+        if packer is not None and packer_plc.connected:
+            packer_writes = plant.packer_writes()
+            try:
+                if packer.last_writes is not None and stats.ticks % VERIFY_EVERY == 0:
+                    wrong = await packer_plc.verify_writes(packer.last_writes)
+                    if wrong:
+                        packer.problem(stats, log, plant.now, f"foreign:{wrong}",
+                                       f"packer PLC: written values changed by someone else: {', '.join(wrong)} "
+                                       "(debugger force or a second writer, e.g. a test script)")
+                await packer_plc.write(packer_writes)
+                packer.last_writes = packer_writes
+                packer_status = await packer_plc.read_status()
+                stats.packer_status = packer_status
+                log.extend(packer_watcher.update(packer_status, plant.now))
+                if stats.packer_count_start is None:
+                    stats.packer_count_start = packer_status.pack_count
+                stats.packer_count_end = packer_status.pack_count
+            except PlcReplyError as error:
+                packer.problem(stats, log, plant.now, f"reply:{error}", str(error))
+            except PlcCommError:
+                packer.last_writes = None
+
         # 6. Link changes
         filler.report_link(stats, log, plant.now)
         if syrup is not None:
             syrup.report_link(stats, log, plant.now)
         if labeler is not None:
             labeler.report_link(stats, log, plant.now)
+        if packer is not None:
+            packer.report_link(stats, log, plant.now)
 
         stats.ticks += 1
         stats.seconds = time.monotonic() - start

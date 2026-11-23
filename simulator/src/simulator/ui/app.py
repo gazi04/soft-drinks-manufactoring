@@ -44,7 +44,7 @@ from simulator import config, loop
 from simulator.commands import CommandQueue
 from simulator.events import Event, EventLog
 from simulator.plant import Plant
-from simulator.plcs import FillerPlc, LabelerPlc, SyrupPlc
+from simulator.plcs import FillerPlc, LabelerPlc, PackerPlc, SyrupPlc
 from simulator.scenarios import SCENARIOS, ScenarioSlot, uses_command
 from simulator.ui import view
 
@@ -160,12 +160,14 @@ class SimulatorApp(App):
     def __init__(
         self, plant: Plant, plc: FillerPlc, log_path: Path | None, scenario: str | None = None,
         syrup_plc: SyrupPlc | None = None, labeler_plc: LabelerPlc | None = None,
+        packer_plc: PackerPlc | None = None,
     ) -> None:
         super().__init__()
         self.plant = plant
         self.plc = plc
         self.syrup_plc = syrup_plc  # the second PLC (None = filler only)
         self.labeler_plc = labeler_plc  # the third PLC (None = labeler stand-in, no labeler tab)
+        self.packer_plc = packer_plc  # the fourth PLC (None = packer stand-in on C3)
         self.queue = CommandQueue()
         self.slot = ScenarioSlot()
         if scenario:
@@ -192,8 +194,14 @@ class SimulatorApp(App):
         if self.has_syrup:
             switches |= SYRUP_SWITCHES
         if self.has_labeler:
-            switches |= LABELER_SWITCHES
+            switches |= self._labeler_switches()
         return switches
+
+    def _labeler_switches(self) -> Switches:
+        """The labeler tab's switches; "Packer running" belongs to the packer stand-in only."""
+        if self.plant.packer is None:
+            return LABELER_SWITCHES
+        return {k: v for k, v in LABELER_SWITCHES.items() if k != "sw-packer"}
 
     # --- Layout ----------------------------------------------------------------------
     def compose(self) -> ComposeResult:
@@ -241,7 +249,7 @@ class SimulatorApp(App):
                                 Button("Clear gate", id="bt-clear-gate", compact=True),
                                 classes="row switch-row",
                             )
-                            yield from self._switch_rows(LABELER_SWITCHES)
+                            yield from self._switch_rows(self._labeler_switches())
         # One scenario row under the tabs; its select shows the active tab's scenarios (filler at start)
         yield Horizontal(
             Label("Scenario"),
@@ -280,7 +288,7 @@ class SimulatorApp(App):
         self.stats = await loop.run(
             self.plc, self.plant, self.events,
             stop=self._stop, on_tick=self._on_tick, commands=self.queue, scenario=self.slot,
-            syrup_plc=self.syrup_plc, labeler_plc=self.labeler_plc,
+            syrup_plc=self.syrup_plc, labeler_plc=self.labeler_plc, packer_plc=self.packer_plc,
         )
 
     def _on_tick(self, stats: loop.LoopStats) -> None:
@@ -288,7 +296,8 @@ class SimulatorApp(App):
 
     # --- Redraw ----------------------------------------------------------------------
     def refresh_view(self) -> None:
-        self.query_one("#header", Static).update(view.header_text(self.stats, self.plc, self.syrup_plc, self.labeler_plc))
+        self.query_one("#header", Static).update(view.header_text(self.stats, self.plc, self.syrup_plc, self.labeler_plc,
+                                                                    self.packer_plc))
         self.query_one("#world", Static).update(view.world_text(self.plant))
         if self.has_syrup:
             self.query_one("#syrup-world", Static).update(view.syrup_world_text(self.plant))
@@ -399,5 +408,7 @@ class SimulatorApp(App):
             self.syrup_plc.close()
         if self.labeler_plc is not None:
             self.labeler_plc.close()
+        if self.packer_plc is not None:
+            self.packer_plc.close()
         self.events.close()
         self.exit(self.stats)

@@ -34,7 +34,7 @@ from simulator import config
 from simulator.commands import LABELER_COMMANDS, SYRUP_COMMANDS, Command, check
 from simulator.events import Event
 from simulator.plant import Plant
-from simulator.plcs import LabelerStatus, PlcStatus, SyrupStatus
+from simulator.plcs import LabelerStatus, PackerStatus, PlcStatus, SyrupStatus
 
 # PLC step and state numbers (plcs.STEP_NAMES / STATE_NAMES)
 IDLE, INDEX, FAULT = 0, 20, 900
@@ -141,15 +141,18 @@ class ScenarioRunner:
         status: PlcStatus | None,
         syrup_status: SyrupStatus | None = None,
         labeler_status: LabelerStatus | None = None,
+        packer_status: PackerStatus | None = None,
     ) -> tuple[list[Command], list[Event]]:
         """Commands of every step that is due now (several if they follow at once).
 
         Conditions see `syrup_status` in a syrup scenario, `labeler_status` in a labeler scenario,
-        `status` (the filler) otherwise."""
+        `packer_status` in a packer scenario, `status` (the filler) otherwise."""
         if self.scenario.target == "syrup":
             status = syrup_status
         elif self.scenario.target == "labeler":
             status = labeler_status
+        elif self.scenario.target == "packer":
+            status = packer_status
         if self._since is None:
             self._since = plant.now  # the timeline starts with the first tick
         commands: list[Command] = []
@@ -190,10 +193,11 @@ class ScenarioSlot:
         status: PlcStatus | None,
         syrup_status: SyrupStatus | None = None,
         labeler_status: LabelerStatus | None = None,
+        packer_status: PackerStatus | None = None,
     ) -> tuple[list[Command], list[Event]]:
         if self.runner is None:
             return [], []
-        return self.runner.due(plant, status, syrup_status, labeler_status)
+        return self.runner.due(plant, status, syrup_status, labeler_status, packer_status)
 
 
 # --- Built-in scenarios ------------------------------------------------------------

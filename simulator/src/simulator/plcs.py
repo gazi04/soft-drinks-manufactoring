@@ -391,6 +391,10 @@ def decode_labeler_status(regs: list[int], alarm_bits: list[bool], mode: int) ->
 
 
 # --- Packer (port 5024) --------------------------------------------------------------
+PACKER_STEP_NAMES = {0: "IDLE", 5: "WARM_UP", 10: "COUNT", 15: "WAIT_WRAP", 20: "PUSH", 25: "RETRACT", 900: "FAULT"}
+PACKER_WRAP_STEP_NAMES = {0: "IDLE", 10: "WAIT_PACK", 20: "FEED", 22: "CUT", 24: "READY", 30: "RUN_ON", 32: "WRAP",
+                          34: "RUN_OUT", 900: "FAULT"}
+PACKER_STATE_NAMES = {0: "Stopped", 1: "Running", 2: "Starved", 3: "Blocked", 9: "Fault"}
 PACKER_ALARM_NAMES = ("Alm_FilmFault", "Alm_PackJam", "Alm_OutfeedBlocked", "Alm_CommLost", "Alm_FilmEmpty",
                       "Alm_OvenOverTemp", "Alm_OvenHeatTimeout", "Alm_OvenJam",  # %MX5.0 .. %MX5.7
                       "Alm_AirflowLost", "Alm_WrapTimeout")  # %MX7.0 .. %MX7.1

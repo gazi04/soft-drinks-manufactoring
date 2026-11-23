@@ -28,12 +28,16 @@ from simulator.plcs import (
     LABELER_STATE_NAMES,
     LABELER_STEP_NAMES,
     MODE_NAMES,
+    PACKER_STATE_NAMES,
+    PACKER_STEP_NAMES,
+    PACKER_WRAP_STEP_NAMES,
     STATE_NAMES,
     STEP_NAMES,
     SYRUP_STATE_NAMES,
     SYRUP_STEP_NAMES,
     FillerPlc,
     LabelerPlc,
+    PackerPlc,
     SyrupPlc,
 )
 from simulator.scenarios import ScenarioSlot
@@ -328,10 +332,36 @@ def labeler_header_text(stats: LoopStats | None, plc: LabelerPlc) -> Text:
     return t
 
 
+def packer_header_text(stats: LoopStats | None, plc: PackerPlc) -> Text:
+    """The packer PLC's line (link, mode, both steps, state, PackCount, alarms), like the labeler's."""
+    t = Text()
+    link = "up" if plc.link_ok else "not connected"
+    t.append(f"packer PLC {plc.host}:{plc.port} {link}", style="green" if plc.link_ok else "bold red")
+    status = stats.packer_status if stats else None
+    if status is None:
+        return t
+    mode = MODE_NAMES.get(status.mode, status.mode)
+    t.append(f"  │  mode {mode}", style="" if status.mode == MODE_AUTO else "bold yellow")
+    t.append(f"  │  step {PACKER_STEP_NAMES.get(status.step, status.step)}"
+             f" / wrap {PACKER_WRAP_STEP_NAMES.get(status.wrap_step, status.wrap_step)}"
+             f"  │  state {PACKER_STATE_NAMES.get(status.state, status.state)}"
+             f"  │  PackCount {status.pack_count}  │  ")
+    active = [name for name, on in status.alarms.items() if on]
+    t.append(f"alarms: {', '.join(active)}" if active else "alarms: none", style="bold red" if active else "")
+    if status.mode != MODE_AUTO:
+        t.append(f"\npacker mode {mode}: Start is ignored. Auto + start:  uv run python tests/hmi.py --packer auto reset start",
+                 style="yellow")
+    elif status.step == IDLE and status.wrap_step == IDLE:
+        t.append("\npacker PLC in IDLE: start it with  uv run python tests/hmi.py --packer auto reset start",
+                 style="yellow")
+    return t
+
+
 def header_text(
-    stats: LoopStats | None, plc: FillerPlc, syrup_plc: SyrupPlc | None = None, labeler_plc: LabelerPlc | None = None
+    stats: LoopStats | None, plc: FillerPlc, syrup_plc: SyrupPlc | None = None, labeler_plc: LabelerPlc | None = None,
+    packer_plc: PackerPlc | None = None,
 ) -> Text:
-    """The filler PLC's line, and under it the syrup room's and the labeler's when there are ones."""
+    """The filler PLC's line, and under it the syrup room's, the labeler's and the packer's when there are ones."""
     t = filler_header_text(stats, plc)
     if syrup_plc is not None:
         t.append("\n")
@@ -339,6 +369,9 @@ def header_text(
     if labeler_plc is not None:
         t.append("\n")
         t.append_text(labeler_header_text(stats, labeler_plc))
+    if packer_plc is not None:
+        t.append("\n")
+        t.append_text(packer_header_text(stats, packer_plc))
     return t
 
 
