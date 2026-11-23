@@ -377,7 +377,7 @@ Tests: `test_loop_syrup.py` (16, two fake servers incl. a silent PLC), heartbeat
 Tests: `test_syrup_faults.py` (12), commands, scenario steps and one loop test (suite 290). Mutation checks (frozen reading ignored, stuck valve ignored, wrong status routed) each fail a test. Live: `tests/test_syrup_scenarios.py` (6 scenarios on the real syrup PLC, in `run_syrup.py`): over_pressure (alarm at 6.05 bar), low_syrup (Starved, refill restarts alone), level_sensor_stuck (`Alm_Overflow` 49.0 s after DOSE_WATER, true level 980 L, no spill), buffer_full (WAIT_BUFFER, Blocked, continues alone), cooling_failure and pump_failure (alarm exactly 60.0 s after the step began, resume after Reset + Start). `buffer_starved` live (2026-11-13, both PLCs, headless): `Product_Available` dropped at 66 s, filler Starved, Running again at 130 s after the next TRANSFER, no empty-buffer warning. Panel switches: stage 7.
 
 **Stage 7 as built (2026-11-13):** the panel has one tab per machine (report 7.5: "each machine gets its own tab").
-- **Layout:** header (filler + syrup PLC lines) / `TabbedContent` `1 Filler`, `2 Syrup room` (keys `1` / `2`; the syrup tab only without `--filler-only`) / one shared scenario row (select shows `name [target]`, syrup scenarios hidden with `--filler-only`) / event log.
+- **Layout:** header (filler + syrup PLC lines) / `TabbedContent` `1 Filler`, `2 Syrup room` (keys `1` / `2`; the syrup tab only without `--filler-only`) / one shared scenario row (select shows `name [target]`, syrup scenarios hidden with `--filler-only`) / event log. *Changed 2026-11-23:* the select shows only the active tab's scenarios (`scenario_options(target, ...)`, refilled on `TabActivated`); the status shows `name (target)`.
 - **Syrup world** (`view.syrup_world_text`, pure): tank levels with `level_bar`, product temperature, CO2 pressure + dissolved CO2, chiller temperature, the syrup PLC's six output lamps, `MixHighHigh`, the `Product_Available` signal and the wire to the filler, E-stop, heartbeat, ledger, draw scale. Numbers are the sensor values written to the PLC; red markers for every injected fault (`FAILED`, `SENSOR STUCK (true … L)`, `CHILLER FAILED`, `STUCK OPEN`, `FROZEN`) and a line when the syrup PLC does not answer.
 - **Syrup controls:** 6 switches (chiller failed, water pump failed, syrup pump failed, CO2 valve stuck, level sensor stuck, syrup heartbeat), 5 value rows (deliver syrup, drain syrup, draw buffer, fill buffer, draw scale), 2 action buttons (vent tank, drain mix tank). Switches follow the plant like the filler's.
 - **New commands** `syrup_heartbeat` (freezes only the syrup PLC's heartbeat) and `fill_buffer_to` (tops the buffer up to a level, for `buffer_full`): 14 syrup commands.
@@ -483,3 +483,87 @@ Tests: `test_view.py` (+3: values and lamps, every fault marker incl. both heate
 - `design-notes.md`: "Pre-demo check with three PLCs" (+3 Q&As), labeler section (+2: label share on the tab, animation words). `README.md` demo check text. Report section 7: labeler status, structure tree, third link, labeler physics, panel tab 3. `CLAUDE.md`.
 
 Test: live `demo_check.py` against the three runtimes, all D6 cases that matter seen: no simulator (WARN), `--no-labeler` (WARN "labeler … started with --no-labeler?"), all three PLCs (PASS) → 14 PASS, 0 WARN, 0 FAIL with the three PLCs reset to IDLE. Unit suite 432 passed.
+
+---
+
+## Packer simulator
+
+Fourth machine (part B of `docs/packer/progress.md`), same pattern as the labeler. Filler, syrup room and labeler classes do not change; `PackerStandIn` stays for `--no-packer`. Addresses: `docs/packer/io-list.md`; behaviour: `docs/packer/state-diagram.md`; PLC constants the physics must fit: `state-diagram.md`, "Fixed constants". **Planned 2026-11-22, open questions answered the same day (all as recommended); nothing built yet.**
+
+Before stage 0: part A committed (PLC program complete, `run_packer.py` 225/225); the other three runtimes up with their programs (`demo_check.py`).
+
+### What the simulator has to model
+
+Everything the packer PLC reads, nothing more (the PLC decides, the simulator only answers):
+
+```
+ C3 (packer PLC drives it) ─► gate ─► collation table ─► pusher ─► WRAP CONVEYOR ──────────────► OVEN CONVEYOR ─────► outfeed table ─► palletizer
+  Bottle_At_Gate = exit slot   │       (group of 6)       │         entry   film stop   slot          Oven_Entry ... Oven_Exit   Table_Full    (stand-in)
+                               Bottle_Counted pulse     Pusher_Home  0 mm   400 mm (Pack_At_Film)    1100 mm   heater, blower,
+                                                        Pusher_Out          film roll -> feed rollers (Film_Pulse)  OvenTemp, Airflow_OK
+                                                                            -> sheet in the slot (Film_In_Slot) -> knife
+                                                                            wrap bar (Wrap_Home) lays it over the pack
+```
+
+New objects: a **`Pack`** (id, its 6 bottles, sheet length, wrapped, seconds hot in the oven, shrunk) that moves like a `Bottle` and is audited when it leaves; positions on the wrap and oven conveyors in **mm** (one pack object with a front position), not slots: the PLC's transitions hang on sensor edges at fixed points (film stop, oven entry), and a 0.5 s slot step would be too coarse.
+
+### Stages
+
+| # | Stage | Content | Test |
+| --- | --- | --- | --- |
+| 0 | Address map | `address_map_packer.py` (converters from `address_map`): 10 outputs (coils 0–9), sensor block 8192–8202 (`%MX0` + `%MX1.0–1.2`, unused `%MX1.0` written FALSE), extra block 8224–8229 (`%MX4.0–4.5`), `OvenTemp` HR 1036, status HR 1074–1077 (State, **Step, WrapStep**, PackCount), computed HR 1064–1067, 10 alarms in two blocks (8232–8239, 8248–8249), conditioned bits 8216–8223, setpoints HR 1054–1057, manual buttons, `SIM_WRITE_*` | unit: numbers = `io-list.md` and the located variables of `plcs/packer/.../main.ld`, both directions; blocks contiguous; one-writer rule |
+| 1 | Collation | `machines/packer.py` part 1: `Pack`; gate on C3's exit (a bottle leaves C3 only while `GateMotor` is ON, `Bottle_Counted` timed pulse per bottle), collation table (group, 7th bottle = audit), group pusher (position 0..1, out while the valve is ON, spring return; the group moves onto the wrap conveyor only at `Pusher_Out`) | 6 gate passes = 6 pulses, each ≥ 1 tick; gate shut after the 6th → no 7th; push / retract times < `PushTimeout` 3 s; a push stopped halfway leaves the group on the table |
+| 2 | Wrap | wrap conveyor (pack front in mm, `Pack_At_Film` while the pack covers the stop sensor), film roll (length, `Film_Low`, `Film_Empty`, a tail that still finishes a started sheet), feed rollers + `Film_Pulse` (timed pulse per 50 mm), sheet in the slot (`Film_In_Slot`, attached until the knife cuts it), knife, wrap bar (one turn while ON, `Wrap_Home` window); a pack that drives over a cut sheet takes it, the bar turn wraps it; audits: pack drives over an uncut sheet (torn), sheet too short, feed into a turning bar | 850 mm = 17 pulses < `FeedTimeout` 10 s (1200 mm too); pulses ≥ 0.3 s apart; cut < `CutTime` 0.3 s; entry → film stop < `ClearTime` 3 s; RUN_ON / RUN_OUT < 3 s; one bar turn < `WrapTimeout` 5 s; bar stops inside its home window after the PLC's reaction time |
+| 3 | Oven + outfeed | `Oven`: air temperature (first-order, heater only with air flowing, room loss), blower + `Airflow_OK`, oven conveyor (transit time), `Oven_Entry` / `Oven_Exit` pulses, shrink (time above the shrink temperature); outfeed table (capacity, `Table_Full`); `PalletizerStandIn` (takes one pack every N s, can be stopped) | heat-up 20 → 175 °C well under `HeatTimeout` 120 s; heater stuck on reaches `OvenMax` 230 °C; transit ≈ `OvenJamTime` / 2; hysteresis with the PLC rule stays in the window; cold oven = audit "not shrunk" |
+| 4 | Plant + test controller | `Plant(with_packer=True)` (needs `with_labeler`): the packer PLC's `ConveyorMotor3` drives C3, the packer replaces `PackerStandIn`; `packer_writes()` (timed pulses ORed over the sub-steps, as `Label_Mark`), shared E-stop, own heartbeat; `PackerTestController` (Python port of both step tables and the oven rules, no alarms, as the labeler's) | test controllers pack N groups without a PLC; palletizer stopped → table full → READY waits (Blocked) → gate stays shut → C3 full → labeler Blocked → C2 full → filler Blocked (the line backs up, report 5.5) |
+| 5 | Fourth link | `PackerPlc` (shared `PlcLink` base) on port 5024: `read_outputs()` (coils 0–9), `write()` (sensor block, extra block, `OvenTemp`), heartbeat, `read_status()` (State, Step, WrapStep, PackCount, GroupCount, PacksInOven, 10 alarms), `verify_writes()` | unit mapping + local-server link tests; live `test_link_packer.py`: heartbeat watchdog, write + read back, the PLC reacts to `OvenTemp` / `Table_Full` |
+| 6 | Closed loop, four PLCs | `loop.run(..., packer_plc=)`, plant lock on 5024, fourth header line; CLI default = four PLCs, `--no-packer` keeps the stand-in | live `test_closed_loop_packer.py`: real bottles labeler → packer, N packs, `PackCount` + N, every pack wrapped and shrunk; `--packer-only` (the test feeds C3) |
+| 7 | Commands + scenarios | faults in the physics (the PLC is never told) and hand actions, `target="packer"` scenarios (list below) | each scenario gives the alarm / state of `state-diagram.md` on the real packer PLC (`test_packer_scenarios.py`) |
+| 8 | Panel | tab `4 Packer`: C3 + gate, table group, pusher, wrap conveyor with the pack and the film stop, roll, sheet, bar, oven temperature + packs inside, outfeed table; switches and value rows for every packer command | pilot test + one scenario from the panel |
+| 9 | Wrap-up | `demo_check.py` (fourth PLC), design notes, README, report section 7, `CLAUDE.md`; animation words `%MW70–79` decided with the HMI plan (part C), as for the labeler | live `demo_check.py` with four PLCs |
+
+### Proposed parameters (checked against the PLC constants)
+
+| Parameter | Proposed | Must fit with (PLC) |
+| --- | --- | --- |
+| Gate: bottle leaves C3 → on the table | 0.4 s, `Bottle_Counted` ON 0.2 s at the start | the next bottle of a queue needs a full slot step (0.5 s) to reach C3's exit; the PLC shuts the gate ≤ 0.2 s after the 6th count (tick + scan): no 7th bottle |
+| Pusher out / spring return | 1.0 s / 0.8 s | `PushTimeout` 3 s |
+| Wrap conveyor speed, entry → film stop | 200 mm/s, 400 mm (2.0 s) | `ClearTime` 3 s longer than the travel (rule 2) |
+| Pack length | 200 mm (3 bottles × 65 mm) | RUN_ON = 1.0 s < 3 s; the conveyor's stop overshoot (≤ 40 mm) keeps `Pack_At_Film` ON |
+| Feed speed, pulse | 167 mm/s, one pulse per 50 mm, ON 0.15 s / OFF 0.15 s | `FilmPulseMM` 50; 850 mm 5.1 s, 1200 mm 7.2 s < `FeedTimeout` 10 s; each level ≥ one 0.1 s tick |
+| Knife | cuts after 0.2 s ON | `CutTime` 0.3 s |
+| Wrap bar | 1.5 s per turn, `Wrap_Home` window 25 % of a turn (0.375 s) | `WrapTimeout` 5 s; the PLC drops `WrapBar` 0.1–0.2 s after the edge, the bar stops inside the window |
+| WRAP → oven entry | film stop 400 → oven entry 1100 mm: RUN_OUT about 1.0 s | `PushTimeout` 3 s |
+| Sheet needed to wrap a pack | 800 mm | default `FilmLength` 850 wraps; 600 mm = audit "sheet too short" (the recipe value matters) |
+| Oven length, conveyor speed | 1000 mm, 100 mm/s: transit 10 s | `OvenJamTime` 20 s ≈ 2 × transit |
+| Oven heater, room | target 300 °C, tau 60 s with air flowing; room 20 °C, tau 300 s | 20 → 175 °C in 48 s < `HeatTimeout` 120 s; stuck heater 190 → 230 °C in 27 s (`OvenMax` reachable); 0.19 °C per tick at 185 °C inside `OvenHyst` 5 °C |
+| Shrink | ≥ 6 s above 170 °C | `Oven_Ready` window 175–205 °C |
+| Blower spin-up / `Airflow_OK` | 1.0 s after `OvenBlower` ON, FALSE at once when OFF | `AirflowTimeout` 3 s |
+| Film roll | 300 m (about 350 sheets), `Film_Low` at 10 m, tail 1.2 m | warnings only; the tail finishes a started 1200 mm sheet |
+| Outfeed table, palletizer | capacity 6 packs, `Table_Full` at 3; one pack taken every 10 s | Q3: room behind the sensor for every pack past READY (1 on the wrap conveyor + ≤ 2 in the oven) |
+| Throughput | wrap cycle about 13 s; the labeler gives one group per about 36 s | the packer keeps up and is often Starved (expected, `progress.md` concept) |
+
+### Commands and scenarios (stage 7)
+
+| Scenario | Fault / hand action | Expected on the real packer PLC |
+| --- | --- | --- |
+| `film_torn` | feed rollers turn, no film moves (no `Film_Pulse`) | `Alm_FilmFault` 10 s after FEED began; roll fixed, Reset + Start feeds the rest |
+| `sheet_dropped` | the cut sheet falls out of the slot in READY | `Alm_FilmFault` after 1 s; sheet put back by hand, Reset + Start |
+| `roll_empty` | small roll; `load_roll` | `Film_Empty`: pack waits in WAIT_PACK, Starved + `Alm_FilmEmpty`, no FAULT; the roll change alone restarts it |
+| `pusher_stuck` | pusher valve ON, cylinder does not move | `Alm_PackJam` 3 s after PUSH began |
+| `wrap_bar_stuck` | bar does not turn (film caught) | `Alm_WrapTimeout` 5 s after WRAP began; no pack wrapped twice after the restart |
+| `heater_failed` | heater gives no heat | `Alm_OvenHeatTimeout` 120 s after WARM_UP began |
+| `heater_stuck_on` | heater heats whatever the PLC says | `Alm_OvenOverTemp` at 230 °C in any mode, FAULT, blower runs 30 s more |
+| `blower_failed` | blower ON, no air (`Airflow_OK` FALSE) | heater off by its interlock, `Alm_AirflowLost` after 3 s |
+| `pack_stuck_in_oven` | one pack stops in the oven; `clear_oven` | `Alm_OvenJam` 20 s after the last pack out; Reset zeroes `PacksInOven` |
+| `palletizer_stopped` | palletizer stand-in stops | table full → READY waits, Blocked, `Alm_OutfeedBlocked` 2 min later, no FAULT; C3 fills → labeler Blocked (the line backs up); continues without Reset |
+
+Commands get a `_Spec(packer=True)` flag (ignored with a warning without the real packer); `packer_heartbeat` freezes only the packer's heartbeat.
+
+### Open questions (answered 2026-11-22: all as recommended ★)
+
+1. **CLI default:** `uv run simulator` drives four PLCs (`--no-packer` keeps the stand-in), like the labeler became the default? ★ yes – but then the packer runtime must run, else C3 stands and the labeler is soon Blocked.
+2. **Test controller:** port the packer's two step tables and oven rules to Python (`PackerTestController`) for the unit tests of stages 4–6, like the labeler's? ★ yes – it lets stages 1–4 be tuned and tested without the PLC and gives the line-backup test.
+3. **Pack quality:** audit warnings when a pack leaves with a short sheet, no wrap, not shrunk, or an unlabelled bottle (the PLC cannot see these)? ★ yes, warnings only, counted on the panel.
+4. **Conveyor model:** wrap and oven conveyors with positions in mm (above) instead of the slot `Conveyor`? ★ mm.
+5. **Scenario list** above: complete, or add / drop one (e.g. `bottles_short`: fewer bottles from the labeler = Starved)?
