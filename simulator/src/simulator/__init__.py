@@ -186,6 +186,9 @@ def main() -> None:
         raise SystemExit(f"scenario {args.scenario!r} stops the labeler stand-in: add --no-labeler")
     if args.scenario and args.with_packer and uses_command(SCENARIOS[args.scenario], "packer_running"):
         raise SystemExit(f"scenario {args.scenario!r} stops the packer stand-in: add --no-packer")
+    if args.scenario and not args.with_packer and SCENARIOS[args.scenario].target == "packer":
+        raise SystemExit(f"scenario {args.scenario!r} needs the real packer: leave out --no-packer / --no-labeler / "
+                         "--filler-only")
     if args.scenario and not args.with_labeler and SCENARIOS[args.scenario].target == "labeler":
         raise SystemExit(f"scenario {args.scenario!r} needs the real labeler: leave out --no-labeler / --filler-only")
     from simulator import plant_lock

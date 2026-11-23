@@ -143,6 +143,7 @@ class Packer:
         self._count_timer = 0.0  # remaining time of the Bottle_Counted pulse
         self._pushed_this_stroke = False  # the group of this push is already on the wrap conveyor
         self._next_pack_id = 1
+        self.pusher_stuck = False  # injected fault (stage 7): valve ON or OFF, the cylinder stays where it is
         self._now = 0.0
         self._audit = Audit()
         self.outfeed = OutfeedTable()
@@ -193,6 +194,8 @@ class Packer:
 
     # --- 4: pusher --------------------------------------------------------------------
     def _move_pusher(self, valve_on: bool, dt: float) -> None:
+        if self.pusher_stuck:
+            return
         if valve_on:
             self.pusher = min(1.0, self.pusher + dt / config.PUSH_OUT_S)
         else:
@@ -327,6 +330,18 @@ class Film:
         self.cut = False
         return sheet
 
+    def drop_sheet(self) -> None:
+        """Injected fault (stage 7): the film above the slot tears off at the slot and falls away."""
+        self.sheet_mm = 0.0
+        self.cut = False
+
+    def put_sheet(self, sheet_mm: float) -> None:
+        """Hand action (stage 7): the operator puts a cut sheet of `sheet_mm` back into the slot."""
+        if sheet_mm < 0:
+            raise ValueError(f"sheet_mm must be >= 0, got {sheet_mm}")
+        self.sheet_mm = sheet_mm
+        self.cut = sheet_mm > 0
+
     def load_roll(self, roll_mm: float = config.FILM_ROLL_MM) -> None:
         """Roll change by the operator: a new roll (a sheet already in the slot stays)."""
         if roll_mm < 0:
@@ -372,6 +387,7 @@ class Wrapper:
         self.packs: list[Pack] = []  # on the wrap conveyor, front pack (nearest the oven) first
         self.bar = 0.0  # wrap bar position in turns, 0 <= bar < 1, 0 = the middle of home
         self.wrapped = 0  # packs wrapped
+        self.bar_stuck = False  # injected fault (stage 7): WrapBar ON, the bar does not turn (film caught)
         self._now = 0.0
         self._audit = Audit()
 
@@ -399,7 +415,7 @@ class Wrapper:
         self._audit.warn("feed_under", moving and covered is not None,
                          f"film fed under {covered.name if covered else ''} covering the slot")
         # 2. Wrap bar
-        if out.wrap_bar:
+        if out.wrap_bar and not self.bar_stuck:
             events += self._turn_bar(dt)
         # 3. Conveyor
         if out.wrap_conveyor:
@@ -535,6 +551,12 @@ class Oven:
         self.packs: list[Pack] = []  # on the oven conveyor, front pack (nearest the exit) first
         self.left = 0  # packs moved onto the outfeed table
         self._spin_s = 0.0  # how long the blower has been running
+        self.removed: list[Pack] = []  # packs the operator took out of the oven (clear())
+        # Injected faults (stage 7), set only by commands; the PLC only sees their effect
+        self.heater_failed = False  # element burnt out: heats nothing (wins over heater_stuck_on)
+        self.heater_stuck_on = False  # contactor welded: heats whatever the PLC says (still only with air)
+        self.blower_failed = False  # blower motor runs, no air moves (broken belt): Airflow_OK stays FALSE
+        self.jammed = False  # a pack caught in the oven: the conveyor runs, the packs stand
         self._now = 0.0
         self._audit = Audit()
 
@@ -542,12 +564,13 @@ class Oven:
         self._now = now
         self._audit.start(now)
         # 1. Blower
-        self._spin_s = self._spin_s + dt if blower_on else 0.0
+        self._spin_s = self._spin_s + dt if blower_on and not self.blower_failed else 0.0
         # 2. Air temperature
-        self._heat(heater_on and self.air_flowing, dt)
+        heating = (heater_on or self.heater_stuck_on) and not self.heater_failed
+        self._heat(heating and self.air_flowing, dt)
         # 3.-4. Conveyor and outfeed
         events: list[Event] = []
-        if conveyor_on:
+        if conveyor_on and not self.jammed:
             self._move(dt)
         events += self._leave()
         # 5. Shrink
@@ -607,6 +630,13 @@ class Oven:
                                                    f"{', '.join(map(str, unlabelled))}", warning=True))
         name = self.packs[0].name if self.packs else ""
         self._audit.warn("exit_blocked", waiting, f"{name} waits at the oven exit: outfeed table full")
+        return events
+
+    def clear(self) -> list[Event]:
+        """Hand action (stage 7): the operator takes every pack out of the oven (after a jam)."""
+        events = [Event.sim(self._now, f"{pack.name} taken out of the oven by hand") for pack in self.packs]
+        self.removed += self.packs
+        self.packs = []
         return events
 
     # --- The door for the wrap conveyor (stage 2) -------------------------------------

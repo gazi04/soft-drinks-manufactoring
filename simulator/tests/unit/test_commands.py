@@ -84,6 +84,10 @@ LABELER_COMMANDS_TESTED = {
     "web_torn", "bell_stuck", "heater_failed", "heater_stuck_on", "gate_jam", "clear_gate", "load_roll",
     "glue_level", "add_glue", "packer_running", "labeler_heartbeat",
 }
+PACKER_COMMANDS_TESTED = {
+    "film_torn", "drop_sheet", "put_sheet", "load_film", "pusher_stuck", "wrap_bar_stuck", "oven_heater_failed",
+    "oven_heater_stuck_on", "blower_failed", "oven_jam", "clear_oven", "palletizer_running", "packer_heartbeat",
+}
 
 
 def applied_labeler(name, value) -> Plant:
@@ -129,7 +133,7 @@ def test_every_command_is_tested_above():
     assert set(COMMANDS) == {
         "supply_rate", "add_bottles", "supply_paused", "fill_flow", "product_available",
         "e_stop", "index_jam", "labeler_running", "heartbeat",
-    } | SYRUP_COMMANDS_TESTED | LABELER_COMMANDS_TESTED
+    } | SYRUP_COMMANDS_TESTED | LABELER_COMMANDS_TESTED | PACKER_COMMANDS_TESTED
 
 
 @pytest.mark.parametrize(
@@ -168,3 +172,48 @@ def test_apply_empties_queue_in_order_and_logs_each_command():
     assert [e.text for e in events] == ["command: product_available = False", "command: product_available = True"]
     assert all(e.source == Source.SIM and not e.is_warning for e in events)
     assert q.apply(plant) == []  # nothing left
+
+
+# --- Packer commands (stage 7) ---------------------------------------------------------------
+def applied_packer(name, value, plant: Plant | None = None) -> Plant:
+    plant = plant or Plant(with_labeler=True, with_packer=True)
+    q = CommandQueue()
+    q.put(name, value)
+    events = q.apply(plant)
+    assert not any(e.is_warning for e in events), events
+    return plant
+
+
+def test_every_packer_command_sets_its_attribute():
+    from simulator.bottle import BottleFactory
+    from simulator.machines.packer import Pack
+
+    assert applied_packer("film_torn", True).packer.wrapper.film.torn is True
+    assert applied_packer("pusher_stuck", True).packer.pusher_stuck is True
+    assert applied_packer("wrap_bar_stuck", True).packer.wrapper.bar_stuck is True
+    assert applied_packer("oven_heater_failed", True).packer.oven.heater_failed is True
+    assert applied_packer("oven_heater_stuck_on", True).packer.oven.heater_stuck_on is True
+    assert applied_packer("blower_failed", True).packer.oven.blower_failed is True
+    assert applied_packer("oven_jam", True).packer.oven.jammed is True
+    assert applied_packer("palletizer_running", False).palletizer.running is False
+    assert applied_packer("load_film", 1.3).packer.wrapper.film.left_mm == pytest.approx(1300.0)  # metres
+    film = applied_packer("put_sheet", 850.0).packer.wrapper.film
+    assert film.sheet_mm == 850.0 and film.cut and film.film_in_slot
+    plant = applied_packer("packer_heartbeat", False)
+    assert plant.packer_heartbeat.enabled is False and plant.labeler_heartbeat.enabled is True  # only the packer's
+    for value, kept in ((True, False), (False, True)):  # drop_sheet and clear_oven are actions: False does nothing
+        plant = Plant(with_labeler=True, with_packer=True)
+        plant.packer.wrapper.film.put_sheet(850.0)
+        plant.packer.oven.packs.append(Pack(1, [BottleFactory().new()]))
+        applied_packer("drop_sheet", value, plant)
+        applied_packer("clear_oven", value, plant)
+        assert plant.packer.wrapper.film.film_in_slot is kept
+        assert (len(plant.packer.oven.packs) == 1) is kept and len(plant.packer.oven.removed) == (0 if kept else 1)
+
+
+def test_packer_commands_are_ignored_without_the_real_packer():
+    for plant in (Plant(with_labeler=True), Plant()):
+        q = CommandQueue()
+        q.put("film_torn", True)
+        events = q.apply(plant)
+        assert len(events) == 1 and events[0].is_warning and "--no-packer" in events[0].text

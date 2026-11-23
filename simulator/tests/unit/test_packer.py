@@ -965,3 +965,76 @@ def test_packer_step_drives_the_wrap_from_the_outputs():
     line.run(CONVEYOR, 4.0)
     assert pack in line.packer.oven.packs and line.packer.oven.oven_entry
 
+
+# --- Injected faults and hand actions (stage 7) ------------------------------------------------
+def test_stuck_pusher_stays_where_it_is():
+    line = collated()
+    line.packer.pusher_stuck = True
+    line.run(PUSH, 3.0)
+    assert line.packer.pusher_home and not line.packer.pusher_out and line.packer.wrap_packs == []
+    line.packer.pusher_stuck = False
+    push_and_return(line)  # repaired: the same group is pushed
+    assert len(line.packer.wrap_packs) == 1 and len(line.packer.wrap_packs[0].bottles) == 6
+
+
+def test_stuck_wrap_bar_does_not_turn_and_wraps_nothing():
+    rig = WrapRig()
+    pack = rig.place()
+    rig.wrapper.bar_stuck = True
+    pack.sheet_mm = 850.0
+    pack.front_mm = 700.0  # in reach of the bar
+    rig.run(PackerOutputs(wrap_bar=True), 3.0)
+    assert rig.wrapper.bar == 0.0 and rig.wrapper.wrap_home and not pack.wrapped
+
+
+def test_dropped_sheet_and_the_sheet_put_back():
+    film = Film()
+    film.step(True, False, 1.0, 1.0)
+    film.drop_sheet()
+    assert film.sheet_mm == 0 and not film.film_in_slot and not film.cut
+    film.put_sheet(850.0)
+    assert film.film_in_slot and film.cut  # a cut sheet: the PLC's Sheet_Waiting
+    with pytest.raises(ValueError):
+        film.put_sheet(-1.0)
+
+
+def warm_oven(**faults) -> Oven:
+    oven = Oven(OutfeedTable(), temp_c=190.0)
+    for name, value in faults.items():
+        setattr(oven, name, value)
+    oven.step(False, True, False, config.BLOWER_SPINUP_S, 0.0)  # blower spun up (if it can)
+    return oven
+
+
+def test_failed_heater_heats_nothing_even_when_stuck_on():
+    oven = warm_oven(heater_failed=True, heater_stuck_on=True)  # a dead element wins over a welded contactor
+    oven.step(True, True, False, 10.0, 1.0)
+    assert oven.temp_c < 190.0
+
+
+def test_stuck_on_heater_heats_while_air_flows_whatever_the_plc_says():
+    oven = warm_oven(heater_stuck_on=True)
+    oven.step(False, True, False, 10.0, 1.0)  # PLC heater OFF, blower ON
+    assert oven.temp_c > 190.0
+    hot = oven.temp_c
+    oven.step(False, False, False, 10.0, 11.0)  # blower OFF (after its run-on): no air, no heat
+    assert oven.temp_c < hot
+
+
+def test_failed_blower_moves_no_air_so_no_heat():
+    oven = warm_oven(blower_failed=True)
+    assert not oven.airflow_ok
+    oven.step(True, True, False, 10.0, 1.0)
+    assert not oven.airflow_ok and oven.temp_c < 190.0
+
+
+def test_jammed_oven_holds_its_packs_and_clear_takes_them_out():
+    run = OvenRun()
+    pack = make_pack(1)
+    run.put(pack)
+    run.oven.jammed = True
+    run.run(5.0)
+    assert pack.front_mm == 0.0 and run.oven.oven_entry  # the conveyor runs, the pack stands
+    events = run.oven.clear()
+    assert run.oven.packs == [] and run.oven.removed == [pack] and not run.oven.oven_entry
+    assert [e.text for e in events] == [f"{pack.name} taken out of the oven by hand"]

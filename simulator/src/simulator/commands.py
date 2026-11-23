@@ -42,6 +42,7 @@ class _Spec:
     standin: bool = False  # needs the labeler stand-in; with the real labeler the command is ignored with a warning
     labeler: bool = False  # needs the real labeler; with the stand-in the command is ignored with a warning
     packer_standin: bool = False  # needs the packer stand-in; with the real packer the command is ignored with a warning
+    packer: bool = False  # needs the real packer; with the stand-in the command is ignored with a warning
 
 
 def _set_supply_rate(plant: Plant, v) -> None:
@@ -185,6 +186,61 @@ def _labeler_heartbeat(plant: Plant, v) -> None:
     plant.labeler_heartbeat.enabled = v  # its own bit: a comm fault can hit the labeler PLC alone
 
 
+# --- Packer: world faults and hand actions (every one only sets physics, never the PLC) ----
+def _film_torn(plant: Plant, v) -> None:
+    plant.packer.wrapper.film.torn = v
+
+
+def _drop_sheet(plant: Plant, v) -> None:
+    if v:  # an action, not a state: False does nothing
+        plant.packer.wrapper.film.drop_sheet()
+
+
+def _put_sheet(plant: Plant, v) -> None:
+    plant.packer.wrapper.film.put_sheet(v)
+
+
+def _load_film(plant: Plant, v) -> None:
+    plant.packer.wrapper.film.load_roll(v * 1000)  # metres on the panel, mm in the physics
+
+
+def _pusher_stuck(plant: Plant, v) -> None:
+    plant.packer.pusher_stuck = v
+
+
+def _wrap_bar_stuck(plant: Plant, v) -> None:
+    plant.packer.wrapper.bar_stuck = v
+
+
+def _oven_heater_failed(plant: Plant, v) -> None:
+    plant.packer.oven.heater_failed = v
+
+
+def _oven_heater_stuck_on(plant: Plant, v) -> None:
+    plant.packer.oven.heater_stuck_on = v
+
+
+def _blower_failed(plant: Plant, v) -> None:
+    plant.packer.oven.blower_failed = v
+
+
+def _oven_jam(plant: Plant, v) -> None:
+    plant.packer.oven.jammed = v
+
+
+def _clear_oven(plant: Plant, v) -> None:
+    if v:  # an action, not a state
+        plant.packer.oven.clear()
+
+
+def _palletizer_running(plant: Plant, v) -> None:
+    plant.palletizer.running = v
+
+
+def _packer_heartbeat(plant: Plant, v) -> None:
+    plant.packer_heartbeat.enabled = v  # its own bit: a comm fault can hit the packer PLC alone
+
+
 COMMANDS: dict[str, _Spec] = {
     "supply_rate": _Spec(float, _set_supply_rate, "bottles per minute put on C1 (0 = none)"),
     "add_bottles": _Spec(int, _add_bottles, "put n extra bottles on C1"),
@@ -224,10 +280,31 @@ COMMANDS: dict[str, _Spec] = {
                             packer_standin=True),
     "labeler_heartbeat": _Spec(bool, _labeler_heartbeat, "FALSE = labeler PLC heartbeat frozen (its Alm_CommLost after 3 s)",
                                labeler=True),
+    # packer (only with the real packer, not with --no-packer)
+    "film_torn": _Spec(bool, _film_torn, "TRUE = film torn: the feed rollers turn, no film moves, no Film_Pulse",
+                       packer=True),
+    "drop_sheet": _Spec(bool, _drop_sheet, "TRUE = the film above the slot tears off and falls away", packer=True),
+    "put_sheet": _Spec(float, _put_sheet, "the operator puts a cut sheet of n mm back into the slot", packer=True),
+    "load_film": _Spec(float, _load_film, "roll change: a new film roll with n m (300 = full, Film_Empty at 1.25 m)",
+                       packer=True),
+    "pusher_stuck": _Spec(bool, _pusher_stuck, "TRUE = group pusher stuck where it is (valve ON, no movement)",
+                          packer=True),
+    "wrap_bar_stuck": _Spec(bool, _wrap_bar_stuck, "TRUE = wrap bar does not turn (film caught)", packer=True),
+    "oven_heater_failed": _Spec(bool, _oven_heater_failed, "TRUE = oven heater burnt out: heats nothing", packer=True),
+    "oven_heater_stuck_on": _Spec(bool, _oven_heater_stuck_on,
+                                  "TRUE = oven heater contactor welded: heats whenever air flows", packer=True),
+    "blower_failed": _Spec(bool, _blower_failed, "TRUE = blower runs, no air moves: Airflow_OK stays FALSE", packer=True),
+    "oven_jam": _Spec(bool, _oven_jam, "TRUE = packs caught in the oven: the conveyor runs, they stand", packer=True),
+    "clear_oven": _Spec(bool, _clear_oven, "TRUE = the operator takes every pack out of the oven", packer=True),
+    "palletizer_running": _Spec(bool, _palletizer_running, "FALSE = palletizer takes no packs, the table fills up",
+                                packer=True),
+    "packer_heartbeat": _Spec(bool, _packer_heartbeat, "FALSE = packer PLC heartbeat frozen (its Alm_CommLost after 3 s)",
+                              packer=True),
 }
 
 SYRUP_COMMANDS = frozenset(name for name, spec in COMMANDS.items() if spec.syrup)
 LABELER_COMMANDS = frozenset(name for name, spec in COMMANDS.items() if spec.labeler)
+PACKER_COMMANDS = frozenset(name for name, spec in COMMANDS.items() if spec.packer)
 
 
 def check(command: Command) -> None:
@@ -278,6 +355,11 @@ class CommandQueue:
             if spec.labeler and plant.labeler is None:
                 events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "
                                         "no real labeler (run without --no-labeler / --filler-only)", warning=True))
+                continue
+            if spec.packer and plant.packer is None:
+                events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "
+                                        "no real packer (run without --no-packer / --no-labeler / --filler-only)",
+                                        warning=True))
                 continue
             if spec.packer_standin and plant.packer_standin is None:
                 events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "

@@ -192,3 +192,10 @@ def test_header_shows_the_packer_plc_line_and_its_hint():
     idle = loop.LoopStats(packer_status=packer_status(mode=0))
     assert "hmi.py --packer auto reset start" in view.packer_header_text(idle, packer).plain
 
+
+def test_cli_refuses_a_packer_scenario_without_the_real_packer(monkeypatch):
+    import simulator
+
+    monkeypatch.setattr("sys.argv", ["simulator", "--headless", "--no-packer", "--scenario", "film_torn"])
+    with pytest.raises(SystemExit, match="needs the real packer"):
+        simulator.main()

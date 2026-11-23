@@ -138,7 +138,7 @@ def test_syrup_commands_need_a_syrup_scenario_and_the_target_is_checked():
     with pytest.raises(ValueError):
         Scenario("bad", "", (Step(0, Command("chiller_failed", True)),))  # filler target
     with pytest.raises(ValueError):
-        Scenario("bad", "", (), target="packer")  # no such PLC
+        Scenario("bad", "", (), target="palletizer")  # no such PLC
     Scenario("ok", "", (Step(0, Command("product_available", False)),), target="syrup")  # shared command
 
 
@@ -244,3 +244,70 @@ def test_labeler_scenario_numbers_fit_the_plc():
     assert mixed < 160.0 and steps["glue_level"] + steps["add_glue"] >= config.GLUE_LOW_KG  # Glue_Low gone
     rolls = [s.command.value for s in SCENARIOS["roll_empty"].steps if s.command and s.command.name == "load_roll"]
     assert rolls[0] >= 1 and rolls[-1] == config.ROLL_LABELS  # a short roll with some labels, then a full roll
+
+
+# --- Packer scenarios (stage 7) ---------------------------------------------------------------
+PACKER_SCENARIOS = [name for name, sc in SCENARIOS.items() if sc.target == "packer"]
+PACKER_FAULTS = ("film_torn", "pusher_stuck", "wrap_bar_stuck", "oven_heater_failed", "oven_heater_stuck_on",
+                 "blower_failed", "oven_jam")
+
+
+def packer_status(step=0, wrap_step=0, state=0, **alarms):
+    from simulator.plcs import PackerStatus
+
+    flags = dict(alm_film_fault=False, alm_pack_jam=False, alm_outfeed_blocked=False, alm_comm_lost=False,
+                 alm_film_empty=False, alm_oven_over_temp=False, alm_oven_heat_timeout=False, alm_oven_jam=False,
+                 alm_airflow_lost=False, alm_wrap_timeout=False) | alarms
+    return PackerStatus(state, step, wrap_step, 0, 0, 0, 17, 0, **flags)
+
+
+def test_the_packer_scenarios_exist_and_names_are_unique():
+    assert set(PACKER_SCENARIOS) == {
+        "film_torn", "sheet_dropped", "film_empty", "pusher_stuck", "wrap_bar_stuck", "oven_heater_failed",
+        "oven_heater_stuck_on", "blower_failed", "pack_stuck_in_oven", "palletizer_stopped",
+    }
+    assert SCENARIOS["roll_empty"].target == "labeler"  # not hidden by a packer scenario of the same name
+
+
+def test_a_packer_scenario_sees_the_packer_status_and_its_wrap_step():
+    from simulator.scenarios import in_wrap_step, pack_in_oven
+
+    plant = Plant(with_labeler=True, with_packer=True)
+    sc = Scenario("p", "", (Step(in_wrap_step(22), Command("drop_sheet", True)),), target="packer")
+    runner = ScenarioRunner(sc)
+    assert runner.due(plant, None, None, None, packer_status(step=22))[0] == []  # Step is not WrapStep
+    assert runner.due(plant, None, None, None, packer_status(wrap_step=22))[0] == [Command("drop_sheet", True)]
+    assert not pack_in_oven()(plant, None)
+    plant.packer.oven.packs.append(object())
+    assert pack_in_oven()(plant, None)
+
+
+def test_packer_commands_need_a_packer_scenario():
+    for target in ("filler", "syrup", "labeler"):
+        with pytest.raises(ValueError, match="target='packer'"):
+            Scenario("bad", "", (Step(0, Command("film_torn", True)),), target=target)
+
+
+@pytest.mark.parametrize("name", PACKER_SCENARIOS)
+def test_every_packer_scenario_waits_for_the_packer_plc_and_removes_its_fault(name):
+    steps = SCENARIOS[name].steps
+    assert steps[0].wait.name == "PLC started"
+    names = [(s.command.name, s.command.value) for s in steps if s.command]
+    for fault in PACKER_FAULTS + ("palletizer_running",):
+        on = (fault, False) if fault == "palletizer_running" else (fault, True)
+        off = (fault, True) if fault == "palletizer_running" else (fault, False)
+        if on in names:
+            assert off in names  # the scenario ends with the cause removed
+    if ("oven_jam", True) in names:
+        assert ("clear_oven", True) in names  # the stuck pack is taken out before Reset
+
+
+def test_packer_scenario_numbers_fit_the_plc():
+    from simulator import config
+
+    rolls = [s.command.value for s in SCENARIOS["film_empty"].steps if s.command and s.command.name == "load_film"]
+    # one whole sheet still starts (more than the tail), but not a second: then Film_Empty
+    assert config.FILM_TAIL_MM < rolls[0] * 1000 < config.FILM_TAIL_MM + 850
+    assert rolls[-1] * 1000 == config.FILM_ROLL_MM
+    put = [s.command.value for s in SCENARIOS["sheet_dropped"].steps if s.command and s.command.name == "put_sheet"]
+    assert put == [850.0] and put[0] >= config.SHEET_NEEDED_MM  # the sheet put back wraps a pack
