@@ -1,4 +1,5 @@
-"""Packer physics: stage 1 collation (gate, count sensor, collation table, group pusher).  uv run pytest
+"""Packer physics: stage 1 collation (gate, count sensor, collation table, group pusher) and
+stage 3 oven + outfeed table + palletizer stand-in.  uv run pytest
 
 No PLC here: the tests write the PLC outputs by hand, in ticks of 0.1 s as the plant will, with C3
 stepped before the packer (the plant's order). `Collation` plays the PLC's COUNT rule in the real
@@ -13,7 +14,8 @@ from simulator import address_map_packer as pm
 from simulator import config
 from simulator.bottle import BottleFactory
 from simulator.conveyor import Conveyor
-from simulator.machines.packer import Packer, PackerOutputs
+from simulator.machines.packer import Oven, OutfeedTable, Pack, Packer, PackerOutputs
+from simulator.standins import PalletizerStandIn
 
 TICK = 0.1
 
@@ -21,6 +23,13 @@ TICK = 0.1
 # not import PLC values; if a PLC constant changes, change it here too.
 PLC_PACK_SIZE = 6
 PLC_PUSH_TIMEOUT_S = 3
+PLC_OVEN_SETPOINT = 1900  # 0.1 degC
+PLC_OVEN_HYST = 50
+PLC_OVEN_BAND = 150
+PLC_OVEN_MAX = 2300
+PLC_HEAT_TIMEOUT_S = 120
+PLC_AIRFLOW_TIMEOUT_S = 3
+PLC_OVEN_JAM_S = 20
 
 GATE = PackerOutputs(gate_motor=True)
 PUSH = PackerOutputs(group_pusher=True)
@@ -266,3 +275,230 @@ def test_empty_table_push_makes_no_pack():
     line = Line(0)
     push_and_return(line)
     assert line.packer.wrap_packs == [] and not warnings(line.events)
+
+
+# --- Oven: blower and air temperature (stage 3) ------------------------------------------
+def make_pack(pack_id: int) -> Pack:
+    factory = BottleFactory()
+    return Pack(pack_id, [factory.new() for _ in range(6)])
+
+
+def oven_controller(oven: Oven, seconds: float, now: float = 0.0) -> tuple[list[int], list[str]]:
+    """The PLC's oven rules 6-7 in loop order for `seconds`, blower ON: Heat_Demand set below
+    setpoint - hyst, reset at setpoint; heater := Heat_Demand AND Airflow_OK AND OvenTemp < OvenMax.
+
+    Returns the OvenTemp readings and the warnings.
+    """
+    demand, temps, warned = False, [], []
+    for _ in range(round(seconds / TICK)):
+        temp, air = oven.oven_temp, oven.airflow_ok  # 1. read sensors
+        if temp < PLC_OVEN_SETPOINT - PLC_OVEN_HYST:  # 2. set outputs
+            demand = True
+        elif temp >= PLC_OVEN_SETPOINT:
+            demand = False
+        now += TICK
+        warned += warnings(oven.step(demand and air and temp < PLC_OVEN_MAX, True, False, TICK, now))  # 3. step
+        temps.append(oven.oven_temp)
+    return temps, warned
+
+
+def test_airflow_follows_the_blower_within_airflow_timeout():
+    oven = Oven(OutfeedTable())
+    ticks = 0
+    while not oven.airflow_ok:
+        oven.step(False, True, False, TICK, ticks * TICK)
+        ticks += 1
+    assert ticks * TICK == pytest.approx(config.BLOWER_SPINUP_S) and config.BLOWER_SPINUP_S < PLC_AIRFLOW_TIMEOUT_S
+    oven.step(False, False, False, TICK, ticks * TICK)
+    assert not oven.airflow_ok  # blower OFF: no air at once
+
+
+def test_heat_up_reaches_oven_ready_well_below_heat_timeout():
+    oven = Oven(OutfeedTable())
+    t = 0.0
+    while oven.oven_temp < PLC_OVEN_SETPOINT - PLC_OVEN_BAND:
+        oven.step(oven.airflow_ok, True, False, TICK, t)  # the heater waits for the air (interlock)
+        t += TICK
+        assert t < PLC_HEAT_TIMEOUT_S, "oven never reached Oven_Ready"
+    assert 50 < t < 60  # 54.6 s by calculation + the blower's 1 s: half of HeatTimeout
+
+
+def test_hysteresis_stays_inside_the_ready_window():
+    oven = Oven(OutfeedTable(), temp_c=PLC_OVEN_SETPOINT / 10)
+    temps, warned = oven_controller(oven, 300.0)
+    after_spinup = temps[round(config.BLOWER_SPINUP_S / TICK) + 30:]
+    assert min(after_spinup) >= PLC_OVEN_SETPOINT - PLC_OVEN_BAND and max(after_spinup) <= PLC_OVEN_SETPOINT + PLC_OVEN_BAND
+    assert min(after_spinup) >= 1840 and max(after_spinup) <= 1910  # the 5 degC band plus one tick
+    assert not warned
+
+
+def test_heater_left_on_reaches_oven_max():
+    oven = Oven(OutfeedTable(), temp_c=PLC_OVEN_SETPOINT / 10)
+    t = 0.0
+    while oven.oven_temp < PLC_OVEN_MAX:
+        oven.step(True, True, False, TICK, t)  # contactor welded: heater ON whatever the PLC says
+        t += TICK
+        assert t < 120, "a stuck heater must reach OvenMax (over-temperature scenario)"
+    assert 45 < t < 60
+
+
+def test_heater_without_air_does_not_heat_the_air():
+    oven = Oven(OutfeedTable(), temp_c=PLC_OVEN_SETPOINT / 10)
+    for i in range(100):
+        oven.step(True, False, False, TICK, i * TICK)  # heater ON, blower OFF
+    assert oven.temp_c < PLC_OVEN_SETPOINT / 10
+
+
+def test_late_tick_equals_short_ticks():
+    a, b = Oven(OutfeedTable()), Oven(OutfeedTable())
+    for oven in (a, b):
+        oven.step(False, True, False, config.BLOWER_SPINUP_S, 0.0)  # air flows
+    a.step(True, True, False, 1.0, 2.0)
+    for i in range(10):
+        b.step(True, True, False, TICK, 1.0 + (i + 1) * TICK)
+    assert a.temp_c == pytest.approx(b.temp_c)
+
+
+# --- Oven: conveyor, eyes, shrink, outfeed table ---------------------------------------
+class OvenRun:
+    """A hot oven (or a cold one) with the conveyor ON; records both eyes per tick."""
+
+    def __init__(self, hot: bool = True) -> None:
+        self.table = OutfeedTable()
+        self.oven = Oven(self.table, temp_c=190.0 if hot else config.ROOM_C)
+        self.hot = hot
+        self.now = 0.0
+        self.entry: list[bool] = []
+        self.exit: list[bool] = []
+        self.events: list = []
+
+    def put(self, pack: Pack) -> bool:
+        """The wrap conveyor hands a pack over; the eyes are sampled at once (the plant writes them
+        at the end of the tick in which the pack arrived)."""
+        accepted = self.oven.put_at_entry(pack)
+        self.entry.append(self.oven.oven_entry)
+        self.exit.append(self.oven.oven_exit)
+        return accepted
+
+    def tick(self, conveyor: bool = True) -> None:
+        self.now += TICK
+        heater = self.hot and self.oven.airflow_ok and self.oven.oven_temp < PLC_OVEN_SETPOINT
+        self.events += self.oven.step(heater, self.hot, conveyor, TICK, self.now)
+        self.entry.append(self.oven.oven_entry)
+        self.exit.append(self.oven.oven_exit)
+
+    def run(self, seconds: float, conveyor: bool = True) -> None:
+        for _ in range(round(seconds / TICK)):
+            self.tick(conveyor)
+
+
+def rising_edges(levels: list[bool]) -> list[int]:
+    """Tick indexes where the level goes from OFF to ON."""
+    return [i for i in range(len(levels)) if levels[i] and (i == 0 or not levels[i - 1])]
+
+
+def test_one_pack_through_a_hot_oven():
+    run = OvenRun()
+    assert run.put(make_pack(1))
+    run.run(15.0)
+    assert sum(run.entry) == round(config.PACK_LENGTH_MM / config.OVEN_SPEED_MM_S / TICK)  # ON about 2 s
+    exit_edges = rising_edges(run.exit)
+    assert len(rising_edges(run.entry)) == 1 and len(exit_edges) == 1
+    assert exit_edges[0] * TICK == pytest.approx(10.0)  # entry -> exit edge 10 s (sample 0 = the put)
+    assert 10.0 <= PLC_OVEN_JAM_S / 2  # OvenJamTime is about twice the transit
+    assert len(run.table.packs) == 1 and run.oven.packs == [] and run.oven.left == 1
+    pack = run.table.packs[0]
+    assert pack.shrunk and pack.hot_s >= config.SHRINK_S
+    assert not warnings(run.events)
+
+
+def test_cold_oven_pack_leaves_not_shrunk():
+    run = OvenRun(hot=False)
+    run.oven.put_at_entry(make_pack(1))
+    run.run(15.0)
+    assert len(run.table.packs) == 1 and not run.table.packs[0].shrunk
+    assert warnings(run.events) == ["Pack 1 (bottles 1-6) left the oven not shrunk (0.0 s hot)"]
+
+
+def test_conveyor_off_holds_the_packs_and_the_eye():
+    run = OvenRun()
+    run.oven.put_at_entry(make_pack(1))
+    run.run(10.5)  # the pack covers the exit eye
+    assert run.oven.oven_exit
+    front = run.oven.packs[0].front_mm
+    run.run(5.0, conveyor=False)  # FAULT: the oven conveyor stops
+    assert run.oven.packs[0].front_mm == front and run.oven.oven_exit and run.table.packs == []
+    run.run(3.0)
+    assert len(run.table.packs) == 1
+
+
+def test_entry_gap_gives_two_separate_edges_per_eye():
+    run = OvenRun()
+    assert run.oven.put_at_entry(make_pack(1))
+    assert not run.oven.put_at_entry(make_pack(2))  # the entry is not clear
+    waited = 0
+    pack2 = make_pack(2)
+    while not run.oven.put_at_entry(pack2):
+        run.tick()
+        waited += 1
+    assert waited * TICK == pytest.approx((config.PACK_LENGTH_MM + config.OVEN_GAP_MM) / config.OVEN_SPEED_MM_S)
+    run.run(20.0)
+    assert len(rising_edges(run.entry)) == 2 and len(rising_edges(run.exit)) == 2
+    off_between = [i for i, level in enumerate(run.exit) if not level]
+    assert len(run.table.packs) == 2 and off_between  # the exit eye was OFF between the two packs
+
+
+def test_table_full_sensor_leaves_room_for_the_packs_past_ready():
+    table = OutfeedTable()
+    for i in range(3):
+        assert not table.table_full
+        table.packs.append(make_pack(i + 1))
+    assert table.table_full and table.has_room
+    assert config.TABLE_PACKS - config.TABLE_FULL_PACKS >= 3  # 1 on the wrap conveyor + 2 in the oven (Q3)
+
+
+def test_full_table_holds_the_pack_at_the_exit():
+    run = OvenRun()
+    run.table.packs = [make_pack(i) for i in range(10, 10 + config.TABLE_PACKS)]
+    run.oven.put_at_entry(make_pack(1))
+    run.run(20.0)
+    assert len(run.oven.packs) == 1 and run.oven.oven_exit  # waits at the exit, the eye stays ON
+    assert warnings(run.events) == ["Pack 1 (bottles 1-6) waits at the oven exit: outfeed table full"]
+    run.table.take()  # the palletizer takes one
+    run.tick()
+    assert run.oven.packs == [] and not run.oven.oven_exit and len(run.table.packs) == config.TABLE_PACKS
+
+
+# --- Palletizer stand-in ---------------------------------------------------------------
+def test_palletizer_takes_one_pack_per_take_time():
+    table = OutfeedTable()
+    table.packs = [make_pack(i) for i in range(1, 4)]
+    pal = PalletizerStandIn(table)
+    taken_at = []
+    for i in range(round(25.0 / TICK)):
+        if pal.step(TICK, (i + 1) * TICK):
+            taken_at.append(round((i + 1) * TICK, 1))
+    assert taken_at == [0.1, 10.1, 20.1] and pal.taken == 3 and table.packs == []
+    assert pal.step(TICK, 30.0) == []  # empty table: nothing to take
+
+
+def test_stopped_palletizer_takes_nothing():
+    table = OutfeedTable()
+    table.packs = [make_pack(1)]
+    pal = PalletizerStandIn(table)
+    pal.running = False
+    for i in range(100):
+        pal.step(TICK, i * TICK)
+    assert len(table.packs) == 1 and pal.taken == 0
+
+
+# --- The packer drives its oven from the PLC outputs -------------------------------------
+def test_packer_step_drives_the_oven_from_the_outputs():
+    packer = Packer(Conveyor("C3"))
+    packer.oven.put_at_entry(make_pack(1))
+    out = PackerOutputs(oven_heater=True, oven_blower=True, oven_conveyor=True)
+    for i in range(round(2.0 / TICK)):
+        packer.step(out, TICK, (i + 1) * TICK)
+    assert packer.oven.airflow_ok and packer.oven.temp_c > config.ROOM_C  # blower + heater
+    assert packer.oven.packs[0].front_mm == pytest.approx(2.0 * config.OVEN_SPEED_MM_S)  # conveyor
+    assert packer.oven.outfeed is packer.outfeed

@@ -3,6 +3,7 @@
     Supply ──► C1 ──► FILLER ──► C2 ──► LabelerStandIn
     (blow moulder)                       (labeler)
                      ... or, with the real labeler:  LABELER ──► C3 ──► PackerStandIn
+                     ... and behind the real packer:  PACKER's outfeed table ──► PalletizerStandIn
 
     + wiring values from other machines: Product_Available (syrup room),
       E_Stop_OK (E-stop chain), Heartbeat (the simulator is alive)
@@ -18,6 +19,7 @@ from simulator import config
 from simulator.bottle import BottleFactory
 from simulator.conveyor import Conveyor
 from simulator.events import Event
+from simulator.machines.packer import OutfeedTable
 
 _EPSILON = 1e-9  # float tolerance for timers, as in conveyor.py
 
@@ -146,3 +148,29 @@ class Heartbeat:
                 self._timer = self._timer - self.period_s if self._timer < 2 * self.period_s else self._timer % self.period_s
                 self.value = not self.value
         return self.value
+
+
+class PalletizerStandIn:
+    """Takes one pack from the packer's outfeed table every `take_s` seconds (replaces the palletizer).
+
+    Same timer as LabelerStandIn, for packs instead of bottles: `running = False` (palletizer
+    stopped) lets the table fill up until the packer's Table_Full sees it.
+    """
+
+    def __init__(self, table: OutfeedTable, take_s: float = config.PALLETIZER_TAKE_S) -> None:
+        self.table = table
+        self.take_s = take_s
+        self.running = True
+        self.taken = 0  # packs taken since the start
+        self._timer = take_s  # ready to take the first pack at once
+
+    def step(self, dt: float, now: float) -> list[Event]:
+        if not self.running:
+            return []
+        self._timer = min(self._timer + dt, self.take_s)
+        if self._timer < self.take_s - _EPSILON or not self.table.packs:
+            return []
+        pack = self.table.take()
+        self._timer = 0.0
+        self.taken += 1
+        return [Event.sim(now, f"{pack.name} taken by the palletizer")]

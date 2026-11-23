@@ -147,3 +147,24 @@ BOTTLE_COUNTED_S = 0.2  # Bottle_Counted ON while the bottle passes the count se
 PUSH_OUT_S = 1.0  # group pusher home -> out (valve ON); PushTimeout 3 s
 PUSH_RETURN_S = 0.8  # out -> home on the spring (valve OFF); PushTimeout 3 s
 PACK_BOTTLES = 6  # places on the collation table (2 x 3 lane dividers): physical, the PLC's PackSize must match
+
+# --- Packer: oven + outfeed (docs/packer/state-diagram.md rules 6-8; PLC: OvenSetpoint 190.0 degC, OvenHyst
+#     5.0, OvenBand 15.0 (Oven_Ready 175-205 degC), OvenMax 230.0 degC, HeatTimeout 120 s, AirflowTimeout 3 s,
+#     OvenJamTime 20 s) -----------------------------------------------------------------------------------------
+OVEN_HEATER_C = 300.0  # the heater pulls the air toward this (only while air flows) ...
+OVEN_HEAT_TAU_S = 60.0  # ... with this time constant; with the room loss the balance is 253.3 degC:
+#                         20 -> 175 degC in 54.6 s (HeatTimeout 120 s); a heater left on reaches OvenMax
+#                         (230 degC) 49.9 s after 190 degC, so the over-temperature scenario is reachable
+OVEN_ROOM_TAU_S = 300.0  # heat loss to the room: -0.06 degC per tick at 190 degC, the 5 degC band cycles ~13 s
+BLOWER_SPINUP_S = 1.0  # OvenBlower ON -> air flows (Airflow_OK); AirflowTimeout 3 s. OFF -> no air at once
+OVEN_LENGTH_MM = 1000.0  # Oven_Entry eye at 0 mm, Oven_Exit eye at the end
+OVEN_SPEED_MM_S = 100.0  # entry -> exit edge 10 s, about half of OvenJamTime 20 s
+PACK_LENGTH_MM = 200.0  # 3 bottles x 65 mm: each eye is ON about 2 s per pack
+OVEN_GAP_MM = 50.0  # a new pack only when the last one is this far past the entry eye: the eye is OFF >= 0.5 s
+#                     between two packs, so the CTUD sees two rising edges
+SHRINK_C = 170.0  # the film shrinks above this air temperature (Oven_Ready starts at 175 degC) ...
+SHRINK_S = 6.0  # ... after this many seconds; a pack is in the oven 12 s
+TABLE_PACKS = 6  # places on the outfeed table
+TABLE_FULL_PACKS = 3  # Table_Full from this many packs: 3 places stay behind the sensor for every pack that is
+#                       already past READY (1 on the wrap conveyor + up to 2 in the oven, Q3)
+PALLETIZER_TAKE_S = 10.0  # the palletizer stand-in takes one pack every 10 s (a wrap cycle takes ~13 s)
