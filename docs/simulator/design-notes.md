@@ -118,7 +118,7 @@ A command is applied at the next tick. Until then the plant still holds the old 
 `loop.run()` gets its scenario once, at the start. The panel starts scenarios later, so it passes an empty slot that it fills on "Run"; the loop only calls `due()` on it.
 
 **Why is the tick less regular with the panel (85–119 ms instead of 98–102 ms)?**
-The screen is drawn in the same asyncio loop, so a redraw can delay a tick a little; the next deadline then comes sooner. The physics handles any `dt` up to the 0.3 s slow-tick warning (sub-steps, kept pulses), so this does not change what the PLC sees. Use `--headless` for timing measurements.
+The screen is drawn in the same asyncio loop, so a redraw can delay a tick a little; the next deadline then comes sooner. The physics handles any `dt` up to the 0.3 s slow-tick warning (sub-steps, kept pulses; the packer's fast counted pulses through a `PulseWire`, see the packer section), so this does not change what the PLC sees. Use `--headless` for timing measurements.
 
 **Why no Start / Reset buttons in the panel?**
 One-writer rule: commands, modes and setpoints belong to the HMI. The header shows the `tests/hmi.py` command while the PLC is in IDLE.
@@ -256,6 +256,64 @@ The filler's words %MW70–75 were designed together with its FUXA screens, so t
 - **Not read back by `verify_writes()`** (as for the filler): the PLC ignores the words, so a wrong value cannot change the machine, and the read-back stays one request smaller.
 - **Slots 0 and 7 of C3 are rarely seen at a tick end:** the pusher's tick also moves the belt (sub-steps), and the packer stand-in takes the bottle as soon as it reaches slot 7. On the screen a bottle appears in slot 1 and leaves after slot 6; the unit test checks slots 1–6.
 
+## Packer physics (`machines/packer.py`)
+
+Collation (stage 1) and oven (stage 3) parameters and their checks: `roadmap.md`, "Stage 1 / 3 as built". The wrap (stage 2):
+
+**Why are wrap positions in mm, and why the pack's front?**
+The PLC's wrap transitions hang on sensor edges at fixed points (`Pack_At_Film`, the slot, `Oven_Entry`); a 0.5 s slot step would move a pack 100 mm at once. One number per pack (its front) is enough: an eye at x sees a pack while front ≥ x and front − 200 mm < x.
+
+**Why is the film slot 50 mm ahead of the film stop eye?**
+The PLC stops the wrap conveyor one or two ticks after `Pack_At_Film` rises: 20–40 mm of overshoot. The slot must lie beyond that, or the waiting pack would already stand on the slot when the film is fed.
+
+**Why 150 mm/s feed and not 167?**
+`Film_Pulse` is a timed 0.15 s pulse (as `Label_Mark`), ON at two tick ends. At 167 mm/s the 50 mm marks come 2.99 ticks apart, so sometimes after 2 ticks: the pulse would still be ON and the CTU would miss an edge (one sheet 50 mm too long). 150 mm/s gives 3–4 ticks, at least one OFF tick, and a late 0.3 s tick moves 45 mm, never past two marks. 1200 mm take 8.0 s against the 10 s `FeedTimeout`.
+
+**Why does the encoder count roller travel and not film since the cut?**
+A real encoder sits on the roller; the knife does not reset it. So the first pulse of a sheet comes after 0–50 mm and a sheet is pulses × 50 mm minus up to 50 mm plus the run-on: 850 mm gives 817–883 mm, always above the 800 mm needed. The PLC measures to one pulse, as it should.
+
+**Why does `Film_In_Slot` need 80 mm of film, more than one pulse?**
+The PLC reads `Film_In_Slot AND FeedCount = 0` as "a cut sheet waits" (`Sheet_Waiting`, rule 4) and then never feeds again. With the sensor below one pulse period, an interrupted feed of 40 mm (no pulse yet) would look like a cut sheet, and the pack would drive over an uncut stub. Above 50 mm, every sheet the sensor sees has been counted (tested at all 50 encoder phases).
+
+**When is a pack wrapped?**
+When the bar passes the top of its turn and the pack, with a sheet, has its tail past the slot by at most 400 mm (front 650–1050). That is one moment, not the film's path; a pack is never wrapped twice. A stuck bar lets the conveyor carry the pack on into the oven, unwrapped, as on a real machine; the PLC's `WrapTimeout` reports it.
+
+**Why does the roll's tail hold 1.25 m?**
+`Film_Empty` stops new sheets, but a started one must finish: the largest is 1200 mm plus 15–30 mm of run-on. The labeler's 2026-11-18 roll-end bug (a last label cut short) is the reason the tail is sized to the run-on too.
+
+**What happens after an E-stop in RUN_ON?**
+If the pack's front already passed the slot it has its sheet but still covers `Pack_At_Film`. The restart's WAIT_PACK sees an empty slot and feeds a new sheet under it (warning "film fed under …"). The PLC is not changed: the pack is wrapped with its own sheet, the extra sheet waits cut in the slot and the next pack takes it (`Sheet_Waiting` → READY), so nothing is lost but one sheet's place in the order.
+
+**Why does the packer need a `PulseWire` and not the OR the other pulses use?**
+The plant writes one value per tick and the PLC counts rising edges. The OR ("ON if ON at any sub-step") merges two pulses whose ticks touch: no OFF tick, one edge lost for good. The filler's and labeler's pulses come about once a second, so that never happens; `Film_Pulse` comes every 0.33 s and `Bottle_Counted` every 0.5 s, so one late tick of 0.2–0.3 s, still below the slow-tick warning, could lose 50 mm of film or a bottle (a 7th bottle on the table). The wire counts the edges of the sub-steps and passes each one on: an edge behind an ON comes one tick later, after an OFF tick. Limit: one bit per tick carries at most one edge per two ticks, so ticks that STAY slower than half the pulse period (film: about 0.17 s) cannot keep pace whatever the wire does; the sheet then gets longer, never shorter (tested: sustained 0.2 s gives 38 marks instead of 34).
+
+**Why does `PackerPlc` read across gaps but never write across them?**
+A read changes nothing, so one request over %MW40–53 (computed and status words with six unused words between) or over %MX5.0–7.1 (both alarm bytes with the unused %MX6) is cheaper than two and returns the same values. A write over a gap would overwrite the HMI's manual buttons (%MX2) and the PLC's conditioned bits (%MX3): the one-writer guard refuses it, so the sensors stay three writes.
+
+**Why does the live link test answer `Airflow_OK` and avoid the counted inputs?**
+In Auto the idle packer runs its oven (`Oven_On` needs no Start): the blower is ON, and without `Airflow_OK` the PLC raises `Alm_AirflowLost` after 3 s and FAULTs. The test answers the blower every tick, as the physics does. And the PLC's counters count in IDLE too: a pulse on `Film_Pulse` would stay in FeedCount until the next READY and make the next sheet short, so the test never gives an edge on `Bottle_Counted`, `Film_Pulse`, `Oven_Entry` or `Oven_Exit` and checks that the counters did not move.
+
+**Why does the packer closed-loop test supply exactly 12 bottles?**
+The PLC's counters outlive the test: bottles left on the collation table stay in GroupCount, a pack left in the oven in PacksInOven (the next run's `Alm_OvenJam` after 20 s, with no pack to come out). With exactly 6 N bottles every bottle ends in a pack, and the test runs on after Stop until both steps are 0 and the oven is empty. It writes no "neutral" sensors at the end: the last tick is the settled machine, and an `Airflow_OK` FALSE would FAULT the idle packer in Auto.
+
+**Why do WAIT_WRAP and READY not show in the event log?**
+Ladder rungs run top to bottom in one scan: when the wrap side already waits, COUNT → WAIT_WRAP in one rung and WAIT_WRAP → PUSH in a later rung of the same scan (CUT → READY → RUN_ON likewise). The step word never holds 15 or 24 at the end of a scan, so the simulator, which reads it once per tick, cannot see them. They show only when the step really waits (a pack still on the wrap conveyor, a hot oven missing).
+
+**How are the packer faults modelled?**
+As for the other machines: one flag per broken part, set only by a command; the PLC only sees the effect. A torn film lets the rollers turn without film or pulses; a stuck pusher or wrap bar does not move; a failed oven heater heats nothing and wins over a stuck one (a dead element beats a welded contactor); a stuck heater heats whenever air flows, so the blower's run-on after the over-temperature FAULT keeps heating for 30 s (on a real machine too, which is why the heater contactor must be checked); a failed blower moves no air, so `Airflow_OK` stays FALSE and nothing heats; a jammed oven holds its packs while the conveyor runs. Hand actions (`put_sheet`, `clear_oven`, `load_film`) are what the operator does before Reset.
+
+**Why does `sheet_dropped` drop the sheet in CUT, not in READY?**
+READY lasts one PLC scan when the oven is ready and the outfeed free (CUT → READY → RUN_ON in one scan), so no tick can hit it. CUT lasts 0.3 s: the simulator sees it at the end of a tick, drops the sheet at the start of the next, and the write reaches the PLC about 0.2 s after CUT began. At CUT's end the slot is empty, READY waits and `SheetCheck` (1 s) raises `Alm_FilmFault` (live: 1.0 s).
+
+**Why does the scenario test feed exactly 6 bottles per pack and drain after each scenario?**
+Every scenario starts with a fresh plant, but the PLC keeps its counters. A bottle left on the collation table or a pack left in the oven would stay in GroupCount / PacksInOven and the next scenario would start with a group short or an oven jam. So each scenario feeds exactly what it needs and runs on until all is packed and out; "PLC left clean" is a check of its own.
+
+**Why does `palletizer_stopped` need 7 packs?**
+`Table_Full` comes at 3 packs on the table, and by design (Q3) up to 3 more packs may already be past READY (one on the wrap conveyor, two in the oven): the table holds 6. Only the 7th pack is sure to wait in READY. With 4 (first version) all four passed before `Outfeed_Full` latched and no Blocked state came.
+
+**Why does the test controller wait 0.5 s in WAIT_WRAP (`SETTLE_S`)?**
+Stage 4 found it: the PLC counts the 6th bottle at the gate and pushes in the same scan if the wrap side waits, but the bottle reaches the table 0.4 s later. The proposed PLC rung is a settle timer on WAIT_WRAP (roadmap, "Stage 4 as built"); until the user adds it, the real PLC makes the simulator warn "bottle onto the collation table with the pusher out" on every group. The physics was not bent to hide it: a count sensor at the table instead would let a 7th bottle through.
+
 ## Syrup room in the plant (`plant.py`)
 
 **Where is the cable between the two PLCs?**
@@ -352,5 +410,8 @@ Since labeler stage 5 the default `uv run simulator` drives the labeler PLC, and
 **Why does D4 skip the labeler?**
 FUXA has no labeler device yet (the labeler HMI is not planned). A connection status tag that does not exist would read as "not connected" and fail D4 forever. `Runtime.fuxa = False` keeps the labeler out of D4 until its device exists; D7 then points to `tests/hmi.py --labeler` instead of the FUXA header.
 
-**Why does D6 name `--no-labeler` or `--filler-only`?**
-There is one plant lock per PLC port. The CLI can leave PLCs out in two ways: `--no-labeler` (labeler lock free) and `--filler-only` (syrup and labeler free). D6 names the option that fits the free locks, so the fix is one restart without it instead of a search; other combinations (cannot come from one simulator) get the generic text.
+**Why is the packer's FUXA link a note in D4, not a check?**
+FUXA has no packer device until the packer HMI (part C). A missing connection status tag would read as "not connected" and fail D4 forever, as it would have for the labeler before its HMI. The note says where the packer is operated instead (`tests/hmi.py --packer`); D7 still checks its mode and alarms, reading both step words and the second alarm byte (%MX7) that only the packer has.
+
+**Why does D6 name `--no-packer`, `--no-labeler` or `--filler-only`?**
+There is one plant lock per PLC port. The CLI can leave PLCs out in three ways: `--no-packer` (packer lock free), `--no-labeler` (labeler and packer free) and `--filler-only` (syrup room, labeler and packer free). D6 names the option that fits the free locks, so the fix is one restart without it instead of a search; other combinations (cannot come from one simulator) get the generic text.
