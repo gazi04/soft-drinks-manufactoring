@@ -3,18 +3,19 @@
     uv run python tests/demo_check.py
 
 Each line is PASS / WARN / FAIL and says how to fix it. The checks follow the things
-that broke during development; D2, D3, D6 and D7 run once per PLC (filler, syrup room, labeler):
-    D1 containers openplc, plc-syrup-carb, plc-labeler and fuxa are running
+that broke during development; D2, D3, D6 and D7 run once per PLC (filler, syrup room, labeler, packer):
+    D1 containers openplc, plc-syrup-carb, plc-labeler, plc-packer and fuxa are running
     D2 per runtime: a compiled PLC program exists AND its Modbus server is enabled. A container
        re-creation resets /workdir/plugins.conf (container layer, not a volume): the program
        still runs from the build volume, but modbus_slave is off until the next upload
     D3 per runtime: the PLC program answers on Modbus
     D4 FUXA is up and connected to each PLC that has a FUXA device (one line per PLC, connection
-       status 5; all three PLCs since HMI L7). One link at 0 = that PLC is down (D3); all at 0
-       can also be FUXA's missing Modbus plugin
+       status 5; filler, syrup room and labeler since HMI L7; the packer gets its device with its HMI,
+       part C, until then a note). One link at 0 = that PLC is down (D3); all at 0 can also be FUXA's
+       missing Modbus plugin
     D5 FUXA has the current screens (live project = docs/hmi/fuxa-project.json)
     D6 per PLC: one simulator writes its sensors (plant lock held) - WARN if none
-    D7 per PLC: ready, mode Auto, no active alarm
+    D7 per PLC: ready, mode Auto, no active alarm (the packer: both step words, all ten alarms in %MX5 + %MX7)
 Exit code 1 if any FAIL.
 """
 
@@ -30,9 +31,11 @@ from pymodbus.client import ModbusTcpClient
 
 from simulator import address_map as am
 from simulator import address_map_labeler as lm
+from simulator import address_map_packer as pm
 from simulator import address_map_syrup as sm
 from simulator import config, plant_lock
 from simulator.plcs import (ALARM_NAMES, LABELER_ALARM_NAMES, LABELER_STATE_NAMES, LABELER_STEP_NAMES, MODE_NAMES,
+                            PACKER_ALARM_NAMES, PACKER_STATE_NAMES, PACKER_STEP_NAMES, PACKER_WRAP_STEP_NAMES,
                             STATE_NAMES, STEP_NAMES, SYRUP_ALARM_NAMES, SYRUP_STATE_NAMES, SYRUP_STEP_NAMES)
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -66,6 +69,9 @@ RUNTIMES = [
     Runtime("plc-labeler", "labeler", "127.0.0.3", "plcs/labeler", config.LABELER_PORT,
             lm, LABELER_STEP_NAMES, LABELER_STATE_NAMES, LABELER_ALARM_NAMES,
             "the FUXA header (row 2: Labeler, e.g. on the Labeler screen)"),
+    Runtime("plc-packer", "packer", "127.0.0.4", "plcs/packer", config.PACKER_PORT,
+            pm, PACKER_STEP_NAMES, PACKER_STATE_NAMES, PACKER_ALARM_NAMES,
+            "`uv run python tests/hmi.py --packer`", fuxa=False),  # FUXA device with the packer HMI (part C)
 ]
 SERVICES = {"fuxa", *(rt.service for rt in RUNTIMES)}
 COLOURS = {"PASS": "\033[32m", "WARN": "\033[33m", "FAIL": "\033[31m"}
@@ -144,6 +150,9 @@ def d3_plc(rt: Runtime) -> ModbusTcpClient | None:
 def d4_fuxa() -> bool:
     """One line per PLC device (only the PLCs FUXA has a device for). True when FUXA answers (then D5 runs)."""
     with_device = [rt for rt in RUNTIMES if rt.fuxa]
+    for rt in RUNTIMES:
+        if not rt.fuxa:  # explained, not counted
+            print(f"      D4 FUXA -> {rt.label} PLC: no FUXA device before its HMI (part C); operate it with {rt.hmi}")
     ids = [status_tag(rt.label) for rt in with_device]
     try:
         values = {v["id"]: v.get("value") for v in get_json(f"/api/getTagValue?ids={urllib.parse.quote(json.dumps(ids))}")}
@@ -177,21 +186,23 @@ def d5_project() -> None:
 
 
 def _d6_cause(free: list[str]) -> str:
-    """The likely start option behind the PLCs nobody writes (the CLI's two ways to leave PLCs out)."""
-    if free == ["labeler"]:
-        return " (simulator started with --no-labeler?) – restart `uv run simulator` without it"
-    if free == ["syrup", "labeler"]:
-        return " (simulator started with --filler-only?) – restart `uv run simulator` without it"
+    """The likely start option behind the PLCs nobody writes (the CLI's three ways to leave PLCs out)."""
+    options = {("packer",): "--no-packer", ("labeler", "packer"): "--no-labeler",
+               ("syrup", "labeler", "packer"): "--filler-only"}
+    option = options.get(tuple(free))
+    if option is not None:
+        return f" (simulator started with {option}?) – restart `uv run simulator` without it"
     return " – restart `uv run simulator`"
 
 
 def d6_simulator() -> None:
-    """One plant lock per PLC (plant_lock.py). Some held = the simulator was started with --no-labeler / --filler-only."""
+    """One plant lock per PLC (plant_lock.py). Some held = the simulator left PLCs out (--no-packer, --no-labeler,
+    --filler-only)."""
     holders = {rt.label: plant_lock.is_held(config.PLC_HOST, rt.port) for rt in RUNTIMES}
     if all(holders.values()):
         report("PASS", "D6 simulator", "; ".join(f"{label}: {who}" for label, who in holders.items()))
     elif not any(holders.values()):
-        report("WARN", "D6 simulator", "no simulator running – start it: `uv run simulator` (panel, all three PLCs) or "
+        report("WARN", "D6 simulator", "no simulator running – start it: `uv run simulator` (panel, all four PLCs) or "
                "`uv run simulator --headless`; without it the heartbeat alarms latch")
     else:
         free = [label for label, who in holders.items() if not who]
@@ -202,10 +213,15 @@ def d6_simulator() -> None:
 def d7_ready(rt: Runtime, client: ModbusTcpClient) -> None:
     m = rt.amap
     mode = client.read_holding_registers(m.MODE_REQ, count=1).registers[0]
-    state, step, _unused, _count = client.read_holding_registers(m.STATUS_START, count=m.STATUS_COUNT).registers
-    alarms = [n for n, on in zip(rt.alarms, client.read_coils(m.ALARMS_START, count=m.ALARMS_COUNT).bits) if on]
-    where = (f"mode {MODE_NAMES.get(mode, mode)}, step {rt.steps.get(step, step)}, "
-             f"state {rt.states.get(state, state)}")
+    state, step, third, _count = client.read_holding_registers(m.STATUS_START, count=m.STATUS_COUNT).registers
+    bits = client.read_coils(m.ALARMS_START, count=m.ALARMS_COUNT).bits[: m.ALARMS_COUNT]
+    if hasattr(m, "EXTRA_ALARMS_START"):  # the packer's ninth and tenth alarm sit in %MX7
+        bits += client.read_coils(m.EXTRA_ALARMS_START, count=m.EXTRA_ALARMS_COUNT).bits[: m.EXTRA_ALARMS_COUNT]
+    alarms = [n for n, on in zip(rt.alarms, bits) if on]
+    step_text = rt.steps.get(step, step)
+    if hasattr(m, "WRAP_STEP"):  # the packer's second sequencer: the third status word
+        step_text = f"{step_text} / wrap {PACKER_WRAP_STEP_NAMES.get(third, third)}"
+    where = f"mode {MODE_NAMES.get(mode, mode)}, step {step_text}, state {rt.states.get(state, state)}"
     fixes = []
     if mode != 1:
         fixes.append(f"Auto via {rt.hmi}")
