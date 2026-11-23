@@ -148,6 +148,29 @@ PUSH_OUT_S = 1.0  # group pusher home -> out (valve ON); PushTimeout 3 s
 PUSH_RETURN_S = 0.8  # out -> home on the spring (valve OFF); PushTimeout 3 s
 PACK_BOTTLES = 6  # places on the collation table (2 x 3 lane dividers): physical, the PLC's PackSize must match
 
+# --- Packer: wrap (docs/packer/state-diagram.md rules 2, 4, 5; PLC: FilmPulseMM 50, FilmLength 850 mm in
+#     600-1200, ClearTime 3 s, PushTimeout 3 s, FeedTimeout 10 s, CutTime 0.3 s, WrapTimeout 5 s) ------------
+# Positions on the wrap conveyor are those of a pack's FRONT, in mm; the pusher sets a pack down at 0.
+WRAP_SPEED_MM_S = 200.0  # push line -> film stop 2.0 s (ClearTime 3 s); the PLC's 1-2 tick stop = 20-40 mm
+FILM_STOP_MM = 400.0  # Pack_At_Film eye: ON while a pack covers it (front 400-600)
+FILM_SLOT_MM = 450.0  # the film slot, 50 mm ahead of the stop: the stop overshoot never reaches it
+WRAP_REACH_MM = 400.0  # the bar wraps a pack whose tail is past the slot by at most this (front 650-1050)
+OVEN_ENTRY_MM = 1100.0  # the pack's front reaches the oven's entry eye: handed to Oven.put_at_entry
+FILM_FEED_MM_S = 150.0  # feed rollers; a pulse boundary every 3.33 ticks (>= 3: every pulse level is seen),
+#                         a late 0.3 s tick moves 45 mm < one pulse; 1200 mm in 8.0 s (FeedTimeout 10 s)
+FILM_PULSE_MM = 50.0  # one Film_Pulse per 50 mm of film (encoder on the feed roller; PLC FilmPulseMM)
+FILM_PULSE_S = 0.15  # Film_Pulse ON time: 2 tick ends ON, at least 1 OFF before the next pulse
+FILM_SENSOR_MM = 80.0  # Film_In_Slot sees film this far out of the slot: more than one pulse period, so a
+#                        sheet the PLC sees always has FeedCount >= 1 unless it was cut (Sheet_Waiting)
+KNIFE_CUT_S = 0.2  # the knife cuts after this long ON (CUT step: CutTime 0.3 s)
+SHEET_NEEDED_MM = 800.0  # film needed to wrap a pack: the default 850 mm wraps, 600 mm is a short sheet
+WRAP_TURN_S = 1.5  # one turn of the wrap bar (WrapTimeout 5 s)
+WRAP_HOME_TURN = 0.25  # Wrap_Home window: a quarter of a turn around home (0.375 s); the PLC drops WrapBar
+#                        0.1-0.2 s after the rising edge, the bar stops inside the window
+FILM_ROLL_MM = 300_000.0  # film on a new roll (about 350 sheets)
+FILM_LOW_MM = 10_000.0  # Film_Low at or below this
+FILM_TAIL_MM = 1250.0  # Film_Empty at or below this: the largest sheet (1200 mm) plus its run-on still fits
+
 # --- Packer: oven + outfeed (docs/packer/state-diagram.md rules 6-8; PLC: OvenSetpoint 190.0 degC, OvenHyst
 #     5.0, OvenBand 15.0 (Oven_Ready 175-205 degC), OvenMax 230.0 degC, HeatTimeout 120 s, AirflowTimeout 3 s,
 #     OvenJamTime 20 s) -----------------------------------------------------------------------------------------

@@ -1,11 +1,14 @@
-"""Packer physics: stage 1 collation (gate, count sensor, collation table, group pusher) and
-stage 3 oven + outfeed table + palletizer stand-in.  uv run pytest
+"""Packer physics: stage 1 collation (gate, count sensor, collation table, group pusher),
+stage 2 wrap (wrap conveyor, film, knife, wrap bar) and stage 3 oven + outfeed table + palletizer
+stand-in.  uv run pytest
 
 No PLC here: the tests write the PLC outputs by hand, in ticks of 0.1 s as the plant will, with C3
 stepped before the packer (the plant's order). `Collation` plays the PLC's COUNT rule in the real
-loop's order (read sensors, set outputs, step), so the one-tick latency is included.
+loop's order (read sensors, set outputs, step), so the one-tick latency is included; `WrapPlc`
+does the same for the wrap sequencer's step table.
 """
 
+import itertools
 from dataclasses import fields
 
 import pytest
@@ -14,7 +17,7 @@ from simulator import address_map_packer as pm
 from simulator import config
 from simulator.bottle import BottleFactory
 from simulator.conveyor import Conveyor
-from simulator.machines.packer import Oven, OutfeedTable, Pack, Packer, PackerOutputs
+from simulator.machines.packer import Film, Oven, OutfeedTable, Pack, Packer, PackerOutputs, Wrapper
 from simulator.standins import PalletizerStandIn
 
 TICK = 0.1
@@ -23,6 +26,13 @@ TICK = 0.1
 # not import PLC values; if a PLC constant changes, change it here too.
 PLC_PACK_SIZE = 6
 PLC_PUSH_TIMEOUT_S = 3
+PLC_CLEAR_TIME_S = 3
+PLC_FILM_PULSE_MM = 50
+PLC_FILM_MIN, PLC_FILM_MAX = 600, 1200
+PLC_FEED_TIMEOUT_S = 10
+PLC_CUT_TIME_S = 0.3
+PLC_SHEET_CHECK_S = 1
+PLC_WRAP_TIMEOUT_S = 5
 PLC_OVEN_SETPOINT = 1900  # 0.1 degC
 PLC_OVEN_HYST = 50
 PLC_OVEN_BAND = 150
@@ -34,6 +44,9 @@ PLC_OVEN_JAM_S = 20
 GATE = PackerOutputs(gate_motor=True)
 PUSH = PackerOutputs(group_pusher=True)
 OFF = PackerOutputs()
+FEED = PackerOutputs(film_feed=True)
+KNIFE = PackerOutputs(knife=True)
+CONVEYOR = PackerOutputs(wrap_conveyor=True)
 
 
 def warnings(events) -> list[str]:
@@ -240,6 +253,7 @@ def test_two_full_cycles_make_two_packs():
         plc.run(8.0)  # COUNT
         assert len(line.packer.table) == 6
         push_and_return(line)  # PUSH, RETRACT (the counter is reset in RETRACT: a new Collation)
+        line.run(CONVEYOR, config.PACK_LENGTH_MM / config.WRAP_SPEED_MM_S)  # the pack clears the push line
     packs = line.packer.wrap_packs
     assert [p.id for p in packs] == [1, 2] and line.packer.groups_pushed == 2
     assert [b.id for p in packs for b in p.bottles] == list(range(1, 13))
@@ -502,3 +516,452 @@ def test_packer_step_drives_the_oven_from_the_outputs():
     assert packer.oven.airflow_ok and packer.oven.temp_c > config.ROOM_C  # blower + heater
     assert packer.oven.packs[0].front_mm == pytest.approx(2.0 * config.OVEN_SPEED_MM_S)  # conveyor
     assert packer.oven.outfeed is packer.outfeed
+
+
+# --- Wrap (stage 2) ------------------------------------------------------------------------
+
+
+def feed_pulses(film_length: int) -> int:
+    """The PLC's FeedPulses: LIMIT(FilmMin, FilmLength, FilmMax) / FilmPulseMM (INT division)."""
+    return min(max(film_length, PLC_FILM_MIN), PLC_FILM_MAX) // PLC_FILM_PULSE_MM
+
+
+def pulse_runs(levels: list[bool]) -> tuple[list[int], list[int]]:
+    """Lengths in ticks of the ON runs, and of the OFF runs between two ON runs."""
+    runs = [(level, len(list(group))) for level, group in itertools.groupby(levels)]
+    while runs and not runs[0][0]:
+        runs.pop(0)
+    while runs and not runs[-1][0]:
+        runs.pop()
+    return [n for level, n in runs if level], [n for level, n in runs if not level]
+
+
+class WrapRig:
+    """Wrapper + a hot oven with its conveyor ON, stepped in the packer's order (wrap, then oven)."""
+
+    def __init__(self, roll_mm: float = config.FILM_ROLL_MM, oven_conveyor: bool = True) -> None:
+        self.oven = Oven(OutfeedTable(), temp_c=190.0)
+        self.wrapper = Wrapper(self.oven, Film(roll_mm))
+        self.film = self.wrapper.film
+        self.oven_conveyor = oven_conveyor
+        self.now = 0.0
+        self.events: list = []
+        self._next_id = 1
+
+    def place(self) -> Pack:
+        """The pusher sets a new pack down at the push line."""
+        pack = make_pack(self._next_id)
+        self._next_id += 1
+        self.events += self.wrapper.put_at_entry(pack, self.now)
+        return pack
+
+    def tick(self, out: PackerOutputs) -> None:
+        self.now += TICK
+        self.events += self.wrapper.step(out, TICK, self.now)
+        self.events += self.oven.step(False, True, self.oven_conveyor, TICK, self.now)
+
+    def run(self, out: PackerOutputs, seconds: float) -> None:
+        for _ in range(round(seconds / TICK)):
+            self.tick(out)
+
+
+class WrapPlc:
+    """The PLC's wrap sequencer (state-diagram.md, wrap step table, rules 4, 5, 12) in loop order:
+    read the sensors, count Film_Pulse edges, one transition, outputs with the interlocks, physics
+    step. Oven ready and outfeed free are assumed. `latency` extra ticks before an output change
+    reaches the plant. Records every step's start time and the Film_Pulse level per tick."""
+
+    def __init__(self, rig: WrapRig, film_length: int = 850, latency: int = 0) -> None:
+        self.rig = rig
+        self.pulses_needed = feed_pulses(film_length)
+        self.step = 10
+        self.count = 0  # Feed_Counter.CV (kept through a stop, reset in READY)
+        self.started: dict[int, float] = {10: 0.0}  # last start time of every step
+        self.durations: dict[int, list[float]] = {}
+        self.pulse_levels: list[bool] = []
+        self.sheet_fault = False
+        self._pulse_was = False
+        self._home_was = True
+        self._step_s = 0.0
+        self._no_sheet_s = 0.0
+        self._pending = [OFF] * latency
+
+    def stop(self) -> None:
+        """Stop / E-stop: the step goes to IDLE, every output off (the counter keeps its count)."""
+        self._goto(0)
+
+    def start(self) -> None:
+        """Start (rule 2): WAIT_PACK, or WRAP when the bar was stopped in the middle of a turn."""
+        self._goto(10 if self.rig.wrapper.wrap_home else 32)
+
+    def _goto(self, step: int) -> None:
+        self.durations.setdefault(self.step, []).append(self._step_s)
+        self.step, self._step_s = step, 0.0
+        self.started[step] = self.rig.now
+
+    def tick(self) -> None:
+        w, film = self.rig.wrapper, self.rig.film
+        # 1. Read the sensors
+        at_film, in_slot, pulse, home = w.pack_at_film, film.film_in_slot, film.film_pulse, w.wrap_home
+        entry = self.rig.oven.oven_entry
+        self.pulse_levels.append(pulse)
+        # 2. Counter (CTU on the rising edge), timers
+        if pulse and not self._pulse_was:
+            self.count += 1
+        self._pulse_was = pulse
+        done = self.count >= self.pulses_needed
+        home_edge = home and not self._home_was
+        self._home_was = home
+        # 3. One transition
+        s = self.step
+        if s == 10 and at_film and in_slot and self.count == 0:
+            self._goto(24)
+        elif s == 10 and at_film and not (in_slot and self.count == 0) and not film.film_empty:
+            self._goto(20)
+        elif s == 20 and done:
+            self._goto(22)
+        elif s == 22 and self._step_s >= PLC_CUT_TIME_S - 1e-9:
+            self._goto(24)
+        elif s == 24 and in_slot and home:
+            self._goto(30)
+        elif s == 30 and not at_film:
+            self._goto(32)
+        elif s == 32 and home_edge:
+            self._goto(34)
+        elif s == 34 and entry:
+            self._goto(10)
+        if self.step == 24:
+            self.count = 0  # Feed_Counter reset in READY
+            self._no_sheet_s = 0.0 if in_slot else self._no_sheet_s + TICK
+            self.sheet_fault |= self._no_sheet_s >= PLC_SHEET_CHECK_S
+        # 4. Outputs with the interlocks (wrap bar > film feed > knife lock-out, rule 12)
+        s = self.step
+        bar = s == 32
+        feed = s == 20 and not done and home and not bar
+        knife = s == 22 and not feed
+        conveyor = ((s == 10 and not at_film) or s in (30, 32, 34)) and not feed and not knife
+        self._pending.append(PackerOutputs(wrap_conveyor=conveyor, film_feed=feed, knife=knife, wrap_bar=bar))
+        # 5. Physics
+        self.rig.tick(self._pending.pop(0))
+        self._step_s += TICK
+
+    def run_until(self, condition, seconds: float = 30.0) -> None:
+        for _ in range(round(seconds / TICK)):
+            if condition():
+                return
+            self.tick()
+        assert condition(), f"not reached within {seconds} s (step {self.step})"
+
+
+def wrap_one(film_length: int = 850, latency: int = 0) -> tuple[WrapRig, WrapPlc, Pack]:
+    """One pack from the push line through the whole wrap sequence into the oven."""
+    rig = WrapRig()
+    pack = rig.place()
+    plc = WrapPlc(rig, film_length, latency)
+    plc.run_until(lambda: pack in rig.oven.packs and plc.step == 10)
+    return rig, plc, pack
+
+
+def test_film_pulse_every_level_lasts_a_tick():
+    film = Film()
+    levels = []
+    for i in range(round(10.0 / TICK)):
+        film.step(True, False, TICK, (i + 1) * TICK)
+        levels.append(film.film_pulse)
+    on, off = pulse_runs(levels)
+    assert len(on) == film.pulses == int(10.0 * config.FILM_FEED_MM_S / config.FILM_PULSE_MM)  # 30 edges
+    assert min(on) >= 1 and min(off) >= 1  # the CTU sees both edges of every pulse
+    assert all(a + b >= 3 for a, b in zip(on, off))  # rising edges >= 0.3 s apart
+    assert config.FILM_FEED_MM_S * 0.3 < config.FILM_PULSE_MM  # a late 0.3 s tick never passes two marks
+
+
+@pytest.mark.parametrize("film_length", [850, 1200, 600, 870])
+@pytest.mark.parametrize("latency", [0, 1])
+def test_feed_counts_the_sheet_within_feed_timeout(film_length, latency):
+    rig = WrapRig()
+    rig.place()
+    plc = WrapPlc(rig, film_length, latency)
+    plc.run_until(lambda: plc.step == 22)
+    n = feed_pulses(film_length)
+    assert plc.count == n and rig.film.pulses == n
+    assert rig.now - plc.started[20] < PLC_FEED_TIMEOUT_S
+    run_on = (1 + latency) * config.FILM_FEED_MM_S * TICK  # the PLC stops the feed 1-2 ticks after the edge
+    assert n * PLC_FILM_PULSE_MM <= rig.film.sheet_mm <= n * PLC_FILM_PULSE_MM + run_on + 1e-6
+
+
+def test_film_in_slot_means_a_pulse_was_counted_at_every_encoder_phase():
+    """The PLC's Sheet_Waiting (Film_In_Slot AND FeedCount = 0) means "a CUT sheet": an uncut sheet
+    the slot sensor sees must always have passed at least one pulse mark, whatever the roller's phase."""
+    for phase in range(0, int(config.FILM_PULSE_MM)):
+        film = Film()
+        film.roller_mm = float(phase)
+        for i in range(round(1.0 / TICK)):
+            film.step(True, False, TICK, (i + 1) * TICK)
+            if film.film_in_slot:
+                assert film.pulses >= 1, f"phase {phase} mm: sheet seen without a pulse"
+        assert film.film_in_slot
+
+
+def test_knife_cuts_within_cut_time():
+    film = Film()
+    film.step(True, False, 1.0, 1.0)  # 150 mm out of the slot
+    film.step(False, True, TICK, 1.1)
+    assert not film.cut  # one tick is not a cut
+    film.step(False, False, TICK, 1.2)
+    for i in range(round(PLC_CUT_TIME_S / TICK)):
+        film.step(False, True, TICK, 1.3 + i * TICK)
+        if film.cut:
+            break
+    assert film.cut and (i + 1) * TICK == pytest.approx(config.KNIFE_CUT_S)
+    assert config.KNIFE_CUT_S < PLC_CUT_TIME_S
+    assert film.film_in_slot  # the cut sheet stays in the slot
+
+
+@pytest.mark.parametrize("latency", [0, 1])
+def test_pack_reaches_the_film_stop_within_clear_time_and_stays_on_the_eye(latency):
+    rig = WrapRig()
+    pack = rig.place()
+    plc = WrapPlc(rig, latency=latency)
+    plc.run_until(lambda: plc.step == 20)
+    assert rig.now - plc.started[10] < PLC_CLEAR_TIME_S - 0.5  # margin for the push and the PLC
+    assert rig.wrapper.pack_at_film and rig.wrapper.slot_covered is None  # overshoot stays before the slot
+    assert config.FILM_STOP_MM <= pack.front_mm <= config.FILM_STOP_MM + 2 * config.WRAP_SPEED_MM_S * TICK + 1e-6
+
+
+@pytest.mark.parametrize("latency", [0, 1])
+def test_one_pack_wrapped_and_into_the_oven_within_every_timeout(latency):
+    rig, plc, pack = wrap_one(latency=latency)
+    assert pack.wrapped and rig.wrapper.wrapped == 1
+    assert config.SHEET_NEEDED_MM <= pack.sheet_mm <= 900
+    for step, limit in ((30, PLC_PUSH_TIMEOUT_S), (32, PLC_WRAP_TIMEOUT_S), (34, PLC_PUSH_TIMEOUT_S)):
+        assert max(plc.durations[step]) < limit - 1.0, f"step {step}: {plc.durations[step]}"
+    assert plc.durations[22] == [pytest.approx(PLC_CUT_TIME_S)]
+    assert rig.oven.oven_entry and rig.wrapper.packs == [] and rig.wrapper.wrap_home
+    assert not plc.sheet_fault and not warnings(rig.events)
+
+
+@pytest.mark.parametrize("latency", [0, 1])
+def test_wrap_bar_stops_inside_its_home_window_turn_after_turn(latency):
+    """WRAP: WrapBar ON until the rising edge of Wrap_Home; the bar stops 1-2 ticks later, inside
+    the window, and the next turn starts from there (no drift)."""
+    w = Wrapper(Oven(OutfeedTable()))
+    now = 0.0
+    for turn in range(10):
+        pending = [OFF] * latency
+        turning, home_was, started = True, w.wrap_home, now
+        while turning or any(o.wrap_bar for o in pending):
+            home = w.wrap_home
+            if home and not home_was:
+                turning = False  # the rising edge ends WRAP
+            home_was = home
+            pending.append(PackerOutputs(wrap_bar=turning))
+            now += TICK
+            w.step(pending.pop(0), TICK, now)
+        assert now - started < PLC_WRAP_TIMEOUT_S - 2.0
+        assert w.wrap_home, f"turn {turn}: bar stopped outside home at {w.bar:.3f} turn"
+
+
+def test_two_cycles_wrap_two_packs_without_warnings():
+    rig = WrapRig()
+    plc = WrapPlc(rig)
+    packs = []
+    for _ in range(2):
+        packs.append(rig.place())
+        plc.run_until(lambda: packs[-1] in rig.oven.packs and plc.step == 10)
+        for _ in range(round(PLC_CLEAR_TIME_S / TICK)):  # Wrap_Clear before the next push
+            plc.tick()
+    assert all(p.wrapped for p in packs) and rig.film.pulses == 2 * 17
+    assert not warnings(rig.events)
+
+
+# --- Wrap: audits --------------------------------------------------------------------------
+def test_pack_over_an_uncut_sheet_tears_it():
+    rig = WrapRig()
+    pack = rig.place()
+    rig.run(CONVEYOR, 2.0)  # front at 400: at the film stop
+    rig.run(FEED, 900 / config.FILM_FEED_MM_S)
+    rig.run(CONVEYOR, 1.0)  # no knife: drives over the uncut sheet
+    assert pack.sheet_mm > 0 and not rig.film.film_in_slot
+    assert any("uncut sheet: film torn" in w for w in warnings(rig.events))
+
+
+def test_short_sheet_warns_at_the_oven_entry():
+    rig, plc, pack = wrap_one(film_length=600)
+    assert pack.wrapped and pack.sheet_mm < config.SHEET_NEEDED_MM
+    assert [w for w in warnings(rig.events) if "short sheet" in w] == [
+        f"{pack.name} entered the oven with a short sheet ({pack.sheet_mm:.0f} mm, needs 800)"]
+
+
+def test_pack_without_film_warns_at_the_oven_entry():
+    rig = WrapRig()
+    pack = rig.place()
+    rig.run(CONVEYOR, 6.0)
+    assert pack in rig.oven.packs
+    assert warnings(rig.events) == [f"{pack.name} entered the oven without film"]
+
+
+def test_bar_turn_without_sheet_wraps_nothing():
+    rig = WrapRig()
+    pack = rig.place()
+    rig.run(PackerOutputs(wrap_conveyor=True, wrap_bar=True), 6.0)
+    assert not pack.wrapped and rig.wrapper.wrapped == 0 and pack in rig.oven.packs
+    assert warnings(rig.events) == [f"{pack.name} entered the oven without film"]
+
+
+def test_feed_with_the_bar_out_warns():
+    rig = WrapRig()
+    rig.run(PackerOutputs(wrap_bar=True), 0.5)
+    assert not rig.wrapper.wrap_home
+    rig.run(FEED, 0.3)
+    assert warnings(rig.events) == ["film fed into the wrap bar's path (bar not home)"]
+
+
+def test_second_sheet_under_a_cut_sheet_warns():
+    rig = WrapRig()
+    rig.run(FEED, 1.0)
+    rig.run(KNIFE, 0.3)
+    rig.run(FEED, 0.2)
+    assert warnings(rig.events) == ["film fed under a cut sheet: two sheets in the slot"]
+
+
+# --- Wrap: film roll -------------------------------------------------------------------------
+def test_film_low_and_empty_thresholds():
+    film = Film(config.FILM_LOW_MM + 10)
+    assert not film.film_low and not film.film_empty
+    film.load_roll(config.FILM_LOW_MM)
+    assert film.film_low and not film.film_empty
+    film.load_roll(config.FILM_TAIL_MM)
+    assert film.film_low and film.film_empty
+
+
+def test_sheet_started_before_film_empty_finishes_on_the_tail():
+    """The largest sheet (1200 mm) started 1 mm before Film_Empty gets all its pulses and its run-on:
+    the same sheet as from a full roll."""
+    sheets = []
+    for roll_mm in (config.FILM_TAIL_MM + 1, config.FILM_ROLL_MM):
+        rig = WrapRig(roll_mm=roll_mm)
+        rig.place()
+        plc = WrapPlc(rig, film_length=1200, latency=1)
+        plc.run_until(lambda: plc.step == 22)
+        assert rig.film.pulses == 24
+        sheets.append(rig.film.sheet_mm)
+    assert rig.film.film_empty is False and sheets[0] == pytest.approx(sheets[1])
+    assert Film(config.FILM_TAIL_MM + 1 - sheets[0]).film_empty  # the first roll is now on its tail
+
+
+def test_empty_roll_starts_no_sheet_and_bare_core_feeds_nothing():
+    rig = WrapRig(roll_mm=config.FILM_TAIL_MM)
+    rig.place()
+    plc = WrapPlc(rig)
+    for _ in range(round(5.0 / TICK)):
+        plc.tick()
+    assert plc.step == 10 and rig.wrapper.pack_at_film  # waits in WAIT_PACK (Starved, Alm_FilmEmpty)
+    core = Film(0.0)
+    for i in range(10):
+        core.step(True, False, TICK, (i + 1) * TICK)
+    assert core.pulses == 0 and core.sheet_mm == 0 and not core.film_pulse
+
+
+def test_torn_film_rollers_turn_nothing_moves():
+    film = Film()
+    film.torn = True
+    for i in range(30):
+        film.step(True, False, TICK, (i + 1) * TICK)
+    assert film.pulses == 0 and film.sheet_mm == 0 and film.left_mm == config.FILM_ROLL_MM
+
+
+# --- Wrap: stops and restarts (state-diagram.md rule 11) --------------------------------------
+def test_stop_in_feed_restart_feeds_only_the_rest():
+    rig = WrapRig()
+    rig.place()
+    plc = WrapPlc(rig)
+    plc.run_until(lambda: plc.step == 20 and plc.count == 8)
+    plc.stop()
+    for _ in range(10):
+        plc.tick()  # IDLE: the counter keeps 8
+    assert rig.film.film_in_slot and plc.count == 8
+    plc.start()
+    plc.run_until(lambda: plc.step == 22)
+    assert rig.film.pulses == 17 and plc.count == 17
+    assert 850 <= rig.film.sheet_mm <= 850 + config.FILM_FEED_MM_S * TICK + 1e-6
+
+
+def test_stop_in_ready_restart_uses_the_cut_sheet():
+    rig = WrapRig()
+    rig.place()
+    plc = WrapPlc(rig)
+    plc.run_until(lambda: plc.step == 24)
+    plc.stop()
+    for _ in range(5):
+        plc.tick()
+    plc.start()
+    plc.tick()
+    assert plc.step == 24  # Sheet_Waiting: READY, no second sheet
+    plc.run_until(lambda: plc.step == 10 and not rig.wrapper.packs)
+    assert rig.film.pulses == 17 and rig.oven.packs[0].wrapped and not warnings(rig.events)
+
+
+def test_e_stop_in_wrap_restart_finishes_the_turn_and_wraps_once():
+    rig = WrapRig()
+    pack = rig.place()
+    plc = WrapPlc(rig)
+    plc.run_until(lambda: plc.step == 32)
+    for _ in range(3):
+        plc.tick()  # the bar leaves home
+    plc.stop()
+    plc.tick()
+    assert not rig.wrapper.wrap_home
+    plc.start()
+    assert plc.step == 32
+    plc.run_until(lambda: pack in rig.oven.packs and plc.step == 10)
+    assert pack.wrapped and rig.wrapper.wrapped == 1 and rig.wrapper.wrap_home
+    assert not warnings(rig.events)
+
+
+def test_e_stop_in_run_on_past_the_slot_feeds_under_the_pack_next_pack_takes_the_sheet():
+    """PLC limit (rule 11): the pack has taken its sheet but still covers Pack_At_Film; the restart's
+    WAIT_PACK sees no sheet and feeds one under it. The physics reports it; the next pack takes it."""
+    rig = WrapRig()
+    first = rig.place()
+    plc = WrapPlc(rig)
+    plc.run_until(lambda: plc.step == 30 and first.front_mm >= config.FILM_SLOT_MM + 20)
+    plc.stop()
+    plc.tick()
+    assert rig.wrapper.pack_at_film and first.sheet_mm > 0
+    plc.start()
+    plc.run_until(lambda: first in rig.oven.packs and plc.step == 10)
+    assert first.wrapped
+    assert any("film fed under Pack 1" in w for w in warnings(rig.events))
+    assert rig.film.film_in_slot and rig.film.cut  # the extra sheet waits in the slot
+    for _ in range(round(PLC_CLEAR_TIME_S / TICK)):
+        plc.tick()
+    second = rig.place()
+    plc.run_until(lambda: plc.step != 10, seconds=5.0)
+    assert plc.step == 24  # Sheet_Waiting: no new feed
+    plc.run_until(lambda: second in rig.oven.packs and plc.step == 10)
+    assert second.wrapped and rig.film.pulses == 2 * 17
+
+
+# --- Wrap: hand-over to the oven and the Packer wiring -----------------------------------------
+def test_oven_entry_not_clear_holds_the_pack_at_the_entry():
+    rig = WrapRig(oven_conveyor=False)
+    first = rig.place()
+    rig.run(CONVEYOR, 1.0)
+    second = rig.place()
+    rig.run(CONVEYOR, 6.0)
+    assert first in rig.oven.packs and second in rig.wrapper.packs
+    assert second.front_mm == config.OVEN_ENTRY_MM
+    assert f"{second.name} waits at the oven entry: the last pack is still there" in warnings(rig.events)
+
+
+def test_packer_step_drives_the_wrap_from_the_outputs():
+    line = collated()
+    push_and_return(line)
+    pack = line.packer.wrap_packs[0]
+    line.run(CONVEYOR, 2.0)
+    assert line.packer.wrapper.pack_at_film and pack.front_mm == pytest.approx(config.FILM_STOP_MM)
+    line.run(FEED, 1.0)
+    assert line.packer.wrapper.film.pulses == 3 and line.packer.wrapper.film.film_in_slot
+    line.run(CONVEYOR, 4.0)
+    assert pack in line.packer.oven.packs and line.packer.oven.oven_entry
+
