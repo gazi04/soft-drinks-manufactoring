@@ -7,6 +7,7 @@ and the screen code in app.py stays small.
     world_text(plant)            the physical truth: bottles, pockets, sensor lamps
     syrup_world_text(plant)      the syrup room's truth: tanks, temperature, pressure, outputs, faults
     labeler_world_text(plant)    the labeler's truth: gate, pocket, label roll, glue tank, C3, outputs, faults
+    packer_world_text(plant)     the packer's truth: gate, table, pusher, wrap conveyor, film, bar, oven, outfeed
     header_text(stats, plc)      what the PLC reports: link, step, state, alarms
     scenario_text(slot)          which scenario runs and how far it is
     event_style(event)           colour of one log line
@@ -22,6 +23,7 @@ from simulator.events import Event, Source
 from simulator.loop import LoopStats
 from simulator.machines.filler import CAP, ENTRY, FILL, RINSE
 from simulator.machines.labeler import LabelerOutputs
+from simulator.machines.packer import Pack, PackerOutputs
 from simulator.machines.syrup import SyrupOutputs
 from simulator.plant import Plant
 from simulator.plcs import (
@@ -281,6 +283,124 @@ def labeler_world_text(plant: Plant) -> Text:
              f"removed by hand {len(lab.removed)}")
     if plant.labeler_outputs is None:
         t.append("\nlabeler PLC not answering: outputs taken as OFF, C2 stands", style="bold red")
+    return t
+
+
+PACKER_LAMP_COL = 40  # the wrap / oven tracks are 34 characters wide plus the 9 of the name column
+TRACK_CELL_MM = 50.0  # one character of a track
+
+
+def track(packs: list[Pack], length_mm: float, marks: dict[float, str]) -> str:
+    """A conveyor in mm as a row of 50 mm cells: '█' in every cell a pack touches, mark characters (an eye,
+    the slot) where nothing covers them, '·' elsewhere. Positions are the packs' fronts (a pack is 200 mm
+    long): a pack between two cells shows 5 cells, so an eye under it is never drawn free."""
+    cells = ["·"] * round(length_mm / TRACK_CELL_MM)
+    for at, char in marks.items():
+        cells[min(len(cells) - 1, int(at // TRACK_CELL_MM))] = char
+    for pack in packs:
+        tail = pack.front_mm - config.PACK_LENGTH_MM
+        for i in range(len(cells)):
+            if tail < (i + 1) * TRACK_CELL_MM - 1e-9 and pack.front_mm > i * TRACK_CELL_MM + 1e-9:
+                cells[i] = "█"
+    return "[" + "".join(cells) + "]"
+
+
+def packer_world_text(plant: Plant) -> Text:
+    """The packer's physical truth: gate, collation table, pusher, wrap conveyor, film, wrap bar, oven,
+    outfeed table and palletizer, the PLC outputs and every injected fault.
+
+    Lamps on the left of a pair are SENSORS as written to the packer PLC (Bottle_Counted and Film_Pulse as
+    the PulseWire passed them), the others are the packer PLC's OUTPUTS from the last tick.
+    """
+    pk = plant.packer
+    if pk is None:
+        return Text("no real packer (started with --no-packer / --no-labeler / --filler-only)", style="dim")
+    t = Text()
+    w = plant.packer_writes()
+    s = w.sensors
+    out = plant.packer_outputs if plant.packer_outputs is not None else PackerOutputs()  # no answer: OFF
+    wrap, film, oven = pk.wrapper, pk.wrapper.film, pk.oven
+
+    def left(text: str) -> None:  # left part of a line; the lamps start in the same column on every line
+        t.append(text.ljust(PACKER_LAMP_COL))
+
+    def lamps(*pairs: tuple[str, bool]) -> None:
+        for i, (name, on) in enumerate(pairs):
+            t.append("  " if i else "")
+            t.append_text(lamp(name, on))
+
+    slots = "".join("●" if b else "·" for b in plant.c3.slots)  # compact: the full row is on the labeler tab
+    exit_bottle = plant.c3.exit_bottle
+    left(f"C3       [{slots}]  at the gate {exit_bottle.id if exit_bottle else 'none'}")
+    lamps(("Bottle_At_Gate", s.bottle_at_gate), ("ConveyorMotor3", out.conveyor_motor3))
+    t.append("\n")
+    left(f"Gate     entering {pk.entering.id if pk.entering else 'none'}")
+    lamps(("Bottle_Counted", s.bottle_counted), ("GateMotor", out.gate_motor))
+    t.append("\n")
+    ids = " ".join(str(b.id) for b in pk.table)
+    left(f"Table    {len(pk.table)}/{config.PACK_BOTTLES}  {ids}"[:PACKER_LAMP_COL - 1])
+    lamps(("Pusher_Home", s.pusher_home), ("Pusher_Out", s.pusher_out))
+    t.append("\n")
+    left(f"Pusher   {level_bar(pk.pusher, 1.0)} {pk.pusher:4.0%}")
+    lamps(("GroupPusher", out.group_pusher))
+    _fault(t, pk.pusher_stuck, "PUSHER STUCK")
+    t.append("\n\n")
+
+    marks = {config.FILM_STOP_MM: "¦", config.FILM_SLOT_MM: "|"}
+    left(f"Wrap     {track(wrap.packs, config.OVEN_ENTRY_MM, marks)}")
+    lamps(("Pack_At_Film", s.pack_at_film), ("WrapConveyor", out.wrap_conveyor))
+    t.append("\n")
+    fronts = ", ".join(f"{p.id}: {p.front_mm:.0f}" for p in wrap.packs) or "no pack"
+    left(f"         fronts mm {fronts}"[:PACKER_LAMP_COL - 1])
+    lamps(("Wrap_Home", s.wrap_home), ("WrapBar", out.wrap_bar))
+    _fault(t, wrap.bar_stuck, "BAR STUCK")
+    t.append("\n")
+    left(f"Film     {level_bar(film.left_mm, config.FILM_ROLL_MM)} {film.left_mm / 1000:6.1f} / "
+         f"{config.FILM_ROLL_MM / 1000:g} m")
+    lamps(("Film_Low", s.film_low), ("Film_Empty", s.film_empty))
+    _fault(t, film.torn, "FILM TORN")
+    t.append("\n")
+    sheet = f"sheet {film.sheet_mm:.0f} mm {'cut' if film.cut else 'on the roll'}" if film.sheet_mm > 0 else "slot empty"
+    left(f"         {sheet}")
+    lamps(("Film_In_Slot", s.film_in_slot), ("Film_Pulse", s.film_pulse))
+    t.append("\n")
+    left(f"         marks {film.pulses}")
+    lamps(("FilmFeed", out.film_feed), ("Knife", out.knife))
+    t.append("\n\n")
+
+    left(f"Oven     {track(oven.packs, config.OVEN_LENGTH_MM, {})}")
+    lamps(("Oven_Entry", s.oven_entry), ("Oven_Exit", s.oven_exit), ("OvenConveyor", out.oven_conveyor))
+    t.append("\n")
+    left(f"         {s.oven_temp / 10:5.1f} °C  {len(oven.packs)} pack(s) inside")
+    lamps(("OvenHeater", out.oven_heater), ("OvenBlower", out.oven_blower), ("Airflow_OK", s.airflow_ok))
+    t.append("\n")
+    faults = [text for on, text in ((oven.heater_failed, "HEATER FAILED"),
+                                    (oven.heater_stuck_on and not oven.heater_failed, "HEATER STUCK ON"),
+                                    (oven.heater_stuck_on and oven.heater_failed, "STUCK ON"),
+                                    (oven.blower_failed, "BLOWER FAILED"), (oven.jammed, "JAMMED")) if on]
+    if faults:
+        left("")
+        t.append("  ".join(faults), style="bold red")
+        t.append("\n")
+    table = pk.outfeed
+    left(f"Outfeed  {len(table.packs)}/{config.TABLE_PACKS} packs")
+    lamps(("Table_Full", s.table_full))
+    t.append("\n")
+    pallet = plant.palletizer
+    t.append("Pallet   ")
+    if pallet.running:
+        t.append("running")
+    else:  # palletizer_running = False: the outfeed table fills up
+        t.append("STOPPED", style="bold red")
+    t.append(f", taken {pallet.taken}\n")
+
+    t.append("Wires    ")
+    lamps(("E_Stop_OK", w.e_stop_ok), ("Heartbeat", w.heartbeat))
+    _fault(t, not plant.packer_heartbeat.enabled, "FROZEN")
+    t.append(f"\nCount    pushed {pk.groups_pushed}  wrapped {wrap.wrapped}  out {oven.left}  "
+             f"palletized {pallet.taken}  taken out by hand {len(oven.removed)}")
+    if plant.packer_outputs is None:
+        t.append("\npacker PLC not answering: outputs taken as OFF, C3 stands", style="bold red")
     return t
 
 

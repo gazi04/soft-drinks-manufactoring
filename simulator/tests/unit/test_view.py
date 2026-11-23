@@ -195,3 +195,64 @@ def test_labeler_world_without_an_answer_and_without_a_labeler():
     text = view.labeler_world_text(plant).plain
     assert "labeler PLC not answering" in text and "ConveyorMotor2 ○" in text
     assert "--no-labeler" in view.labeler_world_text(Plant()).plain
+
+
+# --- Packer tab (stage 8) ---------------------------------------------------------------------
+def _packer_plant():
+    from simulator.machines.filler import FillerOutputs
+    from simulator.machines.packer import Pack, PackerOutputs
+
+    plant = Plant(with_labeler=True, with_packer=True)
+    pk = plant.packer
+    pk.table = [Bottle(i) for i in range(1, 4)]
+    pk.wrapper.packs.append(Pack(7, [], front_mm=420.0))  # at the film stop
+    film = pk.wrapper.film
+    film.sheet_mm, film.cut = 855.0, True
+    pk.oven.temp_c = 189.6
+    pk.oven.packs.append(Pack(6, [], front_mm=600.0))
+    plant.step(FillerOutputs(), 0.0, packer=PackerOutputs(conveyor_motor3=True, gate_motor=True, oven_blower=True))
+    return plant
+
+
+def test_packer_world_shows_the_tracks_sensor_values_and_output_lamps():
+    text = view.packer_world_text(_packer_plant()).plain
+    assert "Table    3/6  1 2 3" in text and "Pusher_Home ●" in text and "GateMotor ●" in text
+    assert "Wrap     [····█████|············]" in text  # the pack covers the film stop eye, the slot is free
+    assert "Pack_At_Film ●" in text and "Film_In_Slot ●" in text and "sheet 855 mm cut" in text
+    assert "Oven     [········████········]" in text and "189.6 °C  1 pack(s) inside" in text
+    assert "OvenBlower ●" in text and "OvenHeater ○" in text and "Wrap_Home ●" in text
+    assert "packer PLC not answering" not in text
+
+
+def test_track_draws_packs_over_the_marks():
+    from simulator.machines.packer import Pack
+
+    assert view.track([], 500.0, {400.0: "|"}) == "[········|·]"
+    assert view.track([Pack(1, [], front_mm=200.0)], 500.0, {}) == "[████······]"  # on cell borders: 4 cells
+    assert view.track([Pack(1, [], front_mm=420.0)], 500.0, {400.0: "|"}) == "[····█████·]"  # between: 5, eye hidden
+
+
+def test_packer_world_marks_every_fault_and_fits_the_box():
+    plant = _packer_plant()
+    pk, oven = plant.packer, plant.packer.oven
+    pk.pusher_stuck = pk.wrapper.bar_stuck = pk.wrapper.film.torn = True
+    oven.heater_failed = oven.heater_stuck_on = oven.blower_failed = oven.jammed = True
+    plant.palletizer.running = plant.packer_heartbeat.enabled = False
+    text = view.packer_world_text(plant).plain
+    for marker in ("PUSHER STUCK", "BAR STUCK", "FILM TORN", "HEATER FAILED  STUCK ON", "BLOWER FAILED", "JAMMED",
+                   "Pallet   STOPPED", "FROZEN"):
+        assert marker in text
+    lines = text.splitlines()
+    assert max(len(line) for line in lines) <= 86 and len(lines) <= 20  # the world box of the panel
+    oven.heater_failed = False
+    assert "HEATER STUCK ON" in view.packer_world_text(plant).plain
+
+
+def test_packer_world_without_an_answer_and_without_a_packer():
+    plant = Plant(with_labeler=True, with_packer=True)
+    from simulator.machines.filler import FillerOutputs
+
+    plant.step(FillerOutputs(), 0.0)  # the packer PLC does not answer
+    text = view.packer_world_text(plant).plain
+    assert "packer PLC not answering" in text and "ConveyorMotor3 ○" in text
+    assert "--no-packer" in view.packer_world_text(Plant(with_labeler=True)).plain
