@@ -14,6 +14,7 @@ PLC_HOST = "127.0.0.1"  # later "plc-filler" inside the Docker network
 PLC_PORT = 502  # the filler keeps 502 (report section 6.1, addresses in build order)
 SYRUP_PORT = 5022  # the syrup room's own runtime (plc-syrup-carb), same host
 LABELER_PORT = 5023  # the labeler's own runtime (plc-labeler), same host
+PACKER_PORT = 5024  # the packer's own runtime (plc-packer), same host
 
 # --- Tick loop --------------------------------------------------------------------
 TICK_S = 0.1  # one simulator cycle; the PLC scans every 20 ms, so ~5 scans per tick

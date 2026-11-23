@@ -25,6 +25,7 @@ SCRIPTS = [
     Script("test_packer_stop_state.py", "Stop at safe points of both sequencers (none in PUSH / CUT / RUN_ON / WRAP), restart cases, PackCount with Cmd 4, Starved, State 0/1/2/3/9"),
     Script("test_packer_alarms.py", "film fault, pack jam, wrap timeout, over-temperature with blower run-on, airflow, oven jam, warnings, FAULT, Reset only when the cause is gone",
            quick_args=("--quick",)),
+    Script("test_link_packer.py", "simulator's PackerPlc client: heartbeat, write + read back of both blocks, PLC reads the sensors, airflow answered in Auto"),
 ]
 
 if __name__ == "__main__":

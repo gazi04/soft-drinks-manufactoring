@@ -5,6 +5,7 @@
     SyrupPlc    the syrup room (port 5022): same pattern, own addresses (address_map_syrup.py);
                 its reads and writes are documented at the class
     LabelerPlc  the labeler (port 5023): same pattern, own addresses (address_map_labeler.py)
+    PackerPlc   the packer (port 5024): same pattern, own addresses (address_map_packer.py)
 
     PLC (OpenPLC runtime, Modbus TCP server)
       coils 0-5            ── read_outputs() ──►  FillerOutputs   ──► plant.step()
@@ -76,11 +77,13 @@ from simulator.address_map import (
     UNUSED_MX0_7,
 )
 from simulator import address_map_labeler as lm
+from simulator import address_map_packer as pm
 from simulator import address_map_syrup as sm
 from simulator.machines.filler import FillerOutputs
 from simulator.machines.labeler import LabelerOutputs
+from simulator.machines.packer import PackerOutputs
 from simulator.machines.syrup import SyrupOutputs
-from simulator.plant import LabelerWrites, SimWrites, SyrupSignals, SyrupWrites
+from simulator.plant import LabelerWrites, PackerWrites, SimWrites, SyrupSignals, SyrupWrites
 
 RECONNECT_S = 2.0  # default: at most one connection attempt every 2 s while the PLC is away
 MAX_BACKOFF = 8  # a PLC that never answered is retried at most every RECONNECT_S x 8 (16 s by default)
@@ -385,6 +388,124 @@ def decode_labeler_status(regs: list[int], alarm_bits: list[bool], mode: int) ->
     """regs = %MW50..%MW53 (State, Step, unused, GoodCount), alarm_bits = %MX5.0..5.6, mode = %MW1."""
     state, step, _unused, good_count = regs[: lm.STATUS_COUNT]
     return LabelerStatus(state, step, good_count, *alarm_bits[: lm.ALARMS_COUNT], mode)
+
+
+# --- Packer (port 5024) --------------------------------------------------------------
+PACKER_ALARM_NAMES = ("Alm_FilmFault", "Alm_PackJam", "Alm_OutfeedBlocked", "Alm_CommLost", "Alm_FilmEmpty",
+                      "Alm_OvenOverTemp", "Alm_OvenHeatTimeout", "Alm_OvenJam",  # %MX5.0 .. %MX5.7
+                      "Alm_AirflowLost", "Alm_WrapTimeout")  # %MX7.0 .. %MX7.1
+
+# The coils the simulator writes, looked up BY ADDRESS (as the labeler). First block %MX0.0-%MX1.2: the 8
+# sensors and the wiring, the unused %MX1.0 sent FALSE. Second block %MX4.0-4.5: the six extra sensors.
+PACKER_COIL_FIELDS = {
+    pm.BOTTLE_AT_GATE: ("bottle_at_gate", lambda w: w.sensors.bottle_at_gate),
+    pm.BOTTLE_COUNTED: ("bottle_counted", lambda w: w.sensors.bottle_counted),
+    pm.PUSHER_HOME: ("pusher_home", lambda w: w.sensors.pusher_home),
+    pm.PUSHER_OUT: ("pusher_out", lambda w: w.sensors.pusher_out),
+    pm.PACK_AT_FILM: ("pack_at_film", lambda w: w.sensors.pack_at_film),
+    pm.FILM_IN_SLOT: ("film_in_slot", lambda w: w.sensors.film_in_slot),
+    pm.FILM_PULSE: ("film_pulse", lambda w: w.sensors.film_pulse),
+    pm.WRAP_HOME: ("wrap_home", lambda w: w.sensors.wrap_home),
+    pm.E_STOP_OK: ("e_stop_ok", lambda w: w.e_stop_ok),
+    pm.HEARTBEAT: ("heartbeat", lambda w: w.heartbeat),
+}
+PACKER_EXTRA_FIELDS = {
+    pm.FILM_EMPTY: ("film_empty", lambda w: w.sensors.film_empty),
+    pm.FILM_LOW: ("film_low", lambda w: w.sensors.film_low),
+    pm.OVEN_ENTRY: ("oven_entry", lambda w: w.sensors.oven_entry),
+    pm.OVEN_EXIT: ("oven_exit", lambda w: w.sensors.oven_exit),
+    pm.TABLE_FULL: ("table_full", lambda w: w.sensors.table_full),
+    pm.AIRFLOW_OK: ("airflow_ok", lambda w: w.sensors.airflow_ok),
+}
+
+assert set(PACKER_COIL_FIELDS) | {pm.UNUSED_MX1_0} == set(pm.SENSOR_BLOCK)
+assert set(PACKER_EXTRA_FIELDS) == set(pm.EXTRA_SENSOR_BLOCK)
+assert set(pm.SENSOR_BLOCK) | set(pm.EXTRA_SENSOR_BLOCK) <= pm.SIM_WRITE_COILS
+assert pm.ANALOG_COUNT == 1 and pm.SIM_WRITE_REGISTERS == {pm.OVEN_TEMP}
+
+# Reads that span gaps (read only, so the words / coils in between cost nothing and change nothing):
+# - status: HR %MW40..%MW53 = the 4 computed words, 6 unused, the 4 status words (one request, not two);
+# - alarms: coils %MX5.0..%MX7.1 = 8 alarms, the unused %MX6, 2 alarms (one request, not two);
+# - read-back: coils %MX0.0..%MX4.5 = both sensor blocks and the HMI / PLC bytes between them.
+PACKER_REGS_START = pm.COMPUTED_START
+PACKER_REGS_COUNT = pm.STATUS_START + pm.STATUS_COUNT - pm.COMPUTED_START  # 14
+PACKER_ALARM_SPAN = pm.EXTRA_ALARMS_START + pm.EXTRA_ALARMS_COUNT - pm.ALARMS_START  # 18
+PACKER_READBACK_COUNT = pm.EXTRA_SENSOR_BLOCK[-1] + 1 - pm.SENSOR_BLOCK_START  # 38
+assert pm.COMPUTED_START < pm.STATUS_START and pm.ALARMS_START < pm.EXTRA_ALARMS_START
+
+
+def decode_packer_outputs(bits: list[bool]) -> PackerOutputs:
+    """Coils 0-9 (%QX0.0-%QX1.1) -> PackerOutputs. pymodbus pads bits to 16, so slice."""
+    return PackerOutputs(*bits[: pm.OUTPUTS_COUNT])
+
+
+def encode_packer_sensor_block(w: PackerWrites) -> list[bool]:
+    """PackerWrites -> the 11 coil values of the first bulk write, in pm.SENSOR_BLOCK order."""
+    return [bool(PACKER_COIL_FIELDS[a][1](w)) if a in PACKER_COIL_FIELDS else False for a in pm.SENSOR_BLOCK]
+
+
+def encode_packer_extra_block(w: PackerWrites) -> list[bool]:
+    """PackerWrites -> the 6 coil values of the second bulk write (%MX4.0-4.5)."""
+    return [bool(PACKER_EXTRA_FIELDS[a][1](w)) for a in pm.EXTRA_SENSOR_BLOCK]
+
+
+def foreign_packer_writes(w: PackerWrites, span: list[bool], oven_raw: int) -> list[str]:
+    """Signals whose read-back value differs from what the simulator wrote (see foreign_writes).
+
+    `span` = the coils %MX0.0..%MX4.5 read in one request; only the simulator's own two blocks are judged.
+    """
+    wrong = []
+    for address, expected in zip(pm.SENSOR_BLOCK, encode_packer_sensor_block(w)):
+        if span[address - pm.SENSOR_BLOCK_START] != expected:
+            wrong.append(PACKER_COIL_FIELDS[address][0] if address in PACKER_COIL_FIELDS else f"coil {address}")
+    for address, expected in zip(pm.EXTRA_SENSOR_BLOCK, encode_packer_extra_block(w)):
+        if span[address - pm.SENSOR_BLOCK_START] != expected:
+            wrong.append(PACKER_EXTRA_FIELDS[address][0])
+    if oven_raw != to_register(w.sensors.oven_temp):
+        wrong.append("oven_temp")
+    return wrong
+
+
+@dataclass(frozen=True)
+class PackerStatus:
+    """What the packer PLC reports about itself (event log, panel)."""
+
+    state: int  # 0 Stopped, 1 Running, 2 Starved, 3 Blocked, 9 Fault (both sequencers)
+    step: int  # collation: 0 IDLE, 5 WARM_UP ... 25 RETRACT, 900 FAULT
+    wrap_step: int  # wrap: 0 IDLE, 10 WAIT_PACK ... 34 RUN_OUT, 900 FAULT
+    pack_count: int
+    group_count: int  # bottles in the current group (Group_Counter.CV)
+    packs_in_oven: int  # Oven_Counter.CV (CTUD)
+    feed_pulses: int  # pulses for one sheet
+    feed_count: int  # pulses fed for the current sheet
+    alm_film_fault: bool
+    alm_pack_jam: bool
+    alm_outfeed_blocked: bool  # a warning
+    alm_comm_lost: bool
+    alm_film_empty: bool  # a warning, not latched
+    alm_oven_over_temp: bool
+    alm_oven_heat_timeout: bool
+    alm_oven_jam: bool
+    alm_airflow_lost: bool
+    alm_wrap_timeout: bool
+    mode: int = 1  # ModeReq as the HMI set it: 0 Stop, 1 Auto, 2 Manual (default only for tests)
+
+    @property
+    def alarms(self) -> dict[str, bool]:
+        flags = (self.alm_film_fault, self.alm_pack_jam, self.alm_outfeed_blocked, self.alm_comm_lost,
+                 self.alm_film_empty, self.alm_oven_over_temp, self.alm_oven_heat_timeout, self.alm_oven_jam,
+                 self.alm_airflow_lost, self.alm_wrap_timeout)
+        return dict(zip(PACKER_ALARM_NAMES, flags))
+
+
+def decode_packer_status(regs: list[int], alarm_span: list[bool], mode: int) -> PackerStatus:
+    """regs = %MW40..%MW53 (PACKER_REGS_COUNT words), alarm_span = %MX5.0..%MX7.1, mode = %MW1."""
+    computed = regs[: pm.COMPUTED_COUNT]
+    status_at = pm.STATUS_START - PACKER_REGS_START
+    state, step, wrap_step, pack_count = regs[status_at: status_at + pm.STATUS_COUNT]
+    extra_at = pm.EXTRA_ALARMS_START - pm.ALARMS_START
+    alarms = alarm_span[: pm.ALARMS_COUNT] + alarm_span[extra_at: extra_at + pm.EXTRA_ALARMS_COUNT]
+    return PackerStatus(state, step, wrap_step, pack_count, *computed, *map(bool, alarms), mode)
 
 
 # --- Async client ------------------------------------------------------------------
@@ -701,3 +822,67 @@ class LabelerPlc(PlcLink):
         client = self._live_client("read back GlueTemp")
         glue = await self._finish("read back GlueTemp", client.read_holding_registers(lm.GLUE_TEMP, count=1))
         return foreign_labeler_writes(w, coils.bits[:n], extra.bits[:n_extra], glue.registers[0])
+
+
+class PackerPlc(PlcLink):
+    """Async Modbus client of the packer PLC (port 5024).
+
+        coils 0-9                       ── read_outputs() ──►  PackerOutputs (plant.step)
+        coils 8192-8202, 8224-8229,
+        HR 1036 (OvenTemp)              ◄── write() ────────   PackerWrites  (plant.packer_writes)
+        HR 1064-1077, coils 8232-8249, HR 1025 ── read_status() ──► PackerStatus
+
+    The same pattern as LabelerPlc: three writes per tick, because the six extra sensors (%MX4) are not
+    next to the others (%MX2 manual buttons and %MX3 conditioned bits lie between them and belong to
+    the HMI and the PLC). The READS span such gaps instead: reading changes nothing, so the status
+    needs three requests, not five, and the read-back two, not three.
+    """
+
+    write_coils = pm.SIM_WRITE_COILS
+    write_registers = pm.SIM_WRITE_REGISTERS
+
+    def __init__(
+        self,
+        host: str = config.PLC_HOST,
+        port: int = config.PACKER_PORT,
+        reconnect_s: float = RECONNECT_S,
+        timeout_s: float = TIMEOUT_S,
+    ) -> None:
+        super().__init__(host, port, reconnect_s, timeout_s)
+
+    async def read_outputs(self) -> PackerOutputs:
+        client = self._live_client("read outputs")
+        result = await self._finish("read outputs", client.read_coils(pm.OUTPUTS_START, count=pm.OUTPUTS_COUNT))
+        return decode_packer_outputs(result.bits)
+
+    async def write(self, w: PackerWrites) -> None:
+        """The sensor block, the six extra sensors and OvenTemp: three requests."""
+        await self._write_coils(pm.SENSOR_BLOCK_START, encode_packer_sensor_block(w))
+        await self._write_coils(pm.EXTRA_SENSOR_BLOCK_START, encode_packer_extra_block(w))
+        await self._write_register(pm.OVEN_TEMP, to_register(w.sensors.oven_temp))
+
+    async def write_heartbeat(self, value: bool) -> None:
+        """Only the heartbeat coil (first contact)."""
+        await self._write_coils(pm.HEARTBEAT, [value])
+
+    async def read_status(self) -> PackerStatus:
+        client = self._live_client("read status")
+        regs = await self._finish("read status", client.read_holding_registers(PACKER_REGS_START,
+                                                                               count=PACKER_REGS_COUNT))
+        client = self._live_client("read alarms")
+        alarms = await self._finish("read alarms", client.read_coils(pm.ALARMS_START, count=PACKER_ALARM_SPAN))
+        client = self._live_client("read mode")
+        mode = await self._finish("read mode", client.read_holding_registers(pm.MODE_REQ, count=1))  # read only
+        return decode_packer_status(regs.registers, alarms.bits, mode.registers[0])
+
+    async def verify_writes(self, w: PackerWrites) -> list[str]:
+        """Read both coil blocks (one span) and OvenTemp back; names of the signals that differ.
+
+        Pass the values written LAST tick and call it before the next write (see FillerPlc).
+        """
+        client = self._live_client("read back sensors")
+        span = await self._finish("read back sensors", client.read_coils(pm.SENSOR_BLOCK_START,
+                                                                         count=PACKER_READBACK_COUNT))
+        client = self._live_client("read back OvenTemp")
+        oven = await self._finish("read back OvenTemp", client.read_holding_registers(pm.OVEN_TEMP, count=1))
+        return foreign_packer_writes(w, span.bits[:PACKER_READBACK_COUNT], oven.registers[0])
