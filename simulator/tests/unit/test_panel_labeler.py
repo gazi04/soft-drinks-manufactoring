@@ -77,7 +77,7 @@ def test_labeler_switches_follow_the_plant_without_sending_commands(tmp_path):
         app = make_app(tmp_path)
         async with app.run_test(size=SIZE) as pilot:
             app.plant.labeler.bell_stuck = True  # e.g. the bell_stuck scenario
-            app.plant.packer.running = False
+            app.plant.packer_standin.running = False
             app.plant.labeler_heartbeat.enabled = False
             await pilot.pause(0.4)  # one redraw; the tab is hidden, the sync still works
             assert app.query_one("#sw-bell", Switch).value is True

@@ -124,7 +124,11 @@ def _summary(stats, plant, warnings: int) -> str:
         return (f"{stats.summary()}, bottles out {plant.labeler_standin.taken + plant.c2.count}, "
                 f"lost {len(plant.filler.lost)}, warnings {warnings}")
     lab = plant.labeler
-    return (f"{stats.summary()}, labelled {lab.labelled} of {lab.discharged} discharged, packed {plant.packer.taken}, "
+    if plant.packer is None:
+        packed = f"packed {plant.packer_standin.taken}"
+    else:
+        packed = f"packs {plant.packer.groups_pushed} pushed / {plant.palletizer.taken} palletized"
+    return (f"{stats.summary()}, labelled {lab.labelled} of {lab.discharged} discharged, {packed}, "
             f"lost filler {len(plant.filler.lost)} / labeler {len(lab.lost)}, warnings {warnings}")
 
 

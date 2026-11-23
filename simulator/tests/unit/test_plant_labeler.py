@@ -168,9 +168,9 @@ def test_line_labels_every_bottle_and_the_packer_takes_them():
     line = Line()
     line.plant.supply.add(15)
     line.plant.supply.per_min = 0
-    line.run(400, until=lambda: line.plant.packer.taken == 15)
+    line.run(400, until=lambda: line.plant.packer_standin.taken == 15)
     lab = line.plant.labeler
-    assert line.plant.packer.taken == 15
+    assert line.plant.packer_standin.taken == 15
     assert lab.discharged == lab.labelled == 15
     assert not lab.lost and not line.plant.filler.lost
     assert not line.warnings(), line.warnings()
@@ -192,7 +192,7 @@ def test_animation_words_follow_the_pocket_and_c3():
             codes.append(code)
         c3_bits.add(bits)
         assert bits == line.plant.c3.slot_bits()
-        if line.plant.packer.taken == 1:
+        if line.plant.packer_standin.taken == 1:
             break
     assert codes == [0, 1, 2, 3, 0]
     # the bottle stepped along C3. Slots 0 and 7 are not seen at a tick end: the pusher's tick also moves
@@ -220,7 +220,7 @@ def test_labeler_keeps_up_with_the_filler():
 def test_packer_stopped_fills_c3_then_c2_and_continues():
     line = Line()
     line.run(60)
-    line.plant.packer.running = False
+    line.plant.packer_standin.running = False
     line.run(300)
     plant = line.plant
     assert plant.labeler.sensors().c3_full and line.labeler.outfeed_full
@@ -229,7 +229,7 @@ def test_packer_stopped_fills_c3_then_c2_and_continues():
     assert line.w.s7  # C2 filled up behind the labeler: the filler sees it full
     assert line.filler.outfeed_full
     labelled = plant.labeler.labelled
-    plant.packer.running = True
+    plant.packer_standin.running = True
     line.run(60)
     assert plant.labeler.labelled > labelled and not plant.labeler.lost
     assert not line.warnings(), line.warnings()
@@ -251,7 +251,7 @@ def test_late_ticks_keep_the_pulse_edges():
     line.plant.supply.add(6)
     line.plant.supply.per_min = 0
     t = 0.0
-    while line.plant.packer.taken < 6:
+    while line.plant.packer_standin.taken < 6:
         line.tick(dt=0.35)
         t += 0.35
         assert t < 600, "bottles not labelled with late ticks"

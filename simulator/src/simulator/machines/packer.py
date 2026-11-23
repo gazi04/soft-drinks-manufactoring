@@ -44,8 +44,8 @@ the audit logs a warning.
 Known model limits:
 - Bottles cross the gate even if C3's motor is off (as the labeler's gate).
 - A bottle past the gate always reaches the table, even if the gate shuts behind it.
-- Bottle_Counted (0.2 s) and Film_Pulse (0.15 s) are longer than one sub-step (SUBSTEP_S); the
-  plant keeps them ON for a whole tick if they were ON at any sub-step (stage 4), like Label_Mark.
+- Bottle_Counted (0.2 s) and Film_Pulse (0.15 s) are timed pulses; the plant passes every rising
+  edge of its sub-steps on to the PLC through a PulseWire (plant.py), so a late tick merges none.
 - One air temperature for the whole oven (no zones); the heater's speed does not depend on
   the packs inside. The heater heats only while air flows: without air the heat stays in the
   coils (the blower's run-on exists to carry it away, PLC rule 7).
@@ -106,10 +106,33 @@ class Pack:
         return f"Pack {self.id} (bottles {self.bottles[0].id}-{self.bottles[-1].id})"
 
 
+@dataclass(frozen=True)
+class PackerSensors:
+    """What the packer's sensors report, in the order of the I/O list (%MX0, %MX4, %MW12)."""
+
+    bottle_at_gate: bool  # C3 exit slot
+    bottle_counted: bool  # pulse per bottle through the gate
+    pusher_home: bool
+    pusher_out: bool
+    pack_at_film: bool
+    film_in_slot: bool
+    film_pulse: bool  # pulse per 50 mm of film
+    wrap_home: bool
+    film_empty: bool
+    film_low: bool
+    oven_entry: bool
+    oven_exit: bool
+    table_full: bool
+    airflow_ok: bool
+    oven_temp: int  # 0.1 degC
+
+
 class Packer:
     """Gate, collation table and group pusher behind C3 (part 1 of the packer)."""
 
-    def __init__(self, c3: Conveyor) -> None:
+    def __init__(self, c3: Conveyor, check_labels: bool = False) -> None:
+        """`check_labels`: warn when a pack leaves the oven with a bottle without a whole label (the
+        plant sets it, where the bottles come from the labeler; unit tests use unlabelled bottles)."""
         self.c3 = c3
         # True state. Public: tests, the panel and (stage 7) fault commands read / set them.
         self.entering: Bottle | None = None  # the bottle between the gate and the table
@@ -123,7 +146,7 @@ class Packer:
         self._now = 0.0
         self._audit = Audit()
         self.outfeed = OutfeedTable()
-        self.oven = Oven(self.outfeed)
+        self.oven = Oven(self.outfeed, check_labels=check_labels)
         self.wrapper = Wrapper(self.oven)
 
     def step(self, out: PackerOutputs, dt: float, now: float) -> list[Event]:
@@ -194,6 +217,26 @@ class Packer:
             events.append(Event.sim(self._now, f"{pack.name} pushed with {n} bottles, not {config.PACK_BOTTLES}",
                                     warning=True))
         return events
+
+    def sensors(self) -> PackerSensors:
+        w, oven = self.wrapper, self.oven
+        return PackerSensors(
+            bottle_at_gate=self.bottle_at_gate,
+            bottle_counted=self.bottle_counted,
+            pusher_home=self.pusher_home,
+            pusher_out=self.pusher_out,
+            pack_at_film=w.pack_at_film,
+            film_in_slot=w.film.film_in_slot,
+            film_pulse=w.film.film_pulse,
+            wrap_home=w.wrap_home,
+            film_empty=w.film.film_empty,
+            film_low=w.film.film_low,
+            oven_entry=oven.oven_entry,
+            oven_exit=oven.oven_exit,
+            table_full=self.outfeed.table_full,
+            airflow_ok=oven.airflow_ok,
+            oven_temp=oven.oven_temp,
+        )
 
     @property
     def wrap_packs(self) -> list[Pack]:
@@ -479,12 +522,14 @@ class Oven:
         1. blower: air flows BLOWER_SPINUP_S after OvenBlower ON, stops at once when OFF
         2. air temperature (heater only with air flowing, loss to the room)
         3. oven conveyor moves the packs (front pack first, the others queue behind it)
-        4. a pack whose tail passed the exit goes onto the outfeed table (audit: not shrunk)
+        4. a pack whose tail passed the exit goes onto the outfeed table (audit: not shrunk; with
+           check_labels also bottles without a whole label, pack quality Q3)
         5. shrink time of the packs inside
     """
 
-    def __init__(self, outfeed: OutfeedTable, temp_c: float = config.ROOM_C) -> None:
+    def __init__(self, outfeed: OutfeedTable, temp_c: float = config.ROOM_C, check_labels: bool = False) -> None:
         self.outfeed = outfeed
+        self.check_labels = check_labels  # warn about bottles without a whole label (see Packer)
         # True state. Public: tests, the panel and (stage 7) fault commands read / set them.
         self.temp_c = temp_c
         self.packs: list[Pack] = []  # on the oven conveyor, front pack (nearest the exit) first
@@ -555,6 +600,11 @@ class Oven:
             if not pack.shrunk:
                 events.append(Event.sim(self._now, f"{pack.name} left the oven not shrunk ({pack.hot_s:.1f} s hot)",
                                         warning=True))
+            unlabelled = [b.id for b in pack.bottles
+                          if b.label_mm < config.BROKEN_LABEL_SHARE * config.LABEL_LENGTH_MM - _EPSILON]
+            if self.check_labels and unlabelled:
+                events.append(Event.sim(self._now, f"{pack.name} left the oven with bottles without a whole label: "
+                                                   f"{', '.join(map(str, unlabelled))}", warning=True))
         name = self.packs[0].name if self.packs else ""
         self._audit.warn("exit_blocked", waiting, f"{name} waits at the oven exit: outfeed table full")
         return events

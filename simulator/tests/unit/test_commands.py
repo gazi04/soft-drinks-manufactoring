@@ -106,7 +106,7 @@ def test_every_labeler_command_sets_its_attribute():
     assert applied_labeler("glue_level", 0.9).labeler.tank.glue_kg == 0.9
     assert applied_labeler("glue_level", 9.0).labeler.tank.glue_kg == config.GLUE_TANK_KG  # what fits
     assert applied_labeler("add_glue", 0.5).labeler.tank.glue_kg == config.GLUE_START_KG + 0.5
-    assert applied_labeler("packer_running", False).packer.running is False
+    assert applied_labeler("packer_running", False).packer_standin.running is False
     plant = applied_labeler("labeler_heartbeat", False)
     assert plant.labeler_heartbeat.enabled is False and plant.heartbeat.enabled is True  # only the labeler PLC's
     for value, kept in ((True, False), (False, True)):  # clear_gate is an action: False does nothing

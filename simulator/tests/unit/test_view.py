@@ -180,7 +180,7 @@ def test_labeler_world_marks_every_injected_fault():
     lab = plant.labeler
     lab.web.torn = lab.bell_stuck = lab.gate_jammed = True
     lab.tank.heater_failed = lab.tank.heater_stuck_on = True
-    plant.packer.running = False
+    plant.packer_standin.running = False
     plant.labeler_heartbeat.enabled = False
     text = view.labeler_world_text(plant).plain
     assert "GATE JAMMED" in text and "BELL STUCK" in text and "WEB TORN" in text

@@ -261,11 +261,14 @@ def labeler_world_text(plant: Plant) -> Text:
     lamps(("C3_Full", s.c3_full), ("DischargeMotor", out.discharge_motor))
     t.append("\n")
     t.append("Packer   ")
-    if plant.packer.running:
-        t.append("running")
-    else:  # packer_running = False: C3 fills up
-        t.append("STOPPED", style="bold red")
-    t.append(f", taken {plant.packer.taken}\n\n")
+    if plant.packer is not None:  # the real packer: its PLC drives C3
+        t.append(f"packer PLC, {plant.packer.groups_pushed} groups pushed\n\n")
+    else:
+        if plant.packer_standin.running:
+            t.append("running")
+        else:  # packer_running = False: C3 fills up
+            t.append("STOPPED", style="bold red")
+        t.append(f", taken {plant.packer_standin.taken}\n\n")
 
     t.append("Wires    ")
     lamps(("E_Stop_OK", w.e_stop_ok), ("Heartbeat", w.heartbeat))

@@ -41,6 +41,7 @@ class _Spec:
     syrup: bool = False  # needs the syrup room; on a plant without one the command is ignored with a warning
     standin: bool = False  # needs the labeler stand-in; with the real labeler the command is ignored with a warning
     labeler: bool = False  # needs the real labeler; with the stand-in the command is ignored with a warning
+    packer_standin: bool = False  # needs the packer stand-in; with the real packer the command is ignored with a warning
 
 
 def _set_supply_rate(plant: Plant, v) -> None:
@@ -177,7 +178,7 @@ def _add_glue(plant: Plant, v) -> None:
 
 
 def _packer_running(plant: Plant, v) -> None:
-    plant.packer.running = v
+    plant.packer_standin.running = v
 
 
 def _labeler_heartbeat(plant: Plant, v) -> None:
@@ -219,7 +220,8 @@ COMMANDS: dict[str, _Spec] = {
     "load_roll": _Spec(int, _load_roll, "roll change: a new label roll with n labels (1000 = full)", labeler=True),
     "glue_level": _Spec(float, _glue_level, "glue in the melt tank set to n kg (Glue_Low below 1 kg)", labeler=True),
     "add_glue": _Spec(float, _add_glue, "n kg of cold glue blocks put into the melt tank", labeler=True),
-    "packer_running": _Spec(bool, _packer_running, "FALSE = packer takes no bottles, C3 fills up", labeler=True),
+    "packer_running": _Spec(bool, _packer_running, "FALSE = packer takes no bottles, C3 fills up", labeler=True,
+                            packer_standin=True),
     "labeler_heartbeat": _Spec(bool, _labeler_heartbeat, "FALSE = labeler PLC heartbeat frozen (its Alm_CommLost after 3 s)",
                                labeler=True),
 }
@@ -276,6 +278,10 @@ class CommandQueue:
             if spec.labeler and plant.labeler is None:
                 events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "
                                         "no real labeler (run without --no-labeler / --filler-only)", warning=True))
+                continue
+            if spec.packer_standin and plant.packer_standin is None:
+                events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "
+                                        "the real packer runs (its PLC decides when C3 stops)", warning=True))
                 continue
             spec.setter(plant, command.value)
             events.append(Event.sim(plant.now, f"command: {command.name} = {command.value}"))

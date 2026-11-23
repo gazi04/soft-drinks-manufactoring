@@ -158,7 +158,7 @@ def test_summary_counts_labelled_and_packed_bottles():
     from simulator import _summary
 
     plant = Plant(with_labeler=True)
-    plant.labeler.discharged, plant.labeler.labelled, plant.packer.taken = 5, 5, 4
+    plant.labeler.discharged, plant.labeler.labelled, plant.packer_standin.taken = 5, 5, 4
     text = _summary(loop.LoopStats(), plant, 0)
     assert "labelled 5 of 5 discharged, packed 4" in text
     assert "bottles out 0" in _summary(loop.LoopStats(), Plant(), 0)  # the stand-in summary is unchanged

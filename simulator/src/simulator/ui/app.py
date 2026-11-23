@@ -67,14 +67,15 @@ SYRUP_SWITCHES: Switches = {
     "sw-level": ("mix_level_stuck", lambda p: p.syrup.mix_level_frozen is not None, "Level sensor stuck"),
     "sw-syrup-hb": ("syrup_heartbeat", lambda p: p.syrup_heartbeat.enabled, "Heartbeat"),
 }
-# Labeler tab: only used when plant.labeler exists (the lambdas read plant.labeler / plant.packer)
+# Labeler tab: only used when plant.labeler exists (the lambdas read plant.labeler / plant.packer_standin)
 LABELER_SWITCHES: Switches = {
     "sw-web-torn": ("web_torn", lambda p: p.labeler.web.torn, "Label web torn"),
     "sw-bell": ("bell_stuck", lambda p: p.labeler.bell_stuck, "Bell stuck"),
     "sw-heater-failed": ("heater_failed", lambda p: p.labeler.tank.heater_failed, "Heater failed"),
     "sw-heater-on": ("heater_stuck_on", lambda p: p.labeler.tank.heater_stuck_on, "Heater stuck on"),
     "sw-gate-jam": ("gate_jam", lambda p: p.labeler.gate_jammed, "Gate jam"),
-    "sw-packer": ("packer_running", lambda p: p.packer.running, "Packer running"),
+    "sw-packer": ("packer_running", lambda p: p.packer_standin is not None and p.packer_standin.running,
+                  "Packer running"),
     "sw-labeler-hb": ("labeler_heartbeat", lambda p: p.labeler_heartbeat.enabled, "Heartbeat"),
 }
 
