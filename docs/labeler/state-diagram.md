@@ -238,16 +238,21 @@ A normal gap is far shorter than 2 s, so the timer never finishes and the state 
 | --- | --- | --- |
 | GateMotor | `NOT Bottle_In_Pocket` (and `NOT Bottle_Entering` in the TP's input, rule 2: as an interlock it would cut the running pulse, which sets it) | Never two bottles in the pocket |
 | ClampValve | `Bottle_In_Pocket` | Bell down only onto a bottle |
-| SpinMotor | `Bell_Down` | A bottle that is not clamped falls over |
+| SpinMotor | `Bell_Down` (in Manual also run by *Feed + glue*, rule 10) | A bottle that is not clamped falls over |
 | LabelFeed, GlueRoller | `Bell_Down AND Glue_Ready` | Label only onto a clamped bottle, glue only when it sticks; both always together |
 | Cutter | `Bell_Down` | Knife only while a label is on its way to a bottle |
 | GlueHeater | `GlueTemp < GlueMax AND NOT Step_Fault` | No burning glue |
 | DischargeMotor | `NOT Bell_Down AND NOT Outfeed_Full` | Bell up, room on C3 |
 | ConveyorMotor2 | – | Always safe (accumulation conveyor) |
 
-### 10. Manual mode (same as the filler)
+### 10. Manual mode (as the filler, except the bell)
 
-Sequencer frozen, one hold-to-run button per actuator (`Man_*`), jog watchdog (`Jog_Block`), interlocks still apply (spin only with the bell down). The heater keeps working by itself (rule 4). Manual → Auto goes to IDLE; Start resumes by rule 7.
+Sequencer frozen, one button per actuator (`Man_*`), jog watchdog (`Jog_Block`), interlocks still apply (spin only with the bell down). The heater keeps working by itself (rule 4). Manual → Auto goes to IDLE; Start resumes by rule 7.
+
+- **Motors hold-to-run:** C2, gate, turntable, *Feed + glue*, knife, pusher act only while their button is held.
+- **Bell = toggle** (change 2026-11-24): the turntable, the feed and the knife need `Bell_Down`, and one mouse can hold only one button, so a hold-to-run bell would always be up when they are pressed – no label could be put on by hand. The bell is a clamp, not motion (once down it holds the bottle and does not move), so it gets a maintained button: a click on *Bell* (rising edge of `Man_Clamp`, `Clamp_Edge`) flips `Man_Bell_Down`, the next click lifts it. The latch drops by itself when Manual is left, without `Master_Enable` (E-stop, comm lost: the bell never comes down by itself after the release) and without a bottle in the pocket (a click on an empty pocket does nothing, a bottle that arrives later does not bring the bell down). A FAULT and the jog watchdog do not lift it (they never move the bell; every other manual button works in FAULT too). Interlock `Bottle_In_Pocket` unchanged.
+- ***Feed + glue* also turns the table** (`Man_Spin_Any := Man_Spin OR Man_Feed`): a label only sticks to a spinning bottle, in Auto WRAP the two always run together.
+- **Manual label cycle:** *C2* + *Gate* (bottle into the pocket) → click *Bell* (down) → hold *Feed + glue* until the label mark → hold *Knife* briefly → hold *Turntable* for the press turns → click *Bell* (up) → hold *Pusher*.
 
 ### 11. E-stop and FAULT
 

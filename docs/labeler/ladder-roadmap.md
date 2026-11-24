@@ -127,3 +127,42 @@ Section 7, in this order (as the syrup room):
 
 - Run all stage scripts once more (regression; a `tests/run_labeler.py` like `run_syrup.py`), then the Python simulator takes over (`docs/simulator/roadmap.md`, new section "Labeler simulator": conveyor C3 + packer stand-in, `machines/labeler.py` with label roll, glue tank temperature, turntable and bell, `LabelerPlc` on port 5023, C2 driven by the labeler PLC instead of the stand-in).
 - The first **real conveyor link** between two PLCs: stop the labeler → C2 fills → the filler's S7 → filler **Blocked**; Start → C2 drains → the filler continues by itself (report 5.5).
+
+## Change: bell as a toggle in Manual  *(found 2026-11-24 while testing Manual from FUXA, built 2026-11-24; week IV: seal-in / flip-flop, week VII: edge)*
+
+**Status:** done 2026-11-24 (section 7, rungs 49–52 + `Req_Clamp` / `Req_Spin`), uploaded, `test_labeler_outputs.py` 59/59, `run_labeler.py --quick` all passed, manual label cycle on the real PLC `manual_label_cycle.py` 5/5, FUXA updated.
+
+**Problem.** Every manual button was hold-to-run, the bell (`Man_Clamp` → `ClampValve`) too: release it and the bell goes up. But the turntable (`SpinMotor`), *Feed + glue* (`LabelFeed` + `GlueRoller`) and the knife (`Cutter`) are interlocked on `Bell_Down` (`state-diagram.md` rule 9). With one mouse only one button can be held, so in Manual the bell was always up when the next button was pressed: **turntable, feed and knife could never run in Manual**, and no label could be put on by hand. The interlocks are right; the button type of the bell was wrong. Checked 2026-11-24: the filler, syrup room and packer do not have this pattern (their manual interlocks depend on sensors that keep their state, or are lock-outs), only the labeler.
+
+**Why a latch is allowed here.** Hold-to-run is for motion (an actuator that stops when the operator lets go). The bell is a clamp: once down it holds the bottle and does not move. Real machines give clamps a maintained Manual button. Every motor stays hold-to-run with the jog watchdog.
+
+**Rungs** (section 7, after jog watchdog 2/2, so every value is computed above `Req_Clamp` / `Req_Spin`; no new block type: P contact as `Mark_Edge`, reset coil, parallel branches):
+
+```
+49 ──┤P Man_Clamp├──────────────────────────────────( Clamp_Edge )          one click = one scan
+50 ──┤ Clamp_Edge ├──┤/ Man_Bell_Down ├──┬──────────( Man_Bell_Down )        flip-flop (toggle)
+   ──┤ Man_Bell_Down ├──┤/ Clamp_Edge ├──┘
+51 ──┤/ Mode_Manual ├──────┬─────────────────────────(R Man_Bell_Down )      below 50: the reset wins
+   ──┤/ Master_Enable ├────┤
+   ──┤/ Bottle_In_Pocket ├─┘
+52 ──┤ Man_Spin ├──┬─────────────────────────────────( Man_Spin_Any )        feed turns the table
+   ──┤ Man_Feed ├──┘
+63 Req_Clamp := Bottle_In_Pocket AND (Clamp_Steps OR Mode_Manual AND Man_Bell_Down)
+64 Req_Spin  := Bell_Down AND (Spin_Steps OR Mode_Manual AND Man_Spin_Any AND NOT Jog_Block)
+```
+
+New internal BOOLs (no address): `Clamp_Edge`, `Man_Bell_Down`, `Man_Spin_Any`. `Man_Clamp` stays `%MX2.2` (HMI writes 1 on press, 0 on release, as before) and stays in the jog-watchdog OR (a stuck coil still blocks the motors). A click is far shorter than 10 s.
+
+**Decisions taken in review (changes against the first draft):**
+- *Feed + glue* must turn the table: the simulator (like the real web) only sticks the fed label to a clamped, **spinning** bottle (`LabelWeb.step`), otherwise it is lost.
+- No `Step_Fault` in the reset: in Manual the MOVE 900 still runs while a FAULT alarm is latched, so the toggle would be dead until Reset – worse than before (hold-to-run worked in FAULT) and unlike every other manual button. A fault never moves the bell.
+- No `NOT Jog_Block` in the bell's manual branch: holding *Turntable* > 10 s would otherwise lift the bell by surprise. The latch is not hold-to-run.
+- P contact instead of an `R_TRIG` block (same as `Mark_Edge`); a helper coil `Man_Spin_Any` instead of a nested parallel in `Req_Spin`.
+- Rejected: two buttons *Bell down* / *Bell up* (needs `%MX2.7` and a second HMI button for the same result).
+- Known limit (HMI issue I16): a lost FUXA release write leaves `Man_Clamp` at 1, so the next click gives no edge – one click is missed, nothing moves by itself.
+
+**FUXA:** button label "Bell down/up", title "Manual (hold to run, Bell: click)", help line, tag descriptions of `Man_Clamp` / `Man_Feed` (`fuxa_views.py`, `fuxa_tags.py`); the button stays a hold button (H12 unchanged).
+
+**Test** (`test_labeler_outputs.py`): A2b (click in Auto does nothing), M5/M5b (empty pocket, bottle arrives later: bell stays up), M6/M6b (click → down, stays after release), M7–M13 with the bell latched (feed runs the turntable too), M13b (click → up), B1–B3 (latch dropped by Auto, E-stop, no bottle), B4/B4b (Jog_Block keeps the bell, click lifts it).
+
+**Manual label cycle:** *C2* + *Gate* (bottle into the pocket) → click *Bell* (down) → hold *Feed + glue* until the label mark → hold *Knife* briefly → hold *Turntable* for the press turns → click *Bell* (up) → hold *Pusher*.

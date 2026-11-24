@@ -66,15 +66,15 @@ No signal to other machines: the bottle flow needs none (report 5.1). The labele
 
 Defaults copied in on the first scan (`Def_…` → setpoints, as in the other machines).
 
-Manual buttons (hold-to-run, Manual mode only, interlocks still apply, jog watchdog as in the filler). The heater has no button: it is controlled automatically in every mode (`state-diagram.md` rule 4).
+Manual buttons (hold-to-run, Manual mode only, interlocks still apply, jog watchdog as in the filler). Exception: the bell is a **toggle** – the HMI still writes 1 on press and 0 on release, the PLC turns each click into down / up (`state-diagram.md` rule 10). The heater has no button: it is controlled automatically in every mode (`state-diagram.md` rule 4).
 
 | Name | Type | Address | Modbus | Drives |
 | --- | --- | --- | --- | --- |
 | Man_C2 | BOOL | %MX2.0 | coil 8208 | ConveyorMotor2 |
 | Man_Gate | BOOL | %MX2.1 | coil 8209 | GateMotor |
-| Man_Clamp | BOOL | %MX2.2 | coil 8210 | ClampValve |
+| Man_Clamp | BOOL | %MX2.2 | coil 8210 | ClampValve, **toggle**: each click flips the internal latch `Man_Bell_Down` (dropped when leaving Manual, without `Master_Enable` or without a bottle) |
 | Man_Spin | BOOL | %MX2.3 | coil 8211 | SpinMotor |
-| Man_Feed | BOOL | %MX2.4 | coil 8212 | LabelFeed + GlueRoller (always together) |
+| Man_Feed | BOOL | %MX2.4 | coil 8212 | LabelFeed + GlueRoller (always together) + SpinMotor (a label only sticks to a spinning bottle) |
 | Man_Cut | BOOL | %MX2.5 | coil 8213 | Cutter |
 | Man_Discharge | BOOL | %MX2.6 | coil 8214 | DischargeMotor |
 
