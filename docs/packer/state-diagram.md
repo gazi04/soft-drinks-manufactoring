@@ -129,7 +129,7 @@ C3 (`ConveyorMotor3`) runs in every step except FAULT and E-stop, also in IDLE (
 | 0 | IDLE | – | Auto AND Start AND no FAULT alarm AND `WrapStep` = 0 → 5 (and `WrapStep` := 10 or 32, rule 2) | – |
 | 5 | WARM_UP | – | `Oven_Ready` → 10 | 120 s (`Alm_OvenHeatTimeout`) |
 | 10 | COUNT | GateMotor while `NOT Group_Complete` | `Group_Complete` → 15 | none (waiting = **Starved**, rule 10) |
-| 15 | WAIT_WRAP | – | `WrapStep = 10 AND Wrap_Clear` → 20 | none (waiting for the own wrap conveyor is **Running**) |
+| 15 | WAIT_WRAP | – | `WrapStep = 10 AND Wrap_Clear AND Group_Settled` → 20 | none (waiting for the own wrap conveyor is **Running**) |
 | 20 | PUSH | GroupPusher | `Pusher_Out` → 25 | 3 s (`Alm_PackJam`) |
 | 25 | RETRACT | – (spring return); `Group_Counter` held at 0 | `Pusher_Home` → 10 | 3 s (`Alm_PackJam`) |
 | 900 | FAULT | – | Auto + Reset (cause gone) → 0 | – |
@@ -168,6 +168,7 @@ C3 (`ConveyorMotor3`) runs in every step except FAULT and E-stop, also in IDLE (
 | `FilmPulseMM` | 50 | Film per `Film_Pulse` (mm); the simulator's feed speed keeps the pulses ≥ 0.3 s apart (100 ms tick) |
 | `StarvedDelay` | 2 s | No bottle at the gate this long = Starved (rule 10) |
 | `ClearTime` | 3 s | The wrap conveyor must run empty this long before the next push (rule 2); longer than a group's travel from the pusher to `Pack_At_Film` |
+| `SettleTime` | 0.5 s | Wait in WAIT_WRAP before PUSH: the count sensor sits in front of the table, the 6th bottle needs about 0.4 s to land after its count (added 2026-11-23, found by the simulator) |
 | `PushTimeout` | 3 s | PUSH, RETRACT, RUN_ON and RUN_OUT must finish within this time |
 | `FeedTimeout` | 10 s | FEED must count `FeedPulses` within this time (longest sheet 1200 mm) |
 | `CutTime` | 0.3 s | Length of CUT (knife ON) |
@@ -214,6 +215,14 @@ The two step words are separate, but the machine has **one** Start, Stop, FAULT 
   ```
 
   The conveyor runs in WAIT_PACK; once it has run **empty** for `ClearTime` (longer than a group's travel from the pusher to the film stop), nothing can still be on it. A push drops `Pusher_Home` and restarts the timer, so a second group can never be pushed behind the first one. No extra sensor and no memory bit: a "clear belt" timer, as real conveyors use. It also covers the restart: a group left on the conveyor by an E-stop reaches `Pack_At_Film` before the timer can finish.
+- **Settle time** before the push (added 2026-11-23): the count sensor sits in front of the table, so the 6th bottle is counted about 0.4 s before it lies on the table. WAIT_WRAP waits `SettleTime` before PUSH:
+
+  ```
+  Settle_Timer  := TON(IN := Step_WaitWrap, PT := SettleTime)
+  Group_Settled := Settle_Timer.Q
+  ```
+
+  The timer starts with WAIT_WRAP, so it adds no wait when the wrap conveyor clears later than 0.5 s; leaving WAIT_WRAP (PUSH, Stop, FAULT) resets it. A restart with a complete group (pushed halfway) waits it again: harmless. No extra sensor, like `Wrap_Clear`.
 - **FAULT** of either side moves **both** to 900 (one alarm stops the machine); Reset moves both to 0.
 - **Stop / Mode Stop / E-stop** act on both (rule 9).
 

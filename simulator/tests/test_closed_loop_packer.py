@@ -3,20 +3,20 @@
 The simulator (loop + Plant(with_labeler=True, with_packer=True) + FillerPlc + LabelerPlc + PackerPlc) runs
 exactly as `uv run simulator --headless`. A separate client ACTS AS THE HMI (Auto, Reset, Start on each
 PLC, Stop at the end; the simulator never writes commands). All PLCs used must be idle. Checks:
-    C1 packer PackCount +N, and both sequencers went through their steps (WARM_UP, COUNT, PUSH, RETRACT;
-       WAIT_PACK, FEED, CUT, RUN_ON, WRAP, RUN_OUT; WAIT_WRAP and READY last one scan here, see COLLATION)
+    C1 packer PackCount +N, and both sequencers went through their steps (WARM_UP, COUNT,
+       WAIT_WRAP, PUSH, RETRACT; WAIT_PACK, FEED, CUT, RUN_ON, WRAP, RUN_OUT; READY lasts one scan here)
     C2 the physics agrees: packs pushed = the PLC's PackCount increase, every pack has 6 bottles, a sheet
-       of 800-900 mm, is wrapped and shrunk; no packer audit warning (the known PLC gap aside, below)
+       of 800-900 mm, is wrapped and shrunk; no packer audit warning (the settle gap is C6)
     C3 the labeler labelled the bottles (labeler GoodCount >= 6 N)          [not with --packer-only]
     C4 no alarm and no warning event (slow tick, foreign writer, link loss) after the first 10 s
     C5 after Stop every PLC is back in IDLE, and the packer is EMPTY: PacksInOven, GroupCount and
        FeedCount 0 (its counters keep their values; a pack left in the oven would raise Alm_OvenJam in the
        next run). That is why the supply is exactly 6 N bottles: every bottle ends in a pack.
 
-Known PLC gap (simulator stage 4, not changed yet): the PLC pushes the group 0.1-0.2 s after the 6th
-count, before that bottle lands on the table -> "bottle onto the collation table with the pusher out",
-once per group. It is counted and printed as KNOWN, not judged; with the proposed Settle_Timer in the
-PLC the count is 0.
+    C6 no PUSH before the 6th bottle lies on the table: the count sensor sits in front of the table,
+       the bottle needs 0.4 s to land, Settle_Timer (SettleTime 0.5 s in WAIT_WRAP) waits for it. Without
+       it the simulator warns "bottle onto the collation table with the pusher out" once per group.
+
 
     uv run python tests/test_closed_loop_packer.py                # filler + labeler + packer, about 3 min
     uv run python tests/test_closed_loop_packer.py --with-syrup   # + the syrup room PLC (four PLCs)
@@ -57,11 +57,11 @@ TIMEOUT_S = 400.0  # warm-up about 55 s + 12 bottles from the labeler (about 6 s
 SETTLE_S = 40.0  # after Stop: the wrap finishes its pack, the oven empties itself
 START_GRACE_S = 10.0  # the PLCs start with Alm_CommLost latched and no sensors: not judged in the first seconds
 FEED_S = 2.0  # --packer-only: one labelled bottle onto C3 every 2 s
-KNOWN_GAP = "bottle onto the collation table with the pusher out"
+SETTLE_GAP = "bottle onto the collation table with the pusher out"  # C6
 # Steps a tick must see. WAIT_WRAP and READY are left out: the PLC passes them within ONE scan when the
 # other side already waits (COUNT -> WAIT_WRAP -> PUSH, CUT -> READY -> RUN_ON in the same scan, found live),
 # so the simulator, which reads the status once per tick, never sees them
-COLLATION = {5, 10, 20, 25}  # WARM_UP, COUNT, PUSH, RETRACT
+COLLATION = {5, 10, 15, 20, 25}  # WARM_UP, COUNT, WAIT_WRAP (SettleTime 0.5 s), PUSH, RETRACT
 WRAP = {10, 20, 22, 30, 32, 34}  # WAIT_PACK, FEED, CUT, RUN_ON, WRAP, RUN_OUT
 
 
@@ -251,10 +251,10 @@ async def main() -> None:
     packs = [recorder.packs[i] for i in sorted(recorder.packs)]
     bad = [p.name for p in packs if len(p.bottles) != config.PACK_BOTTLES or not p.wrapped or not p.shrunk
            or not 800 <= p.sheet_mm <= 900]
-    gap = [e for e in log.filter(source=Source.SIM, warnings_only=True) if KNOWN_GAP in e.text]
+    gap = [e for e in log.filter(source=Source.SIM, warnings_only=True) if SETTLE_GAP in e.text]
     on_purpose = f"127.0.0.1:{closed}"  # --packer-only: the closed filler / labeler port is on purpose
     audit = [e.format() for e in log.filter(source=Source.SIM, warnings_only=True)
-             if KNOWN_GAP not in e.text and on_purpose not in e.text
+             if SETTLE_GAP not in e.text and on_purpose not in e.text
              and any(w in e.text for w in ("Pack", "film", "sheet", "oven", "collation", "pusher", "wrap", "table",
                                            "label"))]
     r.append(check("C2 physics agrees", packer.groups_pushed == pack_count == len(packs) and not bad and not audit,
@@ -265,7 +265,7 @@ async def main() -> None:
     else:
         r.append(check("C3 labeler labelled the bottles", labeler_good >= BOTTLES, f"labeler GoodCount +{labeler_good}"))
     warnings = [e.format() for e in log.filter(warnings_only=True) if e.time_s > START_GRACE_S
-                and KNOWN_GAP not in e.text and not (PACKER_ONLY and f"127.0.0.1:{closed}" in e.text)]
+                and SETTLE_GAP not in e.text and not (PACKER_ONLY and f"127.0.0.1:{closed}" in e.text)]
     active = [name for st in (stats.packer_status, stats.labeler_status, stats.status, stats.syrup_status) if st
               for name, on in st.alarms.items() if on]
     r.append(check("C4 no alarm / warning", not warnings and not active,
@@ -274,8 +274,9 @@ async def main() -> None:
     r.append(check("C5 back in IDLE and empty after Stop", all_idle() and empty,
                    f"packer Step {end.step if end else '?'}, WrapStep {end.wrap_step if end else '?'}, "
                    f"PacksInOven / GroupCount / FeedCount {(end.packs_in_oven, end.group_count, end.feed_count) if end else '?'}"))
-    print(f"NOTE  known PLC gap (PUSH before the 6th bottle lands, Settle_Timer not in the PLC): "
-          f"{len(gap)} warning(s)" + (f", first at {gap[0].time_s:.1f} s" if gap else ""))
+    r.append(check("C6 PUSH only with the group on the table", not gap,
+                   f"{len(gap)} 'pusher out' warning(s)" + (f", first at {gap[0].time_s:.1f} s" if gap else "")
+                   + " (Settle_Timer: expected 0)"))
     print(summary)
     print(f"{sum(r)}/{len(r)} checks passed (Stop sent; the heartbeats stop now, so Alm_CommLost will latch)")
     sys.exit(0 if all(r) else 1)

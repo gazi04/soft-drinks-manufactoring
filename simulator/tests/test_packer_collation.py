@@ -1,4 +1,4 @@
-"""Packer ladder stage 4: collation sequencer (step decode, Group_Counter, Wrap_Clear, transitions).
+"""Packer ladder stage 4: collation sequencer (step decode, Group_Counter, Wrap_Clear, Settle_Timer, transitions).
 
 Runs against the packer PLC on port 5024. No outputs exist yet: the script plays the machine by
 writing the sensors and watches Step (%MW51) and WrapStep (%MW52). It keeps the heartbeat alive in
@@ -17,6 +17,8 @@ One group:
     G9  Pack_At_Film FALSE: 2.5 s -> still 15;  G10  -> 20 PUSH about 3 s after (ClearTime)
     G11 Pusher_Home off, Pusher_Out on -> 25 RETRACT, GroupCount 0, Group_Complete FALSE
     G12 Pusher_Out off, Pusher_Home on -> 10 COUNT (next group)
+    G22 settle time: Wrap_Clear already TRUE, 6th pulse -> 15, then 20 only SettleTime (0.5 s) after the
+        count (the 6th bottle still rolls onto the table; without Settle_Timer PUSH came in < 0.1 s)
 Variants:
     G13 group pushed halfway: 6 bottles, PUSH, Mode Stop -> Step 0, WrapStep 0, GroupCount still 6
     G14 Auto + Start -> 5 -> 10 -> 15 (Group_Complete kept), G15 Wrap_Clear again after 3 s -> 20
@@ -28,7 +30,7 @@ Variants:
 
     uv run python tests/test_packer_collation.py      (~45 s)
 
-Group_Counter and Clear_Timer have no address: watch them in the debugger if a check fails.
+Group_Counter, Clear_Timer and Settle_Timer have no address: watch them in the debugger if a check fails.
 Release all debugger forces first; do not run the simulator at the same time.
 """
 
@@ -78,6 +80,7 @@ OVEN_SETPOINT, OVEN_HYST, OVEN_BAND = 1900, 50, 150  # defaults (Oven_Ready wind
 OVEN_HOT, OVEN_COLD = 1900, 1500
 SETTLE = 0.3  # s: many scans of the 20 ms task
 PULSE = 0.15  # s: length of one Bottle_Counted pulse and the gap after it (several scans each)
+SETTLE_MIN, SETTLE_MAX = 0.45, 0.9  # s: count edge -> PUSH with SettleTime 0.5 s (poll 50 ms, Modbus delays)
 
 
 def check(name: str, ok: bool, detail: str) -> bool:
@@ -319,12 +322,26 @@ def main() -> int:
         plc.coil(COIL_PUSHER_HOME, True)
         reach("G12", 10, 1, "Pusher_Home (spring return)")
 
-        # ---------- G13-G15 group pushed halfway, restart ----------
-        plc.pulse(COIL_BOTTLE_COUNTED, 6)
-        plc.wait_step(15, 1)
-        ok, seen, _ = plc.wait_step(20, 4)  # Wrap_Clear: film stop free, pusher home, WAIT_PACK
+        # ---------- G22 settle time: Wrap_Clear already TRUE, PUSH waits SettleTime ----------
+        t_clear = time.monotonic()
+        while not plc.coil(COIL_WRAP_CLEAR) and time.monotonic() - t_clear < 4.0:
+            time.sleep(0.05)  # pusher home again: Clear_Timer runs ClearTime once more
+        clear = plc.coil(COIL_WRAP_CLEAR)
+        plc.pulse(COIL_BOTTLE_COUNTED, 5)
+        plc.c.write_coil(COIL_BOTTLE_COUNTED, True)  # 6th bottle: the count edge starts the clock
+        t6 = time.monotonic()
+        time.sleep(PULSE)
+        plc.c.write_coil(COIL_BOTTLE_COUNTED, False)
+        ok15, seen15, _ = plc.wait_step(15, 1)
+        ok, seen, _ = plc.wait_step(20, 1.5)
+        dt = time.monotonic() - t6
+        results.append(check("G22", clear and ok15 and ok and SETTLE_MIN <= dt <= SETTLE_MAX,
+                             f"Wrap_Clear {clear} before the 6th pulse -> Step {seen15 + seen[1:]}, PUSH {dt:.2f} s "
+                             f"after the count (expected 15 then 20 after SettleTime 0.5 s: {SETTLE_MIN}-{SETTLE_MAX} s)"))
         if not ok:
             raise SystemExit(f"cannot reach PUSH (20) for G13, seen {seen}")
+
+        # ---------- G13-G15 group pushed halfway, restart ----------
         plc.coil(COIL_PUSHER_HOME, False)  # pusher on its way out
         plc.mode(MODE_STOP)
         steps, count, complete = plc.steps(), plc.read(HR_GROUP_COUNT), plc.coil(COIL_GROUP_COMPLETE)

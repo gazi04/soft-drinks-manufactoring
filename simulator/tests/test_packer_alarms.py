@@ -98,6 +98,9 @@ def main() -> int:
         while time.monotonic() - t0 < high + 1.0 and plc.steps() != (900, 900):
             time.sleep(0.05)
         dt = time.monotonic() - t0
+        # MOVE 900 is the last rung: Step shows 900 one scan before the output rungs (earlier in the
+        # scan) switch off. Wait a few 20 ms scans so the next reads (F1b, O1b) see the FAULT outputs.
+        time.sleep(0.1)
         steps, active = plc.steps(), alarms()
         report(name, steps == (900, 900) and alarm in active and low <= dt <= high,
                f"{what} -> steps {steps} after {dt:.1f} s, alarms {sorted(active)} "

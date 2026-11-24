@@ -143,7 +143,7 @@ Manual buttons (hold-to-run, Manual mode only, interlocks still apply, jog watch
 | FeedPulses | INT | %MW42 | HR 1066 | Pulses for one sheet: `LIMIT(600, FilmLength, 1200) / FilmPulseMM` (DIV, INT truncation: 850 / 50 = 17) – PV of `Feed_Counter` |
 | FeedCount | INT | %MW43 | HR 1067 | Pulses fed for the current sheet (`Feed_Counter.CV`, CTU): kept through Stop and E-stop, so a restart feeds only the missing rest |
 
-Internal only (no address): step bits of both sequencers, timers (`Gate_Empty_Timer`, `Cut_Timer`, `Clear_Timer`, `Blower_TOF`, …), `Group_Counter` (CTU), `Feed_Counter` (CTU), `Oven_Counter` (CTUD), `Pack_Counter` (CTU behind `PackCount`), edge bits, `Stop_Request`, the constants of `state-diagram.md`.
+Internal only (no address): step bits of both sequencers, timers (`Gate_Empty_Timer`, `Cut_Timer`, `Clear_Timer`, `Settle_Timer`, `Blower_TOF`, …), `Group_Counter` (CTU), `Feed_Counter` (CTU), `Oven_Counter` (CTUD), `Pack_Counter` (CTU behind `PackCount`), edge bits, `Stop_Request`, the constants of `state-diagram.md`.
 
 ## Animation data
 

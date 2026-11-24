@@ -280,12 +280,11 @@ class Run:
 
 PACK_AUDIT = ("not wrapped", "without film", "short sheet", "film torn", "two sheets", "fed under", "fed into",
               "pusher out", "pushed with", "pushed onto", "not shrunk", "without a whole label", "waits at")
-KNOWN_GAP = "pusher out"  # the stage 4 PLC gap (no Settle_Timer): PUSH before the 6th bottle lands
 
 
 def audit(run: Run, *expected: str) -> list[str]:
-    """Pack-quality warnings other than the expected ones and the known PLC gap."""
-    return [w for w in run.sim_warnings(*PACK_AUDIT) if KNOWN_GAP not in w and not any(x in w for x in expected)]
+    """Pack-quality warnings other than the expected ones (the PLC's Settle_Timer: no "pusher out")."""
+    return [w for w in run.sim_warnings(*PACK_AUDIT) if not any(x in w for x in expected)]
 
 
 # === The scenarios ===================================================================
