@@ -1128,7 +1128,7 @@
                 "group": "Packer",
                 "max": 1,
                 "min": 1,
-                "text": "Film fault: sheet not fed within 10 s in FEED (film torn, roller slipping) or no sheet in the slot for 1 s in READY (FAULT)",
+                "text": "Film fault: sheet not fed within 10 s in FEED (film torn) or no sheet in the slot for 1 s in READY (FAULT)",
                 "timedelay": 0
             },
             "info": {
@@ -1302,7 +1302,7 @@
                 "group": "Packer",
                 "max": 1,
                 "min": 1,
-                "text": "Oven over-temperature: 230 \u00b0C reached, heater off, blower on its run-on (FAULT in every mode; Reset below 230 \u00b0C)",
+                "text": "Oven over-temperature: 230 \u00b0C reached, heater off, blower runs on (FAULT in every mode; Reset below 230 \u00b0C)",
                 "timedelay": 0
             },
             "info": {
@@ -20861,35 +20861,35 @@
                                         "id": "ontime",
                                         "label": "Time",
                                         "type": "label",
-                                        "width": 170
+                                        "width": 160
                                     },
                                     {
                                         "align": "left",
                                         "id": "group",
                                         "label": "Machine",
                                         "type": "label",
-                                        "width": 120
+                                        "width": 110
                                     },
                                     {
                                         "align": "left",
                                         "id": "type",
                                         "label": "Priority",
                                         "type": "label",
-                                        "width": 100
+                                        "width": 90
                                     },
                                     {
                                         "align": "left",
                                         "id": "text",
                                         "label": "Alarm",
                                         "type": "label",
-                                        "width": 520
+                                        "width": 680
                                     },
                                     {
                                         "align": "left",
                                         "id": "status",
                                         "label": "Status",
                                         "type": "label",
-                                        "width": 140
+                                        "width": 100
                                     },
                                     {
                                         "align": "left",
@@ -47380,35 +47380,35 @@
                                         "id": "ontime",
                                         "label": "Time",
                                         "type": "label",
-                                        "width": 170
+                                        "width": 160
                                     },
                                     {
                                         "align": "left",
                                         "id": "group",
                                         "label": "Machine",
                                         "type": "label",
-                                        "width": 120
+                                        "width": 110
                                     },
                                     {
                                         "align": "left",
                                         "id": "type",
                                         "label": "Priority",
                                         "type": "label",
-                                        "width": 100
+                                        "width": 90
                                     },
                                     {
                                         "align": "left",
                                         "id": "text",
                                         "label": "Alarm",
                                         "type": "label",
-                                        "width": 520
+                                        "width": 680
                                     },
                                     {
                                         "align": "left",
                                         "id": "status",
                                         "label": "Status",
                                         "type": "label",
-                                        "width": 140
+                                        "width": 100
                                     },
                                     {
                                         "align": "left",
@@ -75421,35 +75421,35 @@
                                         "id": "ontime",
                                         "label": "Time",
                                         "type": "label",
-                                        "width": 170
+                                        "width": 160
                                     },
                                     {
                                         "align": "left",
                                         "id": "group",
                                         "label": "Machine",
                                         "type": "label",
-                                        "width": 120
+                                        "width": 110
                                     },
                                     {
                                         "align": "left",
                                         "id": "type",
                                         "label": "Priority",
                                         "type": "label",
-                                        "width": 100
+                                        "width": 90
                                     },
                                     {
                                         "align": "left",
                                         "id": "text",
                                         "label": "Alarm",
                                         "type": "label",
-                                        "width": 520
+                                        "width": 680
                                     },
                                     {
                                         "align": "left",
                                         "id": "status",
                                         "label": "Status",
                                         "type": "label",
-                                        "width": 140
+                                        "width": 100
                                     },
                                     {
                                         "align": "left",
@@ -104996,35 +104996,35 @@
                                         "id": "ontime",
                                         "label": "Time",
                                         "type": "label",
-                                        "width": 170
+                                        "width": 160
                                     },
                                     {
                                         "align": "left",
                                         "id": "group",
                                         "label": "Machine",
                                         "type": "label",
-                                        "width": 120
+                                        "width": 110
                                     },
                                     {
                                         "align": "left",
                                         "id": "type",
                                         "label": "Priority",
                                         "type": "label",
-                                        "width": 100
+                                        "width": 90
                                     },
                                     {
                                         "align": "left",
                                         "id": "text",
                                         "label": "Alarm",
                                         "type": "label",
-                                        "width": 520
+                                        "width": 680
                                     },
                                     {
                                         "align": "left",
                                         "id": "status",
                                         "label": "Status",
                                         "type": "label",
-                                        "width": 140
+                                        "width": 100
                                     },
                                     {
                                         "align": "left",

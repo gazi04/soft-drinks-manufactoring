@@ -1295,14 +1295,14 @@ LABELER_ALARMS = {
 # WrapTimeout 5 s, OvenMax 230.0 degC, HeatTimeout 120 s, OvenJamTime 20 s, AirflowTimeout 3 s). FilmEmpty
 # is not latched (Starved, clears after the roll change). The two %MX7 bits are alarms like the others.
 PACKER_ALARMS = {
-    "Alm_FilmFault": ("highhigh", "Film fault: sheet not fed within 10 s in FEED (film torn, roller slipping) "
-                                  "or no sheet in the slot for 1 s in READY (FAULT)"),
+    "Alm_FilmFault": ("highhigh", "Film fault: sheet not fed within 10 s in FEED (film torn) or no sheet in the "
+                                  "slot for 1 s in READY (FAULT)"),
     "Alm_PackJam": ("highhigh", "Pack jam: pusher out / home, pack off the film stop or at the oven entry not "
                                 "reached within 3 s (FAULT)"),
     "Alm_WrapTimeout": ("highhigh", "Wrap timeout: wrap bar not back home within 5 s in WRAP (bar stuck, "
                                     "film caught) (FAULT)"),
-    "Alm_OvenOverTemp": ("highhigh", "Oven over-temperature: 230 °C reached, heater off, blower on its run-on "
-                                     "(FAULT in every mode; Reset below 230 °C)"),
+    "Alm_OvenOverTemp": ("highhigh", "Oven over-temperature: 230 °C reached, heater off, blower runs on (FAULT in "
+                                     "every mode; Reset below 230 °C)"),
     "Alm_OvenHeatTimeout": ("highhigh", "Oven heat-up timeout: not ready within 120 s of WARM_UP "
                                         "(heater failed, FAULT)"),
     "Alm_OvenJam": ("highhigh", "Oven jam: packs in the oven and none out for 20 s (FAULT; Reset zeroes the "
@@ -1315,6 +1315,9 @@ PACKER_ALARMS = {
     # FUXA-only warning straight on the sensor bit (packer decision 2026-11-21, as the labeler's Roll_Low)
     "Film_Low": ("low", "Film roll low: prepare the next roll (warning)"),
 }
+# A row of the active alarm list holds one line: the Alarm column (680 px, alarms_view) fits about 113
+# characters of FUXA's table font (measured 5.8 px per character, P7). Longer texts wrap onto the next row.
+ALARM_TEXT_MAX = 110
 # Warnings on sensor bits: FUXA alarms, but no header chip (row 2 is full with the PLC alarm bits)
 SENSOR_WARNINGS = {"labeler": ("Roll_Low", "Glue_Low"), "packer": ("Film_Low",)}
 ALARM_TEXTS = {FILLER_UI.m.key: ALARMS, SYRUP_UI.m.key: SYRUP_ALARMS,  # machine key -> its alarms
@@ -1340,8 +1343,8 @@ def alarms_view(view_id: str = ALARMS_ID) -> dict:
     header(b, HEADER_KEY[view_id], view_id)
     b.add(fs.text(16, 128, "Active alarms", size=15, bold=True))
     b.add(fs.alarm_table("alarms_active", 16, 140, 1248, 230, "alarms",
-                         [("ontime", "Time", 170), ("group", "Machine", 120), ("type", "Priority", 100),
-                          ("text", "Alarm", 520), ("status", "Status", 140), ("ack", "Ack", 80)]))
+                         [("ontime", "Time", 160), ("group", "Machine", 110), ("type", "Priority", 90),
+                          ("text", "Alarm", 680), ("status", "Status", 100), ("ack", "Ack", 80)]))
     b.add(fs.button("alarms_reset", "Reset", 16, 392, 140, 44, [fs.set_value(ui.m.tag_id("Cmd"), 3)],
                     background=NEUTRAL))
     for k, line in enumerate((

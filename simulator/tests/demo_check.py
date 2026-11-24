@@ -10,8 +10,8 @@ that broke during development; D2, D3, D6 and D7 run once per PLC (filler, syrup
        still runs from the build volume, but modbus_slave is off until the next upload
     D3 per runtime: the PLC program answers on Modbus
     D4 FUXA is up and connected to each PLC that has a FUXA device (one line per PLC, connection
-       status 5; filler, syrup room and labeler since HMI L7; the packer gets its device with its HMI,
-       part C, until then a note). One link at 0 = that PLC is down (D3); all at 0 can also be FUXA's
+       status 5; filler, syrup room and labeler since HMI L7, the packer since HMI P7; a PLC without
+       a FUXA device, fuxa=False, gets a note). One link at 0 = that PLC is down (D3); all at 0 can also be FUXA's
        missing Modbus plugin
     D5 FUXA has the current screens (live project = docs/hmi/fuxa-project.json)
     D6 per PLC: one simulator writes its sensors (plant lock held) - WARN if none
@@ -71,7 +71,7 @@ RUNTIMES = [
             "the FUXA header (row 2: Labeler, e.g. on the Labeler screen)"),
     Runtime("plc-packer", "packer", "127.0.0.4", "plcs/packer", config.PACKER_PORT,
             pm, PACKER_STEP_NAMES, PACKER_STATE_NAMES, PACKER_ALARM_NAMES,
-            "`uv run python tests/hmi.py --packer`", fuxa=False),  # FUXA device with the packer HMI (part C)
+            "the FUXA header (row 2: Packer, e.g. on the Packer screen)"),
 ]
 SERVICES = {"fuxa", *(rt.service for rt in RUNTIMES)}
 COLOURS = {"PASS": "\033[32m", "WARN": "\033[33m", "FAIL": "\033[31m"}

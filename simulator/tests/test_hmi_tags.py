@@ -982,6 +982,9 @@ def h8_alarms() -> bool:
         warnings = fv.SENSOR_WARNINGS.get(ui.m.key, ())  # FUXA-only warnings on sensor bits (labeler L5, packer P5)
         if set(texts) != set(ui.alarms) | set(warnings):
             problems.append(f"{ui.title}: alarm texts {sorted(texts)} != alarm bits + warnings")
+        long = [bit for bit, (_p, text) in texts.items() if len(text) > fv.ALARM_TEXT_MAX]
+        if long:
+            problems.append(f"{ui.title}: alarm texts longer than {fv.ALARM_TEXT_MAX} characters (row wraps): {long}")
         for bit in warnings:
             if texts.get(bit, ("",))[0] != "low" or ui.m.tag_id(bit) not in {ui.m.tag_id(n) for n, *_ in ui.m.tags}:
                 problems.append(f"{ui.title} {bit}: a sensor warning must be priority low, on an existing tag")

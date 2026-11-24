@@ -11,7 +11,7 @@ cd simulator
 uv sync
 ```
 
-Both PLCs must run in their OpenPLC runtimes (`docker compose up -d` in the repo root): the filler on Modbus `127.0.0.1:502`, the syrup room on `127.0.0.1:5022` (`mx_bits` = 64 in both projects). Release all debugger forces first. Without the syrup room runtime use `--filler-only`. The labeler (`127.0.0.1:5023`) is the third PLC and part of the default: it drives C2, so it must be in Auto and started (`tests/hmi.py --labeler auto reset start`), otherwise C2 stands and the filler blocks; `--no-labeler` keeps the old labeler stand-in. The packer (`127.0.0.1:5024`) is the fourth PLC, also part of the default: it drives C3, so it must be in Auto and started (`tests/hmi.py --packer auto reset start`; it has no FUXA device before its HMI), otherwise C3 fills and the labeler blocks; `--no-packer` keeps the packer stand-in.
+Both PLCs must run in their OpenPLC runtimes (`docker compose up -d` in the repo root): the filler on Modbus `127.0.0.1:502`, the syrup room on `127.0.0.1:5022` (`mx_bits` = 64 in both projects). Release all debugger forces first. Without the syrup room runtime use `--filler-only`. The labeler (`127.0.0.1:5023`) is the third PLC and part of the default: it drives C2, so it must be in Auto and started (`tests/hmi.py --labeler auto reset start`), otherwise C2 stands and the filler blocks; `--no-labeler` keeps the old labeler stand-in. The packer (`127.0.0.1:5024`) is the fourth PLC, also part of the default: it drives C3, so it must be in Auto and started (from FUXA's header, row 2: Packer, or with `tests/hmi.py --packer auto reset start`), otherwise C3 fills and the labeler blocks; `--no-packer` keeps the packer stand-in.
 
 ## Run
 

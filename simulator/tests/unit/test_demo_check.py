@@ -4,12 +4,12 @@ import demo_check
 from simulator import config
 
 
-def test_four_runtimes_with_their_ports_and_the_packer_without_fuxa():
+def test_four_runtimes_with_their_ports_all_with_a_fuxa_device():
     ports = {rt.label: rt.port for rt in demo_check.RUNTIMES}
     assert ports == {"filler": config.PLC_PORT, "syrup": config.SYRUP_PORT, "labeler": config.LABELER_PORT,
                      "packer": config.PACKER_PORT}
-    assert {rt.label for rt in demo_check.RUNTIMES if not rt.fuxa} == {"packer"}  # its HMI comes with part C
-    assert "plc-packer" in demo_check.SERVICES and "hmi.py --packer" in demo_check.RUNTIMES[-1].hmi
+    assert all(rt.fuxa for rt in demo_check.RUNTIMES)  # the packer since HMI P7
+    assert "plc-packer" in demo_check.SERVICES and "row 2: Packer" in demo_check.RUNTIMES[-1].hmi
 
 
 def test_d6_names_the_start_option_behind_the_free_plcs():
