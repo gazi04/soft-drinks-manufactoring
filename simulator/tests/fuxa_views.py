@@ -656,7 +656,7 @@ LABELER_SETPOINTS = (
     ("Ready window ±", "GlueBand", "°C", 6, 15),
     ("Turns after cut", "PressTurns", "turns", 1, 4),
 )
-LABELER_MANUAL_BUTTONS = (("C2", "Man_C2"), ("Gate", "Man_Gate"), ("Bell", "Man_Clamp"), ("Turntable", "Man_Spin"),
+LABELER_MANUAL_BUTTONS = (("C2", "Man_C2"), ("Gate", "Man_Gate"), ("Bell down/up", "Man_Clamp"), ("Turntable", "Man_Spin"),
                           ("Feed + glue", "Man_Feed"), ("Knife", "Man_Cut"), ("Pusher", "Man_Discharge"))
 RESET_COUNTER = 4  # Cmd value: GoodCount -> 0 (labeler only; Reset = 3 keeps the count)
 C3_X, C3_PITCH = 530, 22  # first C3 slots on the screen (all 8; the Line view shows C3 too, L4)
@@ -805,7 +805,7 @@ def labeler_setpoints(b: Builder) -> None:
 
 def labeler_manual(b: Builder) -> None:
     b.add(fs.rect(792, 420, 472, 280, "#dcdcdc", rx=6))
-    b.add(fs.text(808, 450, "Manual (hold to run)", size=15, bold=True))
+    b.add(fs.text(808, 450, "Manual (hold to run, Bell: click)", size=15, bold=True))
     b.add(fs.conditional_text("labeler_manual_hint", L("ModeReq"), 0, MANUAL - 1, 808, 500,
                               "The buttons appear in Manual mode (header).", size=13, color=MUTED))
     for i, (label, tag) in enumerate(LABELER_MANUAL_BUTTONS):
@@ -818,7 +818,7 @@ def labeler_manual(b: Builder) -> None:
                               "gate: pocket empty · bell: a bottle in the pocket",
                               "turntable, knife: bell down · feed + glue: bell down, glue ready",
                               "pusher: bell up, C3 not full · heater: automatic in every mode",
-                              "A button acts only while it is held.")):
+                              "Bell: click = down / up · Feed + glue turns the table · others: hold")):
         b.add(fs.text(808, 620 + k * 17, line, size=12, color=TEXT if k == 0 else MUTED))
 
 

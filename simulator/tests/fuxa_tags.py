@@ -221,12 +221,12 @@ LABELER_TAGS: list[tuple[str, str, int, str, str]] = [
     ("GlueHyst", HOLDING, lm.GLUE_HYST, "Int16", "setpoint: heater band, degC in FUXA (PLC 0.1 degC)"),
     ("GlueBand", HOLDING, lm.GLUE_BAND, "Int16", "setpoint: Glue_Ready window +-, degC in FUXA (PLC 0.1 degC)"),
     ("PressTurns", HOLDING, lm.PRESS_TURNS, "Int16", "setpoint: bottle turns after the cut"),
-    # manual buttons, written by the HMI (hold-to-run, Manual mode only)
+    # manual buttons, written by the HMI (hold-to-run, Manual mode only; the PLC turns Man_Clamp clicks into a toggle)
     ("Man_C2", COIL, lm.MAN_C2, "Bool", "manual: C2 conveyor"),
     ("Man_Gate", COIL, lm.MAN_GATE, "Bool", "manual: open the gate"),
-    ("Man_Clamp", COIL, lm.MAN_CLAMP, "Bool", "manual: bell down"),
+    ("Man_Clamp", COIL, lm.MAN_CLAMP, "Bool", "manual: bell toggle (click = down / up, only with a bottle)"),
     ("Man_Spin", COIL, lm.MAN_SPIN, "Bool", "manual: turntable (only with the bell down)"),
-    ("Man_Feed", COIL, lm.MAN_FEED, "Bool", "manual: label feed + glue roller (only with glue ready)"),
+    ("Man_Feed", COIL, lm.MAN_FEED, "Bool", "manual: label feed + glue roller + turntable (only with the bell down, glue ready)"),
     ("Man_Cut", COIL, lm.MAN_CUT, "Bool", "manual: knife"),
     ("Man_Discharge", COIL, lm.MAN_DISCHARGE, "Bool", "manual: pusher (only with the bell up and C3 free)"),
     # animation, written by the simulator, ignored by the PLC (HMI L0)
