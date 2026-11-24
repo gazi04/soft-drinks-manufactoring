@@ -15,6 +15,7 @@ Heater (Mode Stop: no mode contact in Req_Heater):
         back to 170.0 degC + Auto + Reset -> IDLE (the Glue_BelowMax interlock stays as a second layer)
 Auto, one bottle (the sensors move the sequencer; Step is written only for 24 and 35):
     A1  IDLE -> C2;  A2  IDLE, Man_Spin held with the bell down -> C2 (manual buttons ignored in Auto)
+    A2b IDLE, bottle in the pocket, Bell clicked -> C2 (the bell toggle works in Manual only)
     A3  Start with cold glue -> 5 WARM_UP: C2 + GlueHeater;  A4  1700 -> 10 WAIT_BOTTLE: C2
     G1  bottle at the gate but Roll_Empty -> no gate pulse
     G2  Roll_Empty off -> exactly ONE GateMotor pulse of GatePulse (0.5 s), Bottle_At_Gate held
@@ -36,20 +37,29 @@ Auto, one bottle (the sensors move the sequencer; Step is written only for 24 an
     E1  glue 150.0 degC -> 5: C2 + GlueHeater;  E2 E_Stop_OK FALSE -> nothing (heater too), Step 0
     E3  E_Stop_OK TRUE again -> C2 + GlueHeater (Auto IDLE)
     F1  Step 900 FAULT, cold glue -> nothing (C2 and heater off in FAULT)
-Manual (ModeReq 2, hold-to-run, interlocks still apply; glue 170.0 degC unless noted):
+Manual (ModeReq 2, hold-to-run except the bell, interlocks still apply; glue 170.0 degC unless noted).
+The bell (Man_Clamp) is a toggle: a click (press + release) latches Man_Bell_Down, the next click
+drops it; reset when leaving Manual, without Master_Enable or without a bottle in the pocket.
     M1  no button -> nothing (C2 only with Man_C2 in Manual);  M2  Man_C2 -> C2
     M3  Man_Gate, pocket empty -> GateMotor;  M4  pocket full -> nothing
-    M5  Man_Clamp, pocket empty -> nothing;  M6  pocket full -> ClampValve
-    M7  Man_Spin, bell up -> nothing;  M8  bell down -> SpinMotor
-    M9  Man_Feed, bell down -> LabelFeed + GlueRoller;  M10 bell up -> nothing
-    M11 Man_Feed, bell down, glue 150.0 degC -> GlueHeater only
-    M12 Man_Cut, bell up -> nothing;  M13 bell down -> Cutter (held, no pulse in Manual)
+    M5  Bell clicked, pocket empty -> nothing;  M5b bottle arrives -> still nothing (no surprise drop)
+    M6  Bell clicked, pocket full -> ClampValve;  M6b button released 0.5 s -> ClampValve stays
+    (M7-M13 with the bell latched, so ClampValve is ON in all of them)
+    M7  Man_Spin, bell up -> ClampValve;  M8  bell down -> + SpinMotor
+    M9  Man_Feed, bell down -> + SpinMotor + LabelFeed + GlueRoller (the feed turns the table);  M10 bell up -> ClampValve
+    M11 Man_Feed, bell down, glue 150.0 degC -> + SpinMotor + GlueHeater (feed needs Glue_Ready)
+    M12 Man_Cut, bell up -> ClampValve;  M13 bell down -> + Cutter (held, no pulse in Manual)
+    M13b Bell clicked again -> nothing (bell up)
+    B1  latched, Mode Auto and back to Manual -> nothing;  B2  latched, E_Stop_OK off and on -> nothing
+    B3  latched, pocket empty and full again -> nothing
+    B4  latched, Man_Spin held 11 s with the bell down -> Jog_Block, the bell stays (ClampValve only);
+        B4b released, Bell clicked -> nothing
     M14 Man_Discharge, bell up, C3 free -> DischargeMotor;  M15 bell down -> nothing
     M16 no button, glue 150.0 degC -> GlueHeater (heater runs in Manual too)
 Jog watchdog:
     J1 Man_C2 held 11 s -> Jog_Block TRUE, C2 off;  J2 released -> Jog_Block FALSE;  J3 pressed again -> C2
 
-    uv run python tests/test_labeler_outputs.py      (~45 s)
+    uv run python tests/test_labeler_outputs.py      (~60 s)
 
 Release all debugger forces first; do not run the simulator at the same time.
 """
@@ -140,6 +150,12 @@ def main() -> int:
         if not value:
             time.sleep(0.1)  # a few scans with no button: Jog_TON restarts
 
+    def click(button: str) -> None:
+        """One click on an HMI button: press, hold 0.2 s (many 20 ms scans), release."""
+        plc.coil(COIL_MAN[button], True)
+        time.sleep(0.2)
+        plc.coil(COIL_MAN[button], False)
+
     def release_all() -> None:
         for button in COIL_MAN:
             plc.coil(COIL_MAN[button], False)
@@ -199,6 +215,10 @@ def main() -> int:
         expect("A2", {C2}, "Auto IDLE, Man_Spin held, bell down")
         press("Man_Spin", False)
         plc.coil(COIL_BELL_DOWN, False)
+        plc.coil(COIL_BOTTLE_IN_POCKET, True)
+        click("Man_Clamp")
+        expect("A2b", {C2}, "Auto IDLE, bottle in the pocket, Bell clicked")
+        plc.coil(COIL_BOTTLE_IN_POCKET, False)
         glue(GLUE_COLD)
         plc.cmd(START)
         plc.wait_step(5, 1)
@@ -297,37 +317,73 @@ def main() -> int:
         expect("M4", set(), "Manual Man_Gate, pocket full")
         press("Man_Gate", False)
 
+        # bell toggle: a click latches the bell, the next click lifts it
         plc.coil(COIL_BOTTLE_IN_POCKET, False)
-        press("Man_Clamp")
-        expect("M5", set(), "Manual Man_Clamp, pocket empty")
+        click("Man_Clamp")
+        expect("M5", set(), "Manual Bell clicked, pocket empty")
         plc.coil(COIL_BOTTLE_IN_POCKET, True)
-        expect("M6", {"ClampValve"}, "Manual Man_Clamp, pocket full")
-        press("Man_Clamp", False)
-        plc.coil(COIL_BOTTLE_IN_POCKET, False)
+        expect("M5b", set(), "Manual, a bottle arrives after the click")
+        click("Man_Clamp")
+        expect("M6", {"ClampValve"}, "Manual Bell clicked, pocket full")
+        time.sleep(0.5)
+        expect("M6b", {"ClampValve"}, "Manual Bell released 0.5 s ago")
+        B = {"ClampValve"}  # the bell stays latched in M7-M13
 
         press("Man_Spin")
-        expect("M7", set(), "Manual Man_Spin, bell up")
+        expect("M7", B, "Manual Man_Spin, bell up")
         plc.coil(COIL_BELL_DOWN, True)
-        expect("M8", {"SpinMotor"}, "Manual Man_Spin, bell down")
+        expect("M8", B | {"SpinMotor"}, "Manual Man_Spin, bell down")
         press("Man_Spin", False)
 
         press("Man_Feed")
-        expect("M9", {"LabelFeed", "GlueRoller"}, "Manual Man_Feed, bell down")
+        expect("M9", B | {"SpinMotor", "LabelFeed", "GlueRoller"}, "Manual Man_Feed, bell down")
         plc.coil(COIL_BELL_DOWN, False)
-        expect("M10", set(), "Manual Man_Feed, bell up")
+        expect("M10", B, "Manual Man_Feed, bell up")
         plc.coil(COIL_BELL_DOWN, True)
         glue(GLUE_COLD)
-        expect("M11", {"GlueHeater"}, "Manual Man_Feed, bell down, glue 150.0 degC")
+        expect("M11", B | {"SpinMotor", "GlueHeater"}, "Manual Man_Feed, bell down, glue 150.0 degC")
         glue(GLUE_WARM)
         press("Man_Feed", False)
         plc.coil(COIL_BELL_DOWN, False)
 
         press("Man_Cut")
-        expect("M12", set(), "Manual Man_Cut, bell up")
+        expect("M12", B, "Manual Man_Cut, bell up")
         plc.coil(COIL_BELL_DOWN, True)
-        expect("M13", {"Cutter"}, "Manual Man_Cut, bell down")
+        expect("M13", B | {"Cutter"}, "Manual Man_Cut, bell down")
         press("Man_Cut", False)
         plc.coil(COIL_BELL_DOWN, False)
+        click("Man_Clamp")
+        expect("M13b", set(), "Manual Bell clicked again")
+
+        # the latch drops by itself: leaving Manual, E-stop, no bottle; a held button (Jog_Block) keeps it
+        click("Man_Clamp")
+        plc.write(HR_MODE_REQ, MODE_AUTO)
+        time.sleep(SETTLE)
+        plc.write(HR_MODE_REQ, MODE_MANUAL)
+        expect("B1", set(), "Bell latched, Mode Auto and back to Manual")
+        click("Man_Clamp")
+        plc.coil(COIL_E_STOP_OK, False)
+        time.sleep(SETTLE)
+        plc.coil(COIL_E_STOP_OK, True)
+        expect("B2", set(), "Bell latched, E_Stop_OK off and on again")
+        click("Man_Clamp")
+        plc.coil(COIL_BOTTLE_IN_POCKET, False)
+        time.sleep(SETTLE)
+        plc.coil(COIL_BOTTLE_IN_POCKET, True)
+        expect("B3", set(), "Bell latched, pocket empty and full again")
+        click("Man_Clamp")
+        plc.coil(COIL_BELL_DOWN, True)
+        press("Man_Spin")
+        time.sleep(11)
+        blocked = plc.coil(COIL_JOG_BLOCK)
+        expect("B4", {"ClampValve"}, f"Bell latched, Man_Spin held 11 s, Jog_Block {blocked}")
+        if not blocked:
+            report("B4j", False, "Jog_Block FALSE after 11 s (expected True)")
+        press("Man_Spin", False)
+        plc.coil(COIL_BELL_DOWN, False)
+        click("Man_Clamp")
+        expect("B4b", set(), "Man_Spin released, Bell clicked")
+        plc.coil(COIL_BOTTLE_IN_POCKET, False)
 
         press("Man_Discharge")
         expect("M14", {"DischargeMotor"}, "Manual Man_Discharge, bell up, C3 free")
