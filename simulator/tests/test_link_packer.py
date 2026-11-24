@@ -10,6 +10,8 @@ writes sensor values, and a running sequence would react to them. Checks:
     P6 write() of both coil blocks (%MX0-1 and %MX4) + OvenTemp, verify_writes() finds nothing wrong
        (no edge on the counted inputs Bottle_Counted, Film_Pulse, Oven_Entry, Oven_Exit: the PLC's counters
        count in IDLE too; P7 checks that GroupCount, FeedCount, PacksInOven and PackCount did not change)
+    P6b the HMI animation words (%MW70-73, HR 1094-1097) written by write() read back by a second client
+        (as FUXA reads them); the PLC's status and computed words keep their values
     P7 the PLC reads the sensors at the addresses of the map (no Start needed):
        a) OvenTemp (HR 1036) -> Heat_Demand and Oven_Ready, expected values from the PLC's own setpoints;
           never >= 2300, OvenMax would FAULT the PLC in every mode
@@ -73,6 +75,7 @@ class World:
         self.sensors = dict(REST)
         self.blower_seen = False
         self.last: PackerWrites | None = None
+        self.anim = (0, 0, 0, 0)  # HMI animation words %MW70-73
 
     async def run(self, seconds: float, on_tick=None, heartbeat: bool = True) -> None:
         end = time.monotonic() + seconds
@@ -85,7 +88,7 @@ class World:
             blower = (await self.plc.read_outputs()).oven_blower
             self.blower_seen |= blower
             self.last = PackerWrites(PackerSensors(airflow_ok=blower, **self.sensors), e_stop_ok=True,
-                                     heartbeat=self.hb.value)
+                                     heartbeat=self.hb.value, anim=self.anim)
             await self.plc.write(self.last)
             if on_tick is not None:
                 await on_tick()
@@ -94,6 +97,9 @@ class World:
     async def set(self, seconds: float = 1.0, **sensors) -> None:
         self.sensors.update(sensors)
         await self.run(seconds)
+
+
+PLC_WORDS = pm.STATUS_START + pm.STATUS_COUNT - pm.COMPUTED_START  # %MW40-53: computed + status words
 
 
 def coil(hmi: ModbusTcpClient, address: int) -> bool:
@@ -187,6 +193,18 @@ async def link_checks(plc: PackerPlc, hmi: ModbusTcpClient) -> list[bool]:
     wrong = await plc.verify_writes(world.last)
     r.append(check("P6 write() + verify_writes()", wrong == [], f"signals that differ: {wrong or 'none'}"))
     await world.set(0.5, **REST)
+
+    # P6b the animation words: written by the simulator, read by FUXA, ignored by the PLC
+    status_before = hmi.read_holding_registers(pm.COMPUTED_START, count=PLC_WORDS).registers
+    world.anim = (0b110_0000_0011, 0b100_0000_0001, 5, pm.SHEET_UNDER_PACK)
+    await world.run(1.0)
+    words = hmi.read_holding_registers(pm.ANIM_START, count=pm.ANIM_COUNT).registers
+    status_after = hmi.read_holding_registers(pm.COMPUTED_START, count=PLC_WORDS).registers
+    r.append(check("P6b animation words (HR 1094-1097) for FUXA",
+                   words == [0b110_0000_0011, 0b100_0000_0001, 5, 3] and status_after == status_before,
+                   f"read {words} (expected [1539, 1025, 5, 3]); PLC words %MW40-53 {status_before} -> {status_after}"))
+    world.anim = (0, 0, 0, 0)
+    await world.run(0.5)
 
     # P7a OvenTemp: the PLC's hysteresis and window at the map's address, judged with its own setpoints
     setpoint, hyst, band = hmi.read_holding_registers(pm.OVEN_SETPOINT, count=3).registers

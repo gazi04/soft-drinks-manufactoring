@@ -60,6 +60,7 @@ Known model limits:
 import math
 from dataclasses import dataclass
 
+from simulator import address_map_packer as pm
 from simulator import config
 from simulator.bottle import Bottle
 from simulator.conveyor import Conveyor
@@ -263,6 +264,42 @@ class Packer:
     @property
     def pusher_out(self) -> bool:
         return self.pusher >= 1.0 - _EPSILON
+
+    # --- HMI animation ----------------------------------------------------------------
+    def anim_words(self) -> tuple[int, int, int, int]:
+        """The 4 HMI animation words %MW70..73 (HMI P0, layout in address_map_packer.py):
+        wrap conveyor cells, oven cells, packs on the outfeed table, sheet code."""
+        length = config.PACK_LENGTH_MM
+        # (tail, front) of every pack in wrap conveyor mm. A pack just handed to the oven starts with its
+        # front at the entry eye, so its body still stands on the end of the wrap conveyor: it lights the
+        # last wrap cells until it is inside (no gap in the animation at the hand-over).
+        wrap = [(p.front_mm - length, p.front_mm) for p in self.wrapper.packs]
+        wrap += [(config.OVEN_ENTRY_MM + p.front_mm - length, config.OVEN_ENTRY_MM + p.front_mm)
+                 for p in self.oven.packs]
+        oven = [(p.front_mm - length, p.front_mm) for p in self.oven.packs]
+        return (_cell_bits(wrap, pm.WRAP_CELLS), _cell_bits(oven, pm.OVEN_CELLS), len(self.outfeed.packs),
+                self._sheet_code())
+
+    def _sheet_code(self) -> int:
+        film = self.wrapper.film
+        if film.fed_mm > 0:
+            return pm.SHEET_FEEDING
+        if film.sheet_mm > _EPSILON:
+            return pm.SHEET_IN_SLOT
+        if any(p.sheet_mm > _EPSILON and not p.wrapped for p in self.wrapper.packs):
+            return pm.SHEET_UNDER_PACK
+        return pm.SHEET_NONE
+
+
+def _cell_bits(spans: list[tuple[float, float]], cells: int) -> int:
+    """Bit i set when one of the (tail, front) spans covers part of cell i (ANIM_CELL_MM each, from 0).
+    Parts outside the cells are not drawn."""
+    bits = 0
+    for tail, front in spans:
+        for i in range(cells):
+            if tail < (i + 1) * pm.ANIM_CELL_MM - _EPSILON and front > i * pm.ANIM_CELL_MM + _EPSILON:
+                bits |= 1 << i
+    return bits
 
 
 class Film:

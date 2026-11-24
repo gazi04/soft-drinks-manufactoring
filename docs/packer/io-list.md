@@ -147,7 +147,14 @@ Internal only (no address): step bits of both sequencers, timers (`Gate_Empty_Ti
 
 ## Animation data
 
-Decided with the HMI plan (part C), as for the labeler. Words `%MW70–79` stay free for it (written by the simulator, read by the HMI, ignored by the PLC).
+Decided with the HMI plan (2026-11-23, `docs/hmi/roadmap.md` section "Packer screens"; built in stage P0). Written by the simulator, read by the HMI, ignored by the PLC (not declared in the program; Modbus serves the words anyway, as the labeler's %MW70–71). Cells are 100 mm (`ANIM_CELL_MM`); a pack (200 mm) lights the 2–3 cells it covers. `%MW74–79` stay free.
+
+| Name | Type | Address | Modbus | Meaning |
+| --- | --- | --- | --- | --- |
+| Anim_Wrap | INT | %MW70 | HR 1094 | Wrap conveyor cells: bit i = a pack covers cell i (bit 0 = push line … bit 10 = last cell before the oven entry, 1000–1100 mm); a pack just handed to the oven still lights the last cells until its tail is inside |
+| Anim_Oven | INT | %MW71 | HR 1095 | Oven cells: bit i = a pack covers cell i (bit 0 = entry eye … bit 9 = up to the exit eye at 1000 mm; bit 10 = a pack leaving over the exit, or waiting there for room on the table) |
+| Anim_Table | INT | %MW72 | HR 1096 | Packs on the outfeed table, 0–6 |
+| Anim_Film | INT | %MW73 | HR 1097 | Sheet: 0 none, 1 feeding (rollers move film), 2 sheet in the slot, 3 sheet under a pack (taken, not wrapped yet) |
 
 ## Answers to the open questions (confirmed 2026-11-21)
 

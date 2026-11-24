@@ -256,6 +256,13 @@ The filler's words %MW70–75 were designed together with its FUXA screens, so t
 - **Not read back by `verify_writes()`** (as for the filler): the PLC ignores the words, so a wrong value cannot change the machine, and the read-back stays one request smaller.
 - **Slots 0 and 7 of C3 are rarely seen at a tick end:** the pusher's tick also moves the belt (sub-steps), and the packer stand-in takes the bottle as soon as it reaches slot 7. On the screen a bottle appears in slot 1 and leaves after slot 6; the unit test checks slots 1–6.
 
+**Packer animation words: what and why (HMI P0)**
+- `Anim_Wrap` %MW70 / `Anim_Oven` %MW71 = cell bits, `Anim_Table` %MW72 = packs on the outfeed table, `Anim_Film` %MW73 = sheet code (0 none, 1 feeding, 2 in the slot, 3 under a pack). Same start address as the other PLCs; not declared in the PLC, a fourth write per tick, not read back – all as the labeler's, for the same reasons.
+- **Cells, not slots.** The packer's conveyors are modelled in mm, not in slots like C1–C3. A word cuts them into 100 mm cells (`ANIM_CELL_MM`): 11 on the wrap conveyor (push line → oven entry at 1100 mm), 10 in the oven + 1 for a pack leaving over the exit eye. A pack (200 mm) lights the 2–3 cells it covers, so it moves smoothly on the screen.
+- **No gap at the hand-over.** The oven takes a pack with its front at the entry eye (oven mm 0), its body still behind the eye. That part is drawn on the last wrap cells until it is inside; the plant test checks every tick that a moving pack lights at least one cell.
+- **Sheet code priority** feeding > in the slot > under a pack: the screen shows the newest sheet first. "Feeding" means the film really moved in the last step (`Film.fed_mm`), so a torn film (rollers turn, film stands) does not show as feeding.
+- **Collation table:** no word; the screen draws it from the PLC's `GroupCount`.
+
 ## Packer physics (`machines/packer.py`)
 
 Collation (stage 1) and oven (stage 3) parameters and their checks: `roadmap.md`, "Stage 1 / 3 as built". The wrap (stage 2):

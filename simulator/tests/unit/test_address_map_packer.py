@@ -11,6 +11,7 @@ from simulator import address_map as filler
 from simulator import address_map_labeler as labeler
 from simulator import address_map_packer as pm
 from simulator import address_map_syrup as syrup
+from simulator import config
 
 ROOT = Path(__file__).parents[3]
 IO_LIST = ROOT / "docs" / "packer" / "io-list.md"
@@ -47,6 +48,9 @@ NAMED = {
     "Man_WrapConveyor": pm.MAN_WRAP_CONVEYOR, "Man_FilmFeed": pm.MAN_FILM_FEED, "Man_Knife": pm.MAN_KNIFE,
     "Man_WrapBar": pm.MAN_WRAP_BAR, "Man_OvenConveyor": pm.MAN_OVEN_CONVEYOR,
 }  # fmt: skip
+
+ANIMATION = {"Anim_Wrap": pm.ANIM_WRAP, "Anim_Oven": pm.ANIM_OVEN, "Anim_Table": pm.ANIM_TABLE,
+             "Anim_Film": pm.ANIM_FILM}  # written by the simulator for FUXA, not declared in the PLC (HMI P0)
 
 PLACEHOLDER_ROWS = {"–"}  # io-list rows for spare / unused addresses; no name, no constant
 CONVERTERS = {"QX": pm.qx, "MX": pm.mx, "MW": pm.mw}
@@ -152,21 +156,32 @@ def test_simulator_never_writes_plc_or_hmi_addresses():
 
     assert pm.SIM_WRITE_COILS == set(pm.SENSOR_BLOCK) | set(pm.EXTRA_SENSOR_BLOCK)
     assert not pm.SIM_WRITE_COILS & (plc_coils | hmi_coils)
-    assert pm.SIM_WRITE_REGISTERS == {1036}  # OvenTemp; animation words come with the HMI plan (part C)
+    assert pm.SIM_WRITE_REGISTERS == {1036, 1094, 1095, 1096, 1097}  # OvenTemp + the 4 animation words (HMI P0)
     assert not pm.SIM_WRITE_REGISTERS & (plc_registers | hmi_registers)
+
+
+def test_animation_words():
+    # %MW70-73 as the labeler's Anim_C3 / Anim_Station (its %MW70-71 live in another PLC)
+    assert (pm.ANIM_WRAP, pm.ANIM_OVEN, pm.ANIM_TABLE, pm.ANIM_FILM) == (1094, 1095, 1096, 1097)
+    assert (pm.ANIM_START, pm.ANIM_COUNT) == (1094, 4)
+    assert (pm.SHEET_NONE, pm.SHEET_FEEDING, pm.SHEET_IN_SLOT, pm.SHEET_UNDER_PACK) == (0, 1, 2, 3)
+    # the cells reach exactly to the oven entry and past the exit eye (one cell for a leaving pack)
+    assert pm.WRAP_CELLS * pm.ANIM_CELL_MM == config.OVEN_ENTRY_MM
+    assert (pm.OVEN_CELLS - 1) * pm.ANIM_CELL_MM == config.OVEN_LENGTH_MM
 
 
 def test_no_two_names_share_an_address():
     # registers are HR 1024..8191; everything else is a coil (%QX 0..1023 or %MX from 8192)
-    registers = [a for a in NAMED.values() if 1024 <= a < 8192]
-    coils = [a for a in NAMED.values() if not 1024 <= a < 8192]
+    every = {**NAMED, **ANIMATION}
+    registers = [a for a in every.values() if 1024 <= a < 8192]
+    coils = [a for a in every.values() if not 1024 <= a < 8192]
     assert len(registers) == len(set(registers)) and len(coils) == len(set(coils))
 
 
 def test_matches_io_list_document():
     doc = doc_addresses()
     assert doc, "no table rows parsed from io-list.md"
-    for name, address in NAMED.items():
+    for name, address in {**NAMED, **ANIMATION}.items():
         assert name in doc, f"{name} not found in io-list.md"
         kind, number = doc[name]
         assert number == address, f"{name}: code {address}, io-list.md {kind} {number}"
@@ -175,7 +190,7 @@ def test_matches_io_list_document():
 
 def test_every_io_list_row_has_a_constant():
     # the other direction: a new row in io-list.md must get a constant and an entry in NAMED
-    missing = set(doc_addresses()) - set(NAMED)
+    missing = set(doc_addresses()) - set(NAMED) - set(ANIMATION)
     assert not missing, f"io-list.md rows without a constant in address_map_packer.py: {sorted(missing)}"
 
 
@@ -189,3 +204,4 @@ def test_matches_plc_program():
         assert plc[name] == address, f"{name}: code {address}, main.ld {plc[name]}"
     extra = set(plc) - set(NAMED)
     assert not extra, f"located variables in main.ld without a constant: {sorted(extra)}"
+    assert not set(plc) & set(ANIMATION), "the animation words belong to the simulator, not the PLC"

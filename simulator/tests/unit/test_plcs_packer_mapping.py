@@ -1,7 +1,7 @@
 """plcs.py packer mapping functions (names <-> Modbus values). No PLC needed.  uv run pytest"""
 
 import asyncio
-from dataclasses import fields
+from dataclasses import fields, replace
 
 import pytest
 
@@ -18,6 +18,7 @@ from simulator.plcs import (
     PackerPlc,
     decode_packer_outputs,
     decode_packer_status,
+    encode_packer_animation,
     encode_packer_extra_block,
     encode_packer_sensor_block,
     foreign_packer_writes,
@@ -74,6 +75,13 @@ def test_every_sensor_has_a_coil_and_unused_mx1_0_is_always_false():
 def test_oven_temp_register():
     assert to_register(writes(oven_temp=1900).sensors.oven_temp) == 1900
     assert to_register(-50) == 65486
+
+
+def test_animation_words_encoded_in_order():
+    w = replace(writes(), anim=(0b111_0000_0000, 0b100_0000_0011, 6, pm.SHEET_IN_SLOT))
+    assert encode_packer_animation(w) == [0x700, 0x403, 6, 2]
+    with pytest.raises(AssertionError):  # a word an INT cannot hold never reaches the PLC
+        encode_packer_animation(replace(w, anim=(1 << 15, 0, 0, 0)))
 
 
 def test_decode_status_reads_every_word_and_alarm_of_the_spans():

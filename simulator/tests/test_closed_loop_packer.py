@@ -17,6 +17,10 @@ PLC, Stop at the end; the simulator never writes commands). All PLCs used must b
        the bottle needs 0.4 s to land, Settle_Timer (SettleTime 0.5 s in WAIT_WRAP) waits for it. Without
        it the simulator warns "bottle onto the collation table with the pusher out" once per group.
 
+    C7 the HMI animation words in the packer PLC (HR 1094-1097, read as FUXA reads them, HMI P0): the first
+       and the last cell of the wrap conveyor and of the oven light up, the sheet code goes through 1 feeding,
+       2 in the slot, 3 under a pack (the table count is printed only: the palletizer may take a pack in
+       the tick it lands)
 
     uv run python tests/test_closed_loop_packer.py                # filler + labeler + packer, about 3 min
     uv run python tests/test_closed_loop_packer.py --with-syrup   # + the syrup room PLC (four PLCs)
@@ -190,10 +194,31 @@ async def main() -> None:
 
     mode = "--packer-only" if PACKER_ONLY else ("all four PLCs" if WITH_SYRUP else "filler + labeler + packer")
     print(f"Closed loop with the packer PLC ({mode}), {N} packs = {BOTTLES} bottles, log {log_path}")
+    # C7: a second client reads the animation words from the PLC while the loop runs, as FUXA does. It
+    # stops with this loop run, not later: an await between two loop runs freezes the plant (K6 trap).
+    anim_seen = {"wrap": 0, "oven": 0, "table": set(), "sheet": set()}
+    loop_done = asyncio.Event()
+
+    async def watch_animation() -> None:
+        reader = await connect(config.PACKER_PORT)
+        while not loop_done.is_set():
+            result = await reader.read_holding_registers(pm.ANIM_START, count=pm.ANIM_COUNT)
+            if not result.isError():
+                wrap, oven, table, sheet = result.registers
+                anim_seen["wrap"] |= wrap
+                anim_seen["oven"] |= oven
+                anim_seen["table"].add(table)
+                anim_seen["sheet"].add(sheet)
+            await asyncio.sleep(0.2)  # FUXA's polling interval
+        reader.close()
+
+    watcher = asyncio.create_task(watch_animation())
     task = asyncio.create_task(operator())
     stats = await loop.run(plc, plant, log, seconds=TIMEOUT_S, until=packed_enough, on_tick=on_tick,
                            syrup_plc=syrup_plc, labeler_plc=labeler_plc, packer_plc=packer_plc)
+    loop_done.set()
     await task
+    await watcher
     pack_count = (stats.packer_count_end or 0) - (stats.packer_count_start or 0)
     labeler_good = (stats.labeler_count_end or 0) - (stats.labeler_count_start or 0)
     summary = stats.summary()
@@ -277,6 +302,14 @@ async def main() -> None:
     r.append(check("C6 PUSH only with the group on the table", not gap,
                    f"{len(gap)} 'pusher out' warning(s)" + (f", first at {gap[0].time_s:.1f} s" if gap else "")
                    + " (Settle_Timer: expected 0)"))
+    first_last = lambda bits, cells: bool(bits & 1) and bool(bits & (1 << (cells - 1)))  # noqa: E731
+    sheets = {pm.SHEET_FEEDING, pm.SHEET_IN_SLOT, pm.SHEET_UNDER_PACK}
+    r.append(check("C7 animation words for FUXA",
+                   first_last(anim_seen["wrap"], pm.WRAP_CELLS) and first_last(anim_seen["oven"], pm.OVEN_CELLS)
+                   and sheets <= anim_seen["sheet"],
+                   f"wrap cells seen {anim_seen['wrap']:011b}, oven cells {anim_seen['oven']:011b} (bit 0 and bit 10 "
+                   f"wanted), sheet codes {sorted(anim_seen['sheet'])} (1, 2, 3 wanted), table counts "
+                   f"{sorted(anim_seen['table'])}"))
     print(summary)
     print(f"{sum(r)}/{len(r)} checks passed (Stop sent; the heartbeats stop now, so Alm_CommLost will latch)")
     sys.exit(0 if all(r) else 1)

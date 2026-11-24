@@ -425,7 +425,8 @@ PACKER_EXTRA_FIELDS = {
 assert set(PACKER_COIL_FIELDS) | {pm.UNUSED_MX1_0} == set(pm.SENSOR_BLOCK)
 assert set(PACKER_EXTRA_FIELDS) == set(pm.EXTRA_SENSOR_BLOCK)
 assert set(pm.SENSOR_BLOCK) | set(pm.EXTRA_SENSOR_BLOCK) <= pm.SIM_WRITE_COILS
-assert pm.ANALOG_COUNT == 1 and pm.SIM_WRITE_REGISTERS == {pm.OVEN_TEMP}
+assert pm.ANALOG_COUNT == 1 and pm.SIM_WRITE_REGISTERS == {pm.OVEN_TEMP, pm.ANIM_WRAP, pm.ANIM_OVEN, pm.ANIM_TABLE,
+                                                            pm.ANIM_FILM}
 
 # Reads that span gaps (read only, so the words / coils in between cost nothing and change nothing):
 # - status: HR %MW40..%MW53 = the 4 computed words, 6 unused, the 4 status words (one request, not two);
@@ -451,6 +452,13 @@ def encode_packer_sensor_block(w: PackerWrites) -> list[bool]:
 def encode_packer_extra_block(w: PackerWrites) -> list[bool]:
     """PackerWrites -> the 6 coil values of the second bulk write (%MX4.0-4.5)."""
     return [bool(PACKER_EXTRA_FIELDS[a][1](w)) for a in pm.EXTRA_SENSOR_BLOCK]
+
+
+def encode_packer_animation(w: PackerWrites) -> list[int]:
+    """The 4 animation words %MW70..73 (wrap cells, oven cells, packs on the table, sheet code)."""
+    words = [int(v) for v in w.anim]
+    assert len(words) == pm.ANIM_COUNT and all(0 <= v <= INT_MAX for v in words)
+    return words
 
 
 def foreign_packer_writes(w: PackerWrites, span: list[bool], oven_raw: int) -> list[str]:
@@ -833,13 +841,15 @@ class PackerPlc(PlcLink):
 
         coils 0-9                       ── read_outputs() ──►  PackerOutputs (plant.step)
         coils 8192-8202, 8224-8229,
-        HR 1036 (OvenTemp)              ◄── write() ────────   PackerWrites  (plant.packer_writes)
+        HR 1036 (OvenTemp),
+        HR 1094-1097 (animation)        ◄── write() ────────   PackerWrites  (plant.packer_writes)
         HR 1064-1077, coils 8232-8249, HR 1025 ── read_status() ──► PackerStatus
 
-    The same pattern as LabelerPlc: three writes per tick, because the six extra sensors (%MX4) are not
+    The same pattern as LabelerPlc: four writes per tick, because the six extra sensors (%MX4) are not
     next to the others (%MX2 manual buttons and %MX3 conditioned bits lie between them and belong to
     the HMI and the PLC). The READS span such gaps instead: reading changes nothing, so the status
-    needs three requests, not five, and the read-back two, not three.
+    needs three requests, not five, and the read-back two, not three. The animation words (%MW70-73) are
+    for FUXA only (the PLC ignores them) and are not read back by verify_writes(), as the labeler's.
     """
 
     write_coils = pm.SIM_WRITE_COILS
@@ -860,10 +870,11 @@ class PackerPlc(PlcLink):
         return decode_packer_outputs(result.bits)
 
     async def write(self, w: PackerWrites) -> None:
-        """The sensor block, the six extra sensors and OvenTemp: three requests."""
+        """The sensor block, the six extra sensors, OvenTemp and the 4 animation words: four requests."""
         await self._write_coils(pm.SENSOR_BLOCK_START, encode_packer_sensor_block(w))
         await self._write_coils(pm.EXTRA_SENSOR_BLOCK_START, encode_packer_extra_block(w))
         await self._write_register(pm.OVEN_TEMP, to_register(w.sensors.oven_temp))
+        await self._write_registers(pm.ANIM_START, encode_packer_animation(w))
 
     async def write_heartbeat(self, value: bool) -> None:
         """Only the heartbeat coil (first contact)."""

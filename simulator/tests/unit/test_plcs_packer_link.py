@@ -20,12 +20,12 @@ from simulator.plcs import FillerPlc, LabelerPlc, PackerPlc, PlcCommError, PlcRe
 logging.getLogger("pymodbus").setLevel(logging.CRITICAL)
 
 
-def packer_writes(oven_temp: int = 1900, **on: bool) -> PackerWrites:
+def packer_writes(oven_temp: int = 1900, anim: tuple[int, int, int, int] = (0, 0, 0, 0), **on: bool) -> PackerWrites:
     values = dict(bottle_at_gate=False, bottle_counted=False, pusher_home=False, pusher_out=False,
                   pack_at_film=False, film_in_slot=False, film_pulse=False, wrap_home=False, film_empty=False,
                   film_low=False, oven_entry=False, oven_exit=False, table_full=False, airflow_ok=False)
     values.update(on)
-    return PackerWrites(PackerSensors(oven_temp=oven_temp, **values), e_stop_ok=True, heartbeat=True)
+    return PackerWrites(PackerSensors(oven_temp=oven_temp, **values), e_stop_ok=True, heartbeat=True, anim=anim)
 
 
 async def connected(port: int) -> tuple[PackerPlc, AsyncModbusTcpClient]:
@@ -100,7 +100,8 @@ def test_drop_and_reconnect():
 
 def test_default_port_and_ownership():
     assert (FillerPlc().port, SyrupPlc().port, LabelerPlc().port, PackerPlc().port) == (502, 5022, 5023, 5024)
-    assert PackerPlc.write_coils == pm.SIM_WRITE_COILS and PackerPlc.write_registers == {pm.OVEN_TEMP}
+    assert PackerPlc.write_coils == pm.SIM_WRITE_COILS and PackerPlc.write_registers == pm.SIM_WRITE_REGISTERS
+    assert PackerPlc.write_registers == {pm.OVEN_TEMP, pm.ANIM_WRAP, pm.ANIM_OVEN, pm.ANIM_TABLE, pm.ANIM_FILM}  # + P0
     assert len(PackerPlc.write_coils) == 11 + 6  # both sensor blocks, nothing between them
 
 
@@ -110,14 +111,17 @@ def test_write_puts_every_value_on_its_address_and_nothing_else():
         port = free_port()
         server = await start_big_server(port)
         plc, reader = await connected(port)
-        await plc.write(packer_writes(oven_temp=1875, pusher_home=True, film_pulse=True, wrap_home=True,
-                                      film_low=True, airflow_ok=True))
+        await plc.write(packer_writes(oven_temp=1875, anim=(0b110_0000_0000, 0b11, 4, pm.SHEET_UNDER_PACK),
+                                      pusher_home=True, film_pulse=True, wrap_home=True, film_low=True,
+                                      airflow_ok=True))
         coils = (await reader.read_coils(pm.SENSOR_BLOCK_START, count=11)).bits[:11]
         assert [a for a, on in zip(pm.SENSOR_BLOCK, coils) if on] == [pm.PUSHER_HOME, pm.FILM_PULSE, pm.WRAP_HOME,
                                                                       pm.E_STOP_OK, pm.HEARTBEAT]
         extra = (await reader.read_coils(pm.EXTRA_SENSOR_BLOCK_START, count=8)).bits[:8]
         assert extra == [False, True, False, False, False, True, False, False]  # %MX4.6-4.7 spare: untouched
         assert (await reader.read_holding_registers(pm.OVEN_TEMP, count=2)).registers == [1875, 0]
+        assert (await reader.read_holding_registers(pm.ANIM_START, count=5)).registers == [0b110_0000_0000, 0b11, 4,
+                                                                                           3, 0]  # %MW74 untouched
         # the HMI's and the PLC's addresses in between are untouched
         assert not any((await reader.read_coils(pm.MAN_C3, count=16)).bits[:16])  # %MX2, %MX3
         assert (await reader.read_holding_registers(pm.CMD, count=2)).registers == [0, 0]

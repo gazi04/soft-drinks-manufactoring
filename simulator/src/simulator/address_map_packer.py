@@ -140,12 +140,25 @@ MAN_KNIFE = mx(2, 5)
 MAN_WRAP_BAR = mx(2, 6)
 MAN_OVEN_CONVEYOR = mx(2, 7)
 
-# Animation words (%MW70-79) are kept free: they are decided with the HMI plan (part C),
-# as for the labeler, and get their constants then.
+# --- Written by the simulator, read by the HMI, ignored by the PLC: animation ------
+# Same idea as the labeler's %MW70-71 (HMI P0, 2026-11-23): only the simulator knows where each
+# pack is. The PLC program does not declare these words; the Modbus server serves every %MW anyway.
+ANIM_WRAP = mw(70)  # wrap conveyor cells, bit i = a pack covers cell i (bit 0 = push line .. bit 10 = oven entry)
+ANIM_OVEN = mw(71)  # oven cells, bit i = a pack covers cell i (bit 0 = entry eye .. bit 9, bit 10 = over the exit)
+ANIM_TABLE = mw(72)  # packs on the outfeed table, 0-6
+ANIM_FILM = mw(73)  # sheet code: 0 none, 1 feeding, 2 sheet in the slot, 3 sheet under a pack (not wrapped yet)
+ANIM_START = ANIM_WRAP  # one write of %MW70..73 per tick
+ANIM_COUNT = 4
+ANIM_CELL_MM = 100  # one cell of ANIM_WRAP / ANIM_OVEN
+WRAP_CELLS = 11  # push line (0) .. oven entry (1100 mm)
+OVEN_CELLS = 11  # 10 cells entry eye .. exit eye (1000 mm) + 1 cell for a pack leaving over the exit
+SHEET_NONE, SHEET_FEEDING, SHEET_IN_SLOT, SHEET_UNDER_PACK = 0, 1, 2, 3  # codes in ANIM_FILM
 
 # --- Ownership: the only addresses the simulator is allowed to write -------------
 SIM_WRITE_COILS = frozenset(SENSOR_BLOCK + EXTRA_SENSOR_BLOCK)
-SIM_WRITE_REGISTERS = frozenset(range(ANALOG_START, ANALOG_START + ANALOG_COUNT))
+SIM_WRITE_REGISTERS = frozenset(
+    {*range(ANALOG_START, ANALOG_START + ANALOG_COUNT), *range(ANIM_START, ANIM_START + ANIM_COUNT)}
+)
 
 # Cheap checks at import: the bulk blocks are contiguous and owned by the simulator
 assert list(SENSOR_BLOCK) == list(range(SENSOR_BLOCK_START, SENSOR_BLOCK_START + 11))
@@ -157,3 +170,5 @@ assert ALM_WRAP_TIMEOUT == EXTRA_ALARMS_START + EXTRA_ALARMS_COUNT - 1
 assert OVEN_ON == CONDITIONED_START + CONDITIONED_COUNT - 1
 assert FEED_COUNT == COMPUTED_START + COMPUTED_COUNT - 1
 assert FILM_LENGTH == SETPOINTS_START + SETPOINTS_COUNT - 1
+assert ANIM_FILM == ANIM_START + ANIM_COUNT - 1
+assert max(WRAP_CELLS, OVEN_CELLS) <= 15  # a word stays below 2**15 (INT, never negative)

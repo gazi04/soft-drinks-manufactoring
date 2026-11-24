@@ -79,11 +79,12 @@ class LabelerWrites:
 
 @dataclass(frozen=True)
 class PackerWrites:
-    """Every value the simulator writes to the packer PLC: sensors and wiring (animation words: HMI part C)."""
+    """Every value the simulator writes to the packer PLC: sensors, wiring and HMI animation."""
 
     sensors: PackerSensors
     e_stop_ok: bool
     heartbeat: bool
+    anim: tuple[int, int, int, int] = (0, 0, 0, 0)  # HMI animation %MW70..73: wrap cells, oven cells, table, sheet
 
 
 class PulseWire:
@@ -400,4 +401,4 @@ class Plant:
         if self.packer is None:
             return None
         s = replace(self.packer.sensors(), bottle_counted=self._counted_wire.value, film_pulse=self._film_wire.value)
-        return PackerWrites(s, self.e_stop_ok, self.packer_heartbeat.value)
+        return PackerWrites(s, self.e_stop_ok, self.packer_heartbeat.value, anim=self.packer.anim_words())

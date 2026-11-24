@@ -12,6 +12,7 @@ import pytest
 from test_plant import TestController
 from test_plant_labeler import WAIT_OUTFEED, LabelerTestController
 
+from simulator import address_map_packer as pm
 from simulator import config
 from simulator.commands import CommandQueue
 from simulator.events import EventLog
@@ -27,9 +28,9 @@ WAIT_PACK, FEED, CUT, READY, RUN_ON, WRAP, RUN_OUT = 10, 20, 22, 24, 30, 32, 34
 OVEN_SETPOINT, OVEN_HYST, OVEN_BAND, OVEN_MAX = 1900, 50, 150, 2300
 PACK_SIZE, FEED_PULSES = 6, 17  # FilmLength 850 / FilmPulseMM 50
 CLEAR_TIME_S, CUT_TIME_S = 3.0, 0.3
-# PROPOSED PLC change, not in main.ld yet (found by this stage): the 6th bottle is counted at the gate
-# but needs PACKER_GATE_S 0.4 s to land on the table, and the PLC pushes 0.1-0.2 s after the count.
-# Settle_Timer := TON(IN := Step_WaitWrap, PT := SettleTime 0.5 s) in the WAIT_WRAP -> PUSH transition.
+# Settle time (found by this stage, in main.ld since 2026-11-23): the 6th bottle is counted at the gate
+# but needs PACKER_GATE_S 0.4 s to land on the table; without a wait the PLC pushed 0.1-0.2 s after the count.
+# Settle_Timer := TON(IN := Step_WaitWrap, PT := SettleTime 0.5 s) -> Group_Settled in the WAIT_WRAP -> PUSH transition.
 SETTLE_S = 0.5
 
 
@@ -39,7 +40,7 @@ class PackerTestController:
     __test__ = False  # not a pytest test class
 
     def __init__(self, settle_s: float = SETTLE_S) -> None:
-        self.settle_s = settle_s  # 0 = the PLC as it is today (no Settle_Timer)
+        self.settle_s = settle_s  # 0 = the PLC before Settle_Timer
         self.settle_t = 0.0  # Settle_Timer
         self.step, self.wrap_step = WARM_UP, WAIT_PACK  # as after Auto + Start (Wrap_Home at the start)
         self.heat_demand = False
@@ -346,11 +347,39 @@ def test_pulse_wire_never_starts_an_on_without_an_edge():
     assert not wire.tick() and wire.pending == 0
 
 
-def test_current_plc_pushes_before_the_sixth_bottle_lands():
-    """Why SETTLE_S: without it (the PLC as it is), PUSH starts 0.1-0.2 s after the 6th count edge,
+def test_without_settle_time_the_plc_pushes_before_the_sixth_bottle_lands():
+    """Why SETTLE_S: without it (the PLC before Settle_Timer), PUSH starts 0.1-0.2 s after the 6th count edge,
     while that bottle still needs 0.4 s to reach the table: it lands in front of a moving pusher."""
     line = bottles(6)
     line.packer = PackerTestController(settle_s=0.0)
     line.run(200, until=lambda: line.plant.packer.groups_pushed == 1)
     assert line.plant.packer.groups_pushed == 1
     assert any("bottle onto the collation table with the pusher out" in w for w in line.warnings())
+
+
+# --- HMI animation words (HMI P0) ------------------------------------------------------------
+def test_animation_words_follow_the_packs_without_a_gap():
+    line = bottles(12)
+    line.plant.palletizer.running = False  # the packs stay on the table
+    table = line.plant.packer.outfeed
+    assert line.pw.anim == (0, 0, 0, 0)
+    wrap_bits = oven_bits = 0
+    sheets, gaps = set(), []
+    for _ in range(round(400 / TICK)):
+        line.tick()
+        packer = line.plant.packer
+        assert line.pw.anim == packer.anim_words()  # what the PLC gets = what the model says
+        wrap, oven, packs, sheet = line.pw.anim
+        wrap_bits, oven_bits = wrap_bits | wrap, oven_bits | oven
+        sheets.add(sheet)
+        # a pack past the push line is always drawn somewhere (no gap at the hand-over to the oven)
+        moving = [p for p in packer.wrapper.packs if p.front_mm > 0] + packer.oven.packs
+        if moving and not wrap and not oven:
+            gaps.append(line.plant.now)
+        assert packs == len(table.packs)
+        if len(table.packs) == 2:
+            break
+    assert len(table.packs) == 2 and not gaps, gaps
+    assert wrap_bits == (1 << pm.WRAP_CELLS) - 1 and oven_bits == (1 << pm.OVEN_CELLS) - 1  # every cell seen
+    assert sheets == {pm.SHEET_NONE, pm.SHEET_FEEDING, pm.SHEET_IN_SLOT, pm.SHEET_UNDER_PACK}
+    assert line.pw.anim[:2] == (0, 0) and line.pw.anim[2] == 2  # both packs on the table, nothing moving

@@ -1038,3 +1038,47 @@ def test_jammed_oven_holds_its_packs_and_clear_takes_them_out():
     events = run.oven.clear()
     assert run.oven.packs == [] and run.oven.removed == [pack] and not run.oven.oven_entry
     assert [e.text for e in events] == [f"{pack.name} taken out of the oven by hand"]
+
+
+# --- HMI animation words (HMI P0) ------------------------------------------------------------
+def test_anim_cells_of_a_pack_on_the_wrap_conveyor_and_in_the_oven():
+    packer = Packer(Conveyor("C3"))
+    assert packer.anim_words() == (0, 0, 0, pm.SHEET_NONE)
+    pack = make_pack(1)
+    packer.wrapper.packs.append(pack)
+    pack.front_mm = 0.0  # just set down at the push line: its body is still behind the line
+    assert packer.anim_words()[0] == 0
+    pack.front_mm = 200.0  # covers 0-200 mm exactly: cells 0 and 1, not 2
+    assert packer.anim_words()[0] == 0b11
+    pack.front_mm = 450.0  # 250-450 mm: cells 2, 3, 4
+    assert packer.anim_words()[0] == 0b1_1100
+    pack.front_mm = config.OVEN_ENTRY_MM  # at the entry, waiting: the last two cells
+    assert packer.anim_words()[:2] == (0b110_0000_0000, 0)
+    # handed over: its front is at the oven's entry eye, its body still on the wrap conveyor's end
+    packer.wrapper.packs.remove(pack)
+    pack.front_mm = 0.0
+    packer.oven.packs.append(pack)
+    assert packer.anim_words()[:2] == (0b110_0000_0000, 0)
+    pack.front_mm = 150.0  # half inside: wrap cell 10 and oven cells 0-1
+    assert packer.anim_words()[:2] == (0b100_0000_0000, 0b11)
+    pack.front_mm = 1100.0  # 900-1100 in oven mm: cell 9 and the exit cell 10
+    assert packer.anim_words()[:2] == (0, 0b110_0000_0000)
+    pack.front_mm = 1200.0  # waiting over the exit for room on the table: only the exit cell
+    assert packer.anim_words()[:2] == (0, 0b100_0000_0000)
+
+
+def test_anim_table_count_and_sheet_codes():
+    packer = Packer(Conveyor("C3"))
+    packer.outfeed.packs += [make_pack(1), make_pack(2)]
+    assert packer.anim_words()[2] == 2
+    film = packer.wrapper.film
+    packer.wrapper.step(FEED, TICK, 0.0)  # the rollers move film
+    assert packer.anim_words()[3] == pm.SHEET_FEEDING
+    packer.wrapper.step(OFF, TICK, 0.1)  # film stands, sheet out of the slot
+    assert film.sheet_mm > 0 and packer.anim_words()[3] == pm.SHEET_IN_SLOT
+    pack = make_pack(3)
+    pack.sheet_mm, _ = film.take_sheet()  # a pack drove over the slot and took it
+    packer.wrapper.packs.append(pack)
+    assert packer.anim_words()[3] == pm.SHEET_UNDER_PACK
+    pack.wrapped = True  # the wrap bar laid it over the top
+    assert packer.anim_words()[3] == pm.SHEET_NONE
