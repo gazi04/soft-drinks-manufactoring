@@ -1,10 +1,10 @@
 """The FUXA project (docs/hmi/fuxa-project.json) matches the PLCs: tags, screens, alarms, trends.
 
     uv run python tests/test_hmi_tags.py --offline   # H1 only: the export file, no PLC, no FUXA
-    uv run python tests/test_hmi_tags.py             # H1-H12: FUXA and all three PLCs must be running
+    uv run python tests/test_hmi_tags.py             # H1-H12: FUXA and all four PLCs must be running
 
 Checks:
-    H1 export (per device, filler + syrup room + labeler): every signal of its address map has exactly one tag,
+    H1 export (per device, filler + syrup room + labeler + packer): every signal of its address map has exactly one tag,
        with FUXA address = Modbus number + 1, the right area and type (catches an edit in
        the editor that moved a tag); the degC / bar tags of the syrup room have FUXA's
        expression scale (read this / f, write Math.round(this * f)), no other tag has a scale
@@ -17,11 +17,13 @@ Checks:
        through FUXA: the PLC must get 29 (rounded, not cut off to 28), then the old value
     H2 + H4 also run for the labeler PLC (port 5023, HMI L1), and H3 there writes GlueHyst 3.5 degC
        through FUXA: the PLC must get 35, then the old value
-    H5 header (export, stages 2, S2 and L2), on every generated view:
-       row 1 = all three machines: a chip per machine on its State that opens its screen, with one
+    H2 + H4 also run for the packer PLC (port 5024, HMI P1), and H3 there writes OvenHyst 4.5 degC
+       through FUXA: the PLC must get 45, then the old value
+    H5 header (export, stages 2, S2, L2 and P2), on every generated view:
+       row 1 = all four machines: a chip per machine on its State that opens its screen, with one
        show-text per state, step and mode value; an E-stop segment per PLC (I17: red at 0, "E-stop OK" /
        "E-STOP" texts, then a "no link" cover on that PLC's connection status, so a lost PLC never shows
-       red); a link cover per PLC inside its chip (L2); Line/Alarms/Trends open the
+       red); a link cover per PLC over its WHOLE chip with the machine's name drawn on top (P2); Line/Alarms/Trends open the
        view of the same machine. Row 2 = the machine of the view (fv.CONTEXT): Start/Stop/Reset
        write its Cmd 1/2/3, Auto/Manual/Stop its ModeReq 1/2/0, a chip per alarm bit; on shared
        views the picker opens the same view for each other machine. Every button has at most one
@@ -33,10 +35,12 @@ Checks:
        fill level and setpoint bars
     H7 Line overview (export, stage 4; every Line view): 8 slot shapes per conveyor, each bound to its own bit
        (bitmask 1, 2, 4 ... 128) of Anim_C1 / Anim_C2 (filler PLC) / Anim_C3 (labeler PLC); C1 and index rollers
-       turn with ConveyorMotor1 / IndexMotor, C2 rollers with the LABELER's ConveyorMotor2, C3 rollers static
-       (packer stand-in); the filler block opens the Filler view; L4: the labeler block on the labeler State opens
+       turn with ConveyorMotor1 / IndexMotor, C2 rollers with the LABELER's ConveyorMotor2, C3 rollers with the
+       PACKER's ConveyorMotor3 (P4); the filler block opens the Filler view; L4: the labeler block on the labeler State opens
        the Labeler view, its step / glue texts let clicks through; the row C1 < filler < C2 < labeler < C3 runs left
-       to right without overlap, the packer stand-in below the end of C3;
+       to right without overlap; P4: the packer block under the end of C3 on the packer State opens the Packer view,
+       its steps / oven / packs-in-oven texts let clicks through, a chute from C3's end down to it, the
+       palletizer stand-in left of it, the pack counter on PackCount;
        S4: the syrup room block on the syrup State (one colour per state) opens the Syrup room
        view, its state / step texts and buffer level (syrup BufferLevel) let clicks through; the
        product pipe and "no product" on the syrup PLC's Product_Available (the source), the
@@ -65,6 +69,13 @@ Checks:
        (0..220 degC) with the GlueMax tick, pocket body / label / word on every Anim_Station code, C3 slots
        on the bits of Anim_C3, turntable turning with SpinMotor, web on LabelFeed, the step texts, and
        Reset counter = ONE write of labeler Cmd 4
+    H13 Packer screen (export, P3): a hold-to-run button per packer Man_* (visible only in its Manual mode),
+       the 4 setpoint inputs with limits that pass five named rules (shrink: ready oven >= SHRINK_C; OvenMax;
+       heater band < ready window; warm-up < HeatTimeout from the simulator's oven model; film = the PLC's
+       LIMIT and fed within FeedTimeout); one lamp per output / conditioned / sensor bit; wrap and oven cells
+       on their Anim bits, collation places on GroupCount, outfeed places on Anim_Table, the C3 end on the
+       labeler's Anim_C3; the film sheet per Anim_Film code; turning parts on their motors; Reset counter =
+       one write of packer Cmd 4
     H10 DAQ (live, stage 6): FUXA's history (GET /api/daq) has values of every trend tag from
        the last 10 min (also when idle: one value a minute at least), and no stored fill level
        is above the fill setpoint + 20 ml. Syrup room: every syrup trend tag has points too, and
@@ -78,6 +89,7 @@ Cmd and Man_* are never written here, they would start or move the machine.
 """
 
 import json
+import math
 import re
 import sys
 import time
@@ -90,6 +102,7 @@ from pymodbus.exceptions import ModbusException
 
 from simulator import address_map as am
 from simulator import address_map_labeler as lm
+from simulator import address_map_packer as pm
 from simulator import address_map_syrup as sm
 from simulator import config
 
@@ -153,10 +166,25 @@ def expected_labeler_addresses() -> set[tuple[str, int]]:
     return {(ft.HOLDING if 1024 <= getattr(lm, n) < 2048 else ft.COIL, getattr(lm, n)) for n in names}
 
 
+PACKER_NOT_SIGNALS = {"OUTPUTS_START", "OUTPUTS_COUNT", "SENSOR_BLOCK_START", "EXTRA_SENSOR_BLOCK_START",
+                      "ANALOG_START", "ANALOG_COUNT", "STATUS_START", "STATUS_COUNT", "COMPUTED_START",
+                      "COMPUTED_COUNT", "ALARMS_START", "ALARMS_COUNT", "EXTRA_ALARMS_START", "EXTRA_ALARMS_COUNT",
+                      "CONDITIONED_START", "CONDITIONED_COUNT", "SETPOINTS_START", "SETPOINTS_COUNT", "ANIM_START",
+                      "ANIM_COUNT", "ANIM_CELL_MM", "WRAP_CELLS", "OVEN_CELLS", "UNUSED_MX1_0"}
+
+
+def expected_packer_addresses() -> set[tuple[str, int]]:
+    """Every signal address in address_map_packer (sheet codes are values, cell sizes are mm, not addresses)."""
+    names = [n for n in dir(pm) if n.isupper() and isinstance(getattr(pm, n), int)
+             and not n.startswith("SHEET_") and n not in PACKER_NOT_SIGNALS]
+    return {(ft.HOLDING if 1024 <= getattr(pm, n) < 2048 else ft.COIL, getattr(pm, n)) for n in names}
+
+
 def h1_export() -> list[bool]:
     return [h1_machine(ft.FILLER, expected_addresses(), fv.TAGS_ID),
             h1_machine(ft.SYRUP, expected_syrup_addresses(), fv.SYRUP_TAGS_ID),
-            h1_machine(ft.LABELER, expected_labeler_addresses(), fv.LABELER_TAGS_ID)]
+            h1_machine(ft.LABELER, expected_labeler_addresses(), fv.LABELER_TAGS_ID),
+            h1_machine(ft.PACKER, expected_packer_addresses(), fv.PACKER_TAGS_ID)]
 
 
 def h1_machine(m: ft.Machine, expected: set[tuple[str, int]], page_id: str) -> bool:
@@ -324,6 +352,13 @@ def h5_header() -> bool:
                 problems.append(f"{name}: {chip.m.key} link cover not drawn over the state / mode words")
             elif 'pointer-events="none"' not in re.search(rf'<rect [^>]*id="{k}_link"[^>]*>', svg).group(0):
                 problems.append(f"{name}: {chip.m.key} link cover catches the chip's click")
+            elif header_boxes(svg, key).get(f"{k}_link") != header_boxes(svg, key).get(f"{k}_chip"):
+                problems.append(f"{name}: {chip.m.key} link cover does not cover the whole chip (stale words show, P2)")
+            elif not svg.find(f'id="{k}_link_lost"') < svg.find(f'id="{k}_title"'):
+                problems.append(f"{name}: {chip.m.key} name not drawn on top of the link cover")
+        for bit in ui.alarms:  # every alarm chip has a label of at most two lines
+            if bit not in fv.ALARM_LABELS or not 1 <= len(fv.alarm_label_lines(fv.ALARM_LABELS[bit])) <= 2:
+                problems.append(f"{name}: alarm chip {bit} without a short label")
         lefts = []
         for chip in fv.UIS:  # E-stop, a segment per PLC (I17): red at 0, OK / E-STOP texts, link cover on top
             e, k, status = chip.m.tag_id("E_Stop_OK"), f"hdr_{key}_estop_{chip.m.key}", chip.m.status_tag_id
@@ -585,6 +620,142 @@ def h12_labeler() -> bool:
     return check("H12 Labeler screen", not problems, f"{len(items)} items" + (f"; {problems[:4]}" if problems else ""))
 
 
+PACKER_FEED_TIMEOUT_S = 10  # PLC constant FeedTimeout (docs/packer/state-diagram.md)
+PACKER_HEAT_TIMEOUT_S = 120  # PLC constant HeatTimeout
+PACKER_FILM_MIN, PACKER_FILM_MAX = 600, 1200  # PLC LIMIT on FilmLength (FilmMin, FilmMax)
+
+
+def oven_warm_up_s(target_c: float) -> float:
+    """Seconds the simulator's oven needs from room temperature to target_c with the heater on all the time
+    (Oven._heat: exponential toward the balance of heater and room loss)."""
+    rate_heat, rate_room = 1 / config.OVEN_HEAT_TAU_S, 1 / config.OVEN_ROOM_TAU_S
+    balance = (rate_heat * config.OVEN_HEATER_C + rate_room * config.ROOM_C) / (rate_heat + rate_room)
+    if target_c >= balance:
+        return float("inf")
+    return -math.log((balance - target_c) / (balance - config.ROOM_C)) / (rate_heat + rate_room)
+
+
+def h13_packer() -> bool:
+    """The packer screen (HMI P3): hold buttons, setpoints with safe limits, a lamp per signal, cells on their
+    bits, the film sheet on every Anim_Film code, oven bar, counter reset."""
+    project = json.loads(ft.EXPORT.read_text())
+    view = next((v for v in project["hmi"]["views"] if v["id"] == fv.PACKER_MAIN_ID), None)
+    if view is None:
+        return check("H13 Packer screen", False, "view missing")
+    items, svg, problems = view["items"], view["svgcontent"], []
+    P, mode = ft.PACKER.tag_id, ft.PACKER.tag_id("ModeReq")
+    for label, tag in fv.PACKER_MANUAL_BUTTONS:  # hold to run, on the PACKER tag, only in its Manual mode
+        item = prop(items, f"HXB_packer_{tag}")
+        ev = {(e["type"], e["actparam"], e["actoptions"]["variableId"]) for e in item.get("events", [])}
+        want = {(k, n, P(tag)) for k, n in (("mousedown", "1"), ("mouseup", "0"), ("mouseout", "0"))}
+        shows = [a for a in item.get("actions", []) if a["type"] == "show" and a["variableId"] == mode]
+        if ev != want or not shows or shows[0]["range"] != {"min": fv.MANUAL, "max": fv.MANUAL}:
+            problems.append(f"manual {label} wrong")
+    if {t for _l, t in fv.PACKER_MANUAL_BUTTONS} != {n for n, *_ in ft.PACKER_TAGS if n.startswith("Man_")}:
+        problems.append("not one hold button per Man_* tag")
+    limits = {}
+    for _label, tag, _unit, lo, hi in fv.PACKER_SETPOINTS:
+        p = prop(items, f"HXI_in_packer_{tag}")
+        opts = p.get("options", {})
+        if p.get("variableId") != P(tag) or not lo < hi or (opts.get("min"), opts.get("max")) != (lo, hi):
+            problems.append(f"setpoint {tag} wrong")
+        if (f'id="I-HXI_in_packer_{tag}" type="number" step="any"' in svg) != (ft.PACKER.factor(tag) != 1):
+            problems.append(f"setpoint {tag}: step attribute")
+        limits[tag] = (lo, hi)
+    # the limits keep every legal combination safe (fv.PACKER_SETPOINTS comment), each rule by name
+    sp, hyst, band, film = (limits.get(t, (0, 0)) for t in ("OvenSetpoint", "OvenHyst", "OvenBand", "FilmLength"))
+    if sp[0] - band[1] < config.SHRINK_C:
+        problems.append(f"shrink rule: lowest ready oven {sp[0] - band[1]} degC < SHRINK_C {config.SHRINK_C}")
+    if sp[1] >= fv.OVEN_MAX_C:
+        problems.append(f"OvenMax rule: setpoint up to {sp[1]} degC reaches OvenMax {fv.OVEN_MAX_C}")
+    if hyst[1] >= band[0]:
+        problems.append(f"band rule: heater band {hyst[1]} not below the window {band[0]}: Oven_Ready would drop")
+    if oven_warm_up_s(sp[1] - band[0]) >= PACKER_HEAT_TIMEOUT_S:
+        problems.append(f"warm-up rule: {sp[1] - band[0]} degC takes {oven_warm_up_s(sp[1] - band[0]):.0f} s "
+                        f">= HeatTimeout {PACKER_HEAT_TIMEOUT_S} s")
+    if film[1] / config.FILM_FEED_MM_S >= PACKER_FEED_TIMEOUT_S or film != (PACKER_FILM_MIN, PACKER_FILM_MAX):
+        problems.append(f"film rule: {film} mm (PLC LIMIT {PACKER_FILM_MIN}-{PACKER_FILM_MAX}, feed < {PACKER_FEED_TIMEOUT_S} s)")
+    lamps = [tag for _x, column in fv.PACKER_LAMP_COLUMNS for tag, _label in column] + ["Starved", "Jog_Block"]
+    signals = [n for n, *_ , d in ft.PACKER_TAGS if d.split(":")[0] in ("output", "conditioned", "sensor")
+               and n != "OvenTemp"]
+    if sorted(lamps) != sorted(signals):
+        problems.append(f"lamps != outputs + conditioned + sensors: {sorted(set(signals) ^ set(lamps))}")
+    for tag in lamps:
+        if prop(items, f"lamp_{tag}").get("variableId") != P(tag):
+            problems.append(f"no lamp {tag}")
+    for bar, tag in (("GXP_oven_temp", "OvenTemp"), ("GXP_oven_setpoint", "OvenSetpoint")):
+        p = prop(items, bar)
+        if p.get("variableId") != P(tag) or (p.get("ranges") or [{}])[0].get("max") != fv.OVEN_SCALE_C:
+            problems.append(f"bar {tag} wrong")
+    if 'id="oven_max_tick"' not in svg:
+        problems.append("no OvenMax tick")
+    for value_id, tag in (("val_OvenTemp", "OvenTemp"), ("val_packer_PackCount", "PackCount"),
+                          ("val_packer_GroupCount", "GroupCount"), ("val_packer_FeedCount", "FeedCount"),
+                          ("val_packer_FeedPulses", "FeedPulses"), ("val_packer_PacksInOven", "PacksInOven")):
+        if prop(items, value_id).get("variableId") != P(tag):
+            problems.append(f"no value {value_id}")
+    ev = prop(items, "HXB_packer_reset_counter").get("events", [])  # one write: Cmd = 4 of the PACKER
+    if [(e["type"], e["actoptions"].get("variableId"), e["actparam"]) for e in ev] != [("click", P("Cmd"), "4")]:
+        problems.append(f"Reset counter does not write packer Cmd = 4 (once): {ev}")
+    for prefix, tag, cells in (("pk_wrap", "Anim_Wrap", pm.WRAP_CELLS), ("pk_oven", "Anim_Oven", pm.OVEN_CELLS)):
+        for i in range(cells):
+            p = prop(items, f"{prefix}{i}")
+            if p.get("variableId") != P(tag) or p.get("bitmask") != 1 << i:
+                problems.append(f"{prefix} cell {i} not on bit {i} of {tag}")
+    for i in range(config.PACK_BOTTLES):  # place i shows a bottle from GroupCount i + 1 on
+        lit = {(r["min"], r["max"]) for r in prop(items, f"pk_table{i}").get("ranges", []) if r["color"] == fv.PRODUCT}
+        if prop(items, f"pk_table{i}").get("variableId") != P("GroupCount") or lit != {(i + 1, config.PACK_BOTTLES)}:
+            problems.append(f"collation place {i} not lit from GroupCount {i + 1}")
+    for i in range(config.TABLE_PACKS):
+        lit = {(r["min"], r["max"]) for r in prop(items, f"pk_out{i}").get("ranges", []) if r["color"] == fv.PRODUCT}
+        if prop(items, f"pk_out{i}").get("variableId") != P("Anim_Table") or lit != {(i + 1, config.TABLE_PACKS)}:
+            problems.append(f"outfeed place {i} not lit from Anim_Table {i + 1}")
+    for bit in (5, 6, 7):  # the end of C3 from the LABELER's slot word, capped and labelled
+        for part in ("slot", "label", "cap"):
+            p = prop(items, f"pk_c3_{part}{bit}")
+            if p.get("variableId") != ft.LABELER.tag_id("Anim_C3") or p.get("bitmask") != 1 << bit:
+                problems.append(f"C3 {part} {bit} not on bit {bit} of the labeler's Anim_C3")
+    sheet = {}  # Anim_Film code -> (up, under): which sheet shape is drawn
+    for element_id in ("pk_sheet_up", "pk_sheet_under"):
+        p = prop(items, element_id)
+        if p.get("variableId") != P("Anim_Film"):
+            problems.append(f"{element_id} not on Anim_Film")
+        for r in p.get("ranges", []):
+            for code in range(r["min"], r["max"] + 1):
+                sheet.setdefault(code, {})[element_id] = r["color"] != "none"
+    want = {pm.SHEET_NONE: (False, False), pm.SHEET_FEEDING: (True, False), pm.SHEET_IN_SLOT: (True, False),
+            pm.SHEET_UNDER_PACK: (False, True)}
+    got = {c: (v.get("pk_sheet_up"), v.get("pk_sheet_under")) for c, v in sheet.items()}
+    if got != want:
+        problems.append(f"film sheet per code {got}, expected {want}")
+    for code in fv.FILM_WORDS:
+        if not shows_at(items, f"pk_film_word_{code}", P("Anim_Film"), code):
+            problems.append(f"no film word {code}")
+    turning = {"pk_film_roll": "FilmFeed", "pk_wrap_bar": "WrapBar", "pk_blower": "OvenBlower",
+               **{f"pk_c3_roller{k}": "ConveyorMotor3" for k in range(2)},
+               **{f"pk_wrap_roller{k}": "WrapConveyor" for k in range(3)},
+               **{f"pk_oven_roller{k}": "OvenConveyor" for k in range(3)}}
+    for element_id, tag in turning.items():
+        acts = prop(items, element_id).get("actions", [])
+        if {(a["type"], a["range"]["min"], a["variableId"]) for a in acts} != {("clockwise", 1, P(tag)), ("stop", 0, P(tag))}:
+            problems.append(f"{element_id} does not turn with {tag}")
+    for element_id, tag in (("pk_gate", "GateMotor"), ("pk_pusher", "GroupPusher"), ("pk_knife", "Knife"),
+                            ("pk_heater", "OvenHeater")):
+        if prop(items, element_id).get("variableId") != P(tag):
+            problems.append(f"{element_id} not on {tag}")
+    for prefix, tag, names in (("packer_step", "Step", fv.PACKER_STEP_NAMES), ("packer_wrap_step", "WrapStep",
+                                                                                 fv.PACKER_WRAP_STEP_NAMES)):
+        for number in names:
+            if not shows_at(items, f"{prefix}_{number}", P(tag), number):
+                problems.append(f"no {tag} text {number}")
+    if not shows_at(items, "packer_manual_blocked", P("Jog_Block"), 1):
+        problems.append("no 'manual blocked' text on Jog_Block")
+    missing = [i for i in items if f'id="{i}"' not in svg]
+    if missing:
+        problems.append(f"items without SVG element {missing[:3]}")
+    return check("H13 Packer screen", not problems, f"{len(items)} items" + (f"; {problems[:4]}" if problems else ""))
+
+
 def h7_line() -> bool:
     """Every Line view (filler, syrup room, labeler in header row 2) has the same body."""
     project = json.loads(ft.EXPORT.read_text())
@@ -621,8 +792,8 @@ def h7_body(view: dict) -> list[str]:
             problems.append(f"C1 roller {k}")
         if turns_with(f"c2_roller{k}") != ft.LABELER.tag_id("ConveyorMotor2"):  # the labeler drives C2 (L4)
             problems.append(f"C2 roller {k} not on the labeler's ConveyorMotor2")
-        if turns_with(f"c3_roller{k}") is not None:  # the packer is a stand-in: no PLC output
-            problems.append(f"C3 roller {k} should be static")
+        if turns_with(f"c3_roller{k}") != ft.PACKER.tag_id("ConveyorMotor3"):  # the packer drives C3 (P4)
+            problems.append(f"C3 roller {k} not on the packer's ConveyorMotor3")
     for k in range(2):
         if turns_with(f"filler_roller{k}") != ft.tag_id("IndexMotor"):
             problems.append(f"index roller {k}")
@@ -631,6 +802,7 @@ def h7_body(view: dict) -> list[str]:
         problems.append("filler block does not open the Filler view")
     problems += h7_syrup(view)
     problems += h7_labeler(view)
+    problems += h7_packer(view)
     missing = [i for i in items if f'id="{i}"' not in view["svgcontent"]]
     if missing:
         problems.append(f"items without SVG element {missing[:3]}")
@@ -697,9 +869,59 @@ def h7_labeler(view: dict) -> list[str]:
     edges = [v for left, right, _ in row for v in (left, right)]
     if edges != sorted(edges) or row[-1][1] > fv.W:  # strictly left to right, inside the view
         problems.append(f"row not left to right without overlap: {[(round(a), round(b)) for a, b, _ in row]}")
-    texts = re.findall(r'<text [^>]*x="([\d.]+)"[^>]*y="([\d.]+)"[^>]*>Packer</text>', svg)
-    if not texts or not (row[-2][0] <= float(texts[0][0]) <= fv.W and float(texts[0][1]) > fv.BELT_Y + 56):
-        problems.append("packer stand-in not below the end of C3")
+    return problems
+
+
+def h7_packer(view: dict) -> list[str]:
+    """P4: the packer block under the end of C3 (State colour, click -> its screen, both steps, oven
+    temperature and packs in the oven drawn click-through on top), the chute from C3's end down to it, the
+    palletizer stand-in left of it, the pack counter."""
+    items, svg, problems = view["items"], view["svgcontent"], []
+    P = ft.PACKER.tag_id
+    block = prop(items, "packer_block")
+    if block.get("variableId") != P("State") or {(r["min"], r["max"]) for r in block.get("ranges", [])} \
+            != {(v, v) for v in fv.STATE_COLOURS}:
+        problems.append("packer block not coloured by the packer State")
+    if goes_to(items, "packer_block") != fv.PACKER_MAIN_ID:
+        problems.append("packer block does not open the Packer view")
+    on_top = []
+    for prefix, tag, names in (("packer_state", "State", STATE_NAMES), ("packer_step_line", "Step", fv.PACKER_STEP_NAMES),
+                               ("packer_wrap_line", "WrapStep", fv.PACKER_WRAP_STEP_NAMES)):
+        bad = [n for n in names if not shows_at(items, f"{prefix}_{n}", P(tag), n)]
+        if bad:
+            problems.append(f"packer {tag} texts {bad[:3]}")
+        on_top += [f"{prefix}_{n}" for n in names]
+    for value_id, tag in (("line_oven", "OvenTemp"), ("line_packs_in_oven", "PacksInOven")):
+        if prop(items, value_id).get("variableId") != P(tag):
+            problems.append(f"{value_id} not on the packer {tag}")
+        on_top.append(value_id)
+    for element_id in on_top:
+        element = re.search(rf'<\w+ [^>]*id="{element_id}"[^>]*>', svg)
+        if element is None or 'pointer-events="none"' not in element.group(0):
+            problems.append(f"{element_id} catches the packer block's click")
+            break
+    if prop(items, "line_packer_packcount").get("variableId") != P("PackCount"):
+        problems.append("pack counter not on the packer PackCount")
+
+    def box(element_id: str) -> tuple[float, float, float, float] | None:
+        element = re.search(rf'<rect [^>]*id="{element_id}"[^>]*>', svg)
+        if element is None:
+            return None
+        a = {k: float(v) for k, v in BOX_ATTR.findall(element.group(0))}
+        return a["x"], a["y"], a["x"] + a["width"], a["y"] + a["height"]
+    blk, chute, c3_end = box("packer_block"), box("c3_chute"), box("c3_slot7")
+    if None in (blk, chute, c3_end):
+        return problems + ["packer block, chute or C3's last slot missing"]
+    if not (blk[0] <= c3_end[0] and blk[1] > fv.BELT_Y + 56 and blk[2] <= fv.W and blk[3] <= fv.H):
+        problems.append(f"packer block {blk} not under the end of C3 {c3_end} (below its lamps, inside the view)")
+    if not (c3_end[0] <= chute[0] <= c3_end[2] + 10 and chute[1] <= fv.BELT_Y + 12 and abs(chute[3] - blk[1]) < 1):
+        problems.append(f"chute {chute} does not run from C3's end down to the packer block")
+    texts = [(float(x), float(y)) for x, y in
+             re.findall(r'<text [^>]*x="([\d.]+)"[^>]*y="([\d.]+)"[^>]*>Palletizer</text>', svg)]
+    if not texts or not (texts[0][0] < blk[0] and blk[1] <= texts[0][1] <= blk[3]):
+        problems.append("palletizer stand-in not left of the packer block")
+    if re.search(r'>Packer</text>\s*<text[^>]*>simulated<', svg):
+        problems.append("the old grey packer stand-in is still drawn")
     return problems
 
 
@@ -757,7 +979,7 @@ def h8_alarms() -> bool:
         problems.append("two alarm definitions with the same name")
     for ui in fv.UIS:  # every machine: one definition per alarm bit, group = the machine (column Machine)
         texts = fv.ALARM_TEXTS.get(ui.m.key, {})
-        warnings = fv.SENSOR_WARNINGS.get(ui.m.key, ())  # FUXA-only warnings on sensor bits (labeler, L5)
+        warnings = fv.SENSOR_WARNINGS.get(ui.m.key, ())  # FUXA-only warnings on sensor bits (labeler L5, packer P5)
         if set(texts) != set(ui.alarms) | set(warnings):
             problems.append(f"{ui.title}: alarm texts {sorted(texts)} != alarm bits + warnings")
         for bit in warnings:
@@ -912,6 +1134,22 @@ def h10_daq_labeler() -> bool:
     return check("H10 DAQ labeler", not problems, f"points in 10 min: {counts}" + (f"; {problems[:4]}" if problems else ""))
 
 
+def h10_daq_packer() -> bool:
+    """The packer's history (HMI P6): every trend tag has points from the last 10 min, stored in
+    degC as shown. Checked on OvenSetpoint (185-210 degC; the raw INT would be 1850-2100) and on
+    OvenTemp, which stays below the heater's balance of about 253 degC (raw: up to 2530)."""
+    problems, counts = [], {}
+    for tag in ft.PACKER.trend_tags:
+        counts[tag] = len(fuxa_history(tag, 10, ft.PACKER))
+        if not counts[tag]:
+            problems.append(f"no {tag} history in the last 10 min")
+    for tag, top in (("OvenSetpoint", 230), ("OvenTemp", 300)):
+        raw = [v for _, v in fuxa_history(tag, 10, ft.PACKER) if v > top]
+        if raw:
+            problems.append(f"{tag} stored as {max(raw):g} (> {top}: not scaled)")
+    return check("H10 DAQ packer", not problems, f"points in 10 min: {counts}" + (f"; {problems[:4]}" if problems else ""))
+
+
 def fuxa_values(ids: list[str]) -> dict[str, object]:
     query = urllib.parse.quote(json.dumps(ids))
     with urllib.request.urlopen(f"{ft.FUXA_URL}/api/getTagValue?ids={query}", timeout=3) as r:
@@ -1059,6 +1297,34 @@ def labeler_live() -> list[bool]:
         plc.close()
 
 
+def h3_packer(plc: ModbusTcpClient) -> bool:
+    """A scaled packer setpoint written through FUXA: OvenHyst 4.5 degC -> PLC 45; the old value is written back."""
+    old = plc_value(plc, ft.HOLDING, pm.OVEN_HYST)
+    probe = 4.5 if old != 45 else 3.5
+    fuxa_set(ft.PACKER.tag_id("OvenHyst"), probe)
+    time.sleep(0.5)
+    seen = plc_value(plc, ft.HOLDING, pm.OVEN_HYST)
+    fuxa_set(ft.PACKER.tag_id("OvenHyst"), old / 10)
+    time.sleep(0.5)
+    back = plc_value(plc, ft.HOLDING, pm.OVEN_HYST)
+    return check("H3 write path packer", seen == round(probe * 10) and back == old,
+                 f"OvenHyst via FUXA {probe} degC -> PLC {seen} ({round(probe * 10)} expected), restored {back} (was {old})")
+
+
+def packer_live() -> list[bool]:
+    """H4 + H2 + H3 + H10 for the packer PLC (port 5024, HMI P1 / P6). H3 writes one setpoint FUXA owns and restores it."""
+    plc = ModbusTcpClient(config.PLC_HOST, port=config.PACKER_PORT, timeout=2)
+    try:
+        if not plc.connect():
+            return [check("H2 read path packer", False, f"no connection to {config.PLC_HOST}:{config.PACKER_PORT}")]
+        plc.read_holding_registers(pm.STATE, count=1)
+        return [h4_connected(ft.PACKER), h2_read(plc, ft.PACKER), h3_packer(plc), h10_daq_packer()]
+    except (ModbusException, OSError):
+        return [check("H2 read path packer", False, "the packer PLC does not answer on Modbus (upload the program)")]
+    finally:
+        plc.close()
+
+
 def filler_live() -> list[bool]:
     """H4, H2, H3, H10 for the filler PLC (port 502). A filler that does not answer is one FAIL, so
     the syrup room's checks still run."""
@@ -1076,9 +1342,9 @@ def filler_live() -> list[bool]:
 
 def main() -> None:
     results = [*h1_export(), h5_header(), h6_filler(), h7_line(), h8_alarms(), h9_trends(), h11_syrup(),
-               h12_labeler()]
+               h12_labeler(), h13_packer()]
     if "--offline" not in sys.argv:
-        results += filler_live() + syrup_live() + labeler_live()
+        results += filler_live() + syrup_live() + labeler_live() + packer_live()
     print(f"\n{sum(results)}/{len(results)} checks passed")
     sys.exit(0 if all(results) else 1)
 

@@ -1,5 +1,5 @@
 """Generate the FUXA Modbus devices and tags of the PLCs (filler: address_map.py, syrup room:
-address_map_syrup.py, labeler: address_map_labeler.py) + the views (fuxa_views.py).
+address_map_syrup.py, labeler: address_map_labeler.py, packer: address_map_packer.py) + the views (fuxa_views.py).
 
 FUXA needs one tag per PLC address it shows or writes. Typing ~40 tags in the
 editor would copy the I/O list a third time (io-list.md, address_map.py, FUXA),
@@ -15,10 +15,11 @@ tests/test_hmi_tags.py.
 What it does:
 - starts from FUXA's current project (GET /api/project) when FUXA answers, so
   views built in the editor are kept; otherwise from the export file;
-- replaces only the devices of MACHINES ("d_filler", "d_syrup", "d_labeler"), their connection-status tags and the views,
+- replaces only the devices of MACHINES ("d_filler", "d_syrup", "d_labeler", "d_packer"), their connection-status tags and the views,
   alarms and charts built by fuxa_views.py; other ones made in the editor stay;
-- turns FUXA's DAQ (history logging) on for each machine's trend_tags only (Trends views, stages 6
-  S6 and L6: TREND_TAGS of the filler, SYRUP_TREND_TAGS of the syrup room, LABELER_TREND_TAGS of the labeler);
+- turns FUXA's DAQ (history logging) on for each machine's trend_tags only (Trends views, stages 6,
+  S6, L6 and P6: TREND_TAGS of the filler, SYRUP_TREND_TAGS of the syrup room, LABELER_TREND_TAGS of the
+  labeler, PACKER_TREND_TAGS of the packer);
 - writes the export with sorted keys (same format as the stage 0 export).
 
 FUXA facts used here (FUXA 1.3.5, runtime/devices/modbus/index.js):
@@ -37,6 +38,7 @@ from pathlib import Path
 
 from simulator import address_map as am
 from simulator import address_map_labeler as lm
+from simulator import address_map_packer as pm
 from simulator import address_map_syrup as sm
 
 FUXA_URL = "http://localhost:1881"
@@ -232,6 +234,93 @@ LABELER_TAGS: list[tuple[str, str, int, str, str]] = [
     ("Anim_Station", HOLDING, lm.ANIM_STATION, "Int16", "animation: pocket 0 empty 1 bottle 2 labelling 3 labelled"),
 ]
 
+# Packer PLC (docs/packer/io-list.md, HMI stage P1). Same description prefixes; the computed words
+# (%MW40-43) are listed as "status" so the Tags page keeps every column within 20 rows. The oven
+# temperatures are INT in 0.1 degC in the PLC; FUXA scales them (PACKER_SCALES).
+PACKER_TAGS: list[tuple[str, str, int, str, str]] = [
+    # status, written by the PLC
+    ("State", HOLDING, pm.STATE, "Int16", "status: 0 Stopped, 1 Running, 2 Starved, 3 Blocked, 9 Fault"),
+    ("Step", HOLDING, pm.STEP, "Int16", "status: collation 0 IDLE, 5 WARM_UP, 10 COUNT, 15 WAIT_WRAP, 20 PUSH, "
+                                        "25 RETRACT, 900 FAULT"),
+    ("WrapStep", HOLDING, pm.WRAP_STEP, "Int16", "status: wrap 0 IDLE, 10 WAIT_PACK, 20 FEED, 22 CUT, 24 READY, "
+                                                 "30 RUN_ON, 32 WRAP, 34 RUN_OUT, 900 FAULT"),
+    ("PackCount", HOLDING, pm.PACK_COUNT, "Int16", "status: finished packs out of the oven (Cmd 4 zeroes it)"),
+    ("GroupCount", HOLDING, pm.GROUP_COUNT, "Int16", "status: bottles in the current group, 0-6"),
+    ("PacksInOven", HOLDING, pm.PACKS_IN_OVEN, "Int16", "status: packs inside the oven (CTUD)"),
+    ("FeedPulses", HOLDING, pm.FEED_PULSES, "Int16", "status: film pulses for one sheet (FilmLength / 50 mm)"),
+    ("FeedCount", HOLDING, pm.FEED_COUNT, "Int16", "status: film pulses fed for the current sheet"),
+    # alarms, written by the PLC
+    ("Alm_FilmFault", COIL, pm.ALM_FILM_FAULT, "Bool", "alarm: sheet not fed in 10 s, or no sheet in READY for 1 s (FAULT)"),
+    ("Alm_PackJam", COIL, pm.ALM_PACK_JAM, "Bool", "alarm: pusher / pack movement not finished in 3 s (FAULT)"),
+    ("Alm_OutfeedBlocked", COIL, pm.ALM_OUTFEED_BLOCKED, "Bool", "alarm: Blocked longer than 2 min (warning)"),
+    ("Alm_CommLost", COIL, pm.ALM_COMM_LOST, "Bool", "alarm: heartbeat not toggled for 3 s"),
+    ("Alm_FilmEmpty", COIL, pm.ALM_FILM_EMPTY, "Bool", "alarm: film roll empty and a pack waits (warning, Starved)"),
+    ("Alm_OvenOverTemp", COIL, pm.ALM_OVEN_OVER_TEMP, "Bool", "alarm: oven at or above OvenMax 230 degC (FAULT)"),
+    ("Alm_OvenHeatTimeout", COIL, pm.ALM_OVEN_HEAT_TIMEOUT, "Bool", "alarm: oven not ready within 120 s of WARM_UP (FAULT)"),
+    ("Alm_OvenJam", COIL, pm.ALM_OVEN_JAM, "Bool", "alarm: packs in the oven and none out for 20 s (FAULT)"),
+    ("Alm_AirflowLost", COIL, pm.ALM_AIRFLOW_LOST, "Bool", "alarm: blower on and no air flow within 3 s (FAULT)"),
+    ("Alm_WrapTimeout", COIL, pm.ALM_WRAP_TIMEOUT, "Bool", "alarm: wrap bar not back home within 5 s (FAULT)"),
+    # outputs, written by the PLC
+    ("ConveyorMotor3", COIL, pm.CONVEYOR_MOTOR3, "Bool", "output: C3 infeed conveyor"),
+    ("GateMotor", COIL, pm.GATE_MOTOR, "Bool", "output: infeed gate held open while the group is not complete"),
+    ("GroupPusher", COIL, pm.GROUP_PUSHER, "Bool", "output: group pusher, table -> wrap conveyor"),
+    ("WrapConveyor", COIL, pm.WRAP_CONVEYOR, "Bool", "output: wrap conveyor, table -> film slot -> oven"),
+    ("FilmFeed", COIL, pm.FILM_FEED, "Bool", "output: film feed rollers"),
+    ("Knife", COIL, pm.KNIFE, "Bool", "output: knife (whole CUT step)"),
+    ("WrapBar", COIL, pm.WRAP_BAR, "Bool", "output: wrap bar, one turn per pack"),
+    ("OvenHeater", COIL, pm.OVEN_HEATER, "Bool", "output: oven heater (Auto only, with air flow)"),
+    ("OvenBlower", COIL, pm.OVEN_BLOWER, "Bool", "output: oven blower (30 s run-on)"),
+    ("OvenConveyor", COIL, pm.OVEN_CONVEYOR, "Bool", "output: conveyor through the oven"),
+    # conditioned values, written by the PLC
+    ("Outfeed_Full", COIL, pm.OUTFEED_FULL, "Bool", "conditioned: outfeed table really full (Table_Full filtered)"),
+    ("Group_Complete", COIL, pm.GROUP_COMPLETE, "Bool", "conditioned: 6 bottles counted, gate closed"),
+    ("Jog_Block", COIL, pm.JOG_BLOCK, "Bool", "conditioned: manual button held > 10 s, manual outputs ignored until all released"),
+    ("Heat_Demand", COIL, pm.HEAT_DEMAND, "Bool", "conditioned: heater hysteresis wants heat"),
+    ("Oven_Ready", COIL, pm.OVEN_READY, "Bool", "conditioned: oven inside OvenSetpoint +- OvenBand"),
+    ("Starved", COIL, pm.STARVED, "Bool", "conditioned: wrap waits and (no bottle at the gate for 2 s, or film empty)"),
+    ("Wrap_Clear", COIL, pm.WRAP_CLEAR, "Bool", "conditioned: wrap conveyor ran empty: the next group may be pushed"),
+    ("Oven_On", COIL, pm.OVEN_ON, "Bool", "conditioned: oven switched on (Auto, no FAULT)"),
+    # sensors and wiring, written by the simulator (read only for the HMI)
+    ("Bottle_At_Gate", COIL, pm.BOTTLE_AT_GATE, "Bool", "sensor: bottle waiting at the gate (end of C3)"),
+    ("Bottle_Counted", COIL, pm.BOTTLE_COUNTED, "Bool", "sensor: count sensor behind the gate (pulse per bottle)"),
+    ("Pusher_Home", COIL, pm.PUSHER_HOME, "Bool", "sensor: group pusher home"),
+    ("Pusher_Out", COIL, pm.PUSHER_OUT, "Bool", "sensor: group pusher fully out"),
+    ("Pack_At_Film", COIL, pm.PACK_AT_FILM, "Bool", "sensor: pack at the stop before the film slot"),
+    ("Film_In_Slot", COIL, pm.FILM_IN_SLOT, "Bool", "sensor: film sheet sticks out of the slot"),
+    ("Film_Pulse", COIL, pm.FILM_PULSE, "Bool", "sensor: feed roller encoder, one pulse per 50 mm"),
+    ("Wrap_Home", COIL, pm.WRAP_HOME, "Bool", "sensor: wrap bar at home"),
+    ("Film_Empty", COIL, pm.FILM_EMPTY, "Bool", "sensor: film roll empty"),
+    ("Film_Low", COIL, pm.FILM_LOW, "Bool", "sensor: film roll low (FUXA warning)"),
+    ("Oven_Entry", COIL, pm.OVEN_ENTRY, "Bool", "sensor: pack at the oven entry (pulse per pack)"),
+    ("Oven_Exit", COIL, pm.OVEN_EXIT, "Bool", "sensor: pack at the oven exit (pulse per pack)"),
+    ("Table_Full", COIL, pm.TABLE_FULL, "Bool", "sensor: outfeed table full"),
+    ("Airflow_OK", COIL, pm.AIRFLOW_OK, "Bool", "sensor: air flow switch in the oven duct"),
+    ("OvenTemp", HOLDING, pm.OVEN_TEMP, "Int16", "sensor: oven air temperature, degC in FUXA (PLC 0.1 degC: 1900 = 190.0)"),
+    ("E_Stop_OK", COIL, pm.E_STOP_OK, "Bool", "wiring: E-stop chain healthy (FALSE = stop)"),
+    ("Heartbeat", COIL, pm.HEARTBEAT, "Bool", "wiring: toggled every 1 s by the simulator"),
+    # commands and setpoints, written by the HMI (FUXA is the only writer)
+    ("Cmd", HOLDING, pm.CMD, "Int16", "command: 1 Start, 2 Stop, 3 Reset, 4 Reset counter (the PLC sets it back to 0)"),
+    ("ModeReq", HOLDING, pm.MODE_REQ, "Int16", "command: 0 Stop, 1 Auto, 2 Manual"),
+    ("OvenSetpoint", HOLDING, pm.OVEN_SETPOINT, "Int16", "setpoint: oven air temperature, degC in FUXA (PLC 0.1 degC)"),
+    ("OvenHyst", HOLDING, pm.OVEN_HYST, "Int16", "setpoint: heater band, degC in FUXA (PLC 0.1 degC)"),
+    ("OvenBand", HOLDING, pm.OVEN_BAND, "Int16", "setpoint: Oven_Ready window +-, degC in FUXA (PLC 0.1 degC)"),
+    ("FilmLength", HOLDING, pm.FILM_LENGTH, "Int16", "setpoint: film sheet length, mm (recipe value)"),
+    # manual buttons, written by the HMI (hold-to-run, Manual mode only)
+    ("Man_C3", COIL, pm.MAN_C3, "Bool", "manual: C3 conveyor"),
+    ("Man_Gate", COIL, pm.MAN_GATE, "Bool", "manual: open the gate"),
+    ("Man_GroupPush", COIL, pm.MAN_GROUP_PUSH, "Bool", "manual: group pusher"),
+    ("Man_WrapConveyor", COIL, pm.MAN_WRAP_CONVEYOR, "Bool", "manual: wrap conveyor"),
+    ("Man_FilmFeed", COIL, pm.MAN_FILM_FEED, "Bool", "manual: film feed rollers"),
+    ("Man_Knife", COIL, pm.MAN_KNIFE, "Bool", "manual: knife"),
+    ("Man_WrapBar", COIL, pm.MAN_WRAP_BAR, "Bool", "manual: wrap bar"),
+    ("Man_OvenConveyor", COIL, pm.MAN_OVEN_CONVEYOR, "Bool", "manual: oven conveyor"),
+    # animation, written by the simulator, ignored by the PLC (HMI P0)
+    ("Anim_Wrap", HOLDING, pm.ANIM_WRAP, "Int16", "animation: wrap conveyor cells, bit 0 push line .. bit 10 oven entry"),
+    ("Anim_Oven", HOLDING, pm.ANIM_OVEN, "Int16", "animation: oven cells, bit 0 entry .. bit 9, bit 10 over the exit"),
+    ("Anim_Table", HOLDING, pm.ANIM_TABLE, "Int16", "animation: packs on the outfeed table, 0-6"),
+    ("Anim_Film", HOLDING, pm.ANIM_FILM, "Int16", "animation: sheet 0 none 1 feeding 2 in slot 3 under a pack"),
+]
+
 
 
 @dataclass(frozen=True)
@@ -288,7 +377,14 @@ LABELER_SCALES = (("GlueTemp", 10), ("GlueSetpoint", 10), ("GlueHyst", 10), ("Gl
 LABELER_TREND_TAGS = ("GlueTemp", "GlueSetpoint", "GoodCount", "State")
 LABELER = Machine("labeler", "Labeler PLC", "plc-labeler:502", tuple(LABELER_TAGS), LABELER_TREND_TAGS,
                   scales=LABELER_SCALES)
-MACHINES = (FILLER, SYRUP, LABELER)
+# Fixed-point tags of the packer (io-list: INT in 0.1 degC).
+PACKER_SCALES = (("OvenTemp", 10), ("OvenSetpoint", 10), ("OvenHyst", 10), ("OvenBand", 10))
+# Logged for the packer's Trends view (HMI P6). OvenSetpoint draws the target line; scaled first,
+# so the history is in degC, as for the labeler.
+PACKER_TREND_TAGS = ("OvenTemp", "OvenSetpoint", "PackCount", "State")
+PACKER = Machine("packer", "Packer PLC", "plc-packer:502", tuple(PACKER_TAGS), PACKER_TREND_TAGS,
+                 scales=PACKER_SCALES)
+MACHINES = (FILLER, SYRUP, LABELER, PACKER)
 
 # the filler's ids under their old names (views and checks use them)
 DEVICE_ID, DEVICE_NAME, PLC_ADDRESS = FILLER.device_id, FILLER.name, FILLER.address
