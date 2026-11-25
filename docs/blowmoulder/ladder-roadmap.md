@@ -1,0 +1,199 @@
+# Blow moulder – Ladder roadmap
+
+How to build the blow moulder PLC program in the OpenPLC Editor v4, in small stages. Same method as the other four machines (`docs/packer/ladder-roadmap.md`): the reusable parts (modes, FBs, heartbeat, jog watchdog, `Outfeed_Full` filter, window compare, Stop at safe points, State rungs, alarm latches) follow the packer, the new parts get their own stage. Design: `state-diagram.md`; addresses: `io-list.md`; checklist and decisions: `progress.md`.
+
+Draft 2026-11-25. New for this machine, and why the stages are cut as they are: the **first analog output** (`%QW0`, checked in stage 0 before anything depends on it), **analog math** with a P controller and a DINT scaling (stage 2, testable with numbers alone), **two sequencers** (stages 4 and 5, one each, as the packer), the **lamps** as their own stage (6), and two outputs that do **not** follow `Master_Enable`: the normally-open exhaust and the self-holding mould (stage 7).
+
+## Working rule for every stage
+
+1. Build only the rungs of this stage (the rungs are scripted into `plcs/blowmoulder/` main.ld as for the packer; the Editor must be closed while the files are written).
+2. Compile and upload (runtime `plc-blowmolder`, device IP `127.0.0.5`).
+3. **Test by forcing** in the debugger where a stage says so.
+4. **Release all forces** (a leftover force blocks Modbus writes later).
+5. Run the Modbus test script for the stage (`simulator/tests/`, against port **5025**) and add it to `run_blowmoulder.py`.
+6. Tick it in `progress.md`; the user commits.
+
+Never start the next stage with a failing test. **Blocks:** used before – `ADD`, `SUB`, `MUL`, `DIV`, `EQ`, `GE`, `LE`, `LT`, `GT`, `XOR`, `MOVE`, `LIMIT`, `TON`, `CTU`, `TO_DINT` (syrup room), P contacts; **new for this machine** – `TO_INT` (DINT → INT; fallback `DINT_TO_INT`) and an `INT` output at `%QW`. Check both in the Editor 4.3.3 library panel before their first rung (pin order in the box).
+
+## Program structure
+
+One program `main`, sections in this order (a value is computed **above** every rung that uses it in the same scan):
+
+```
+main
+ ├─ 1  Modes and safety        (defaults, mode/cmd decode incl. Cmd 4, Master_Enable, heartbeat, Manual entry edge)
+ ├─ 2  Analog values           (Oven_Ready window, Oven_BelowMax, OvenError, P term + LIMIT -> Lamp_Calc,
+ │                              pressure scaling in DINT -> BlowPressure, Press_Range_OK, Pressure_Reached, Pressure_Safe)
+ ├─ 3  Conditioning            (Outfeed_Full filter on C1_Full, Feed_Empty_Timer, Mould toggle edge)
+ ├─ 4  Step decode             (Step -> Oven_Idle ... Oven_Fault; MouldStep -> Mould_Idle ... Mould_Fault; Seq_Enable, Lamps_On)
+ ├─ 5  Done bits and timers    (Soak_Timer -> Preform_Hot, Grip_Timer, Hold_Timer)
+ ├─ 6  Sequencer transitions   (abort, Start of both, oven station, mould station; Stop_Request in stage 8)
+ ├─ 7  Outputs                 (jog watchdog, LampPower, exhaust, mould seal-in + manual toggle, request rungs, interlocks, FBs)
+ ├─ 8  Counter and status      (BottleCount with Cmd 4 reset, Starved, Alm_NoPreforms, State)
+ └─ 9  Alarms                  (timeouts, limits, sensor check, latches, reset, MOVE 900 last)
+Function blocks: FB_Motor, FB_Valve (copied from plcs/packer/)
+```
+
+---
+
+## Stage 0 – Project, container, and the `%QW0` check
+
+- **Fifth runtime container.** `docker-compose.yml` gets a service `plc-blowmolder`, a copy of `plc-packer` with host Modbus port **5025**, editor at **`127.0.0.5:8443`**, own volumes **`blowmoulder-data` / `blowmoulder-build`** (also in the `volumes:` list at the bottom). **Rename the volumes when copying** – a shared build volume makes one upload replace the other PLC's program (packer, 2026-11-21).
+- New project `plcs/blowmoulder/`; *Device*: board **OpenPLC Runtime v4**, IP **127.0.0.5**; *Servers*: Modbus TCP server, port 502 inside the container, same buffer mapping as the packer (`plcs/packer/devices/servers/`), **`mx_bits` = 64** (covers `%MX4` sensors and the `%MX7` alarms). The mapping must also serve the **`%QW` holding registers**.
+- Declare every variable from `io-list.md` (located; `LampPower` as `INT` at `%QW0`) and the constants of `state-diagram.md` as internal variables with initial values (`OvenMax`, `ErrMax`, `ErrMin` −1000, `RawFull` / `PressFull` **as DINT** (27648 / 400, used by the scaling MUL / DIV), `RawMin`, `RawMax`, `ExhaustLimit`, `MaxPressure`, `SoakTime`, `GripTime`, `HoldTime`, `MoveTimeout`, `HeatTimeout`, `BlowTimeout`, `ExhaustTimeout`, `StarvedDelay`, `BlockedWarn`).
+- Copy `FB_Motor` and `FB_Valve` from `plcs/packer/` (no changes).
+- One test rung: `E_Stop_OK → MOVE 42 → LampPower` (the packer's stage 0 needed none; this one proves where `%QW0` lands). Compile, upload, test, then delete it.
+
+**Test** (`test_blowmoulder_stage0.py`, B1–B13): write `OvenTemp` (HR 1036), `BlowPressure_Raw` (HR 1037, a **negative** value −2000: INT is signed), `E_Stop_OK` (coil 8201), `C1_Full` (coil 8228, `%MX4`) on port 5025 and read them back; coil 8250 (`Alm_PressureSensor`, `%MX7.2`) can be read. **`%QW0` check (Q1):** with `E_Stop_OK` FALSE HR 0 is written 0 and stays 0 (a MOVE without EN does nothing, so the 42 is not written back); with `E_Stop_OK` TRUE HR 0 reads 42 → `%QW0` = HR 0 confirmed. If HR 0 is not served, `LampPower` moves to `%MW40` (HR 1064) and `io-list.md` is changed before stage 1. The other four PLCs (502, 5022, 5023, 5024) are unaffected (SKIP when that runtime is not up).
+
+## Stage 1 – Modes and safety  *(weeks IV, VI, VIII, X)*
+
+Same structure as the packer's section 1, with this machine's defaults:
+
+- First-scan defaults (`NOT Init_Done` → MOVE chain → `(S) Init_Done`): `OvenSetpoint` 1050, `OvenBand` 50, `Kp` 10, `Bias` 0, `BlowSetpoint` 350.
+- `ModeReq` → `Mode_Stop/Auto/Manual` (EQ 0–2); `Cmd` → `Start_Cmd/Stop_Cmd/Reset_Cmd/Count_Reset_Cmd` (EQ 1–4); then MOVE 0 → `Cmd`.
+- Heartbeat watchdog (XOR change detect `Hb_Changed`, TON 3 s on `NOT Hb_Changed` → `Alm_CommLost`), then `Master_Enable := E_Stop_OK AND NOT Alm_CommLost`.
+- **New:** `┤P Mode_Manual├ → ( Manual_Entry )` – one scan when Manual is entered (used by the mould toggle in stage 7).
+
+**Test** (`test_blowmoulder_stage1.py`): after upload HR 1054–1058 hold the defaults; a later write is kept; `Cmd` 1–4 each read back as 0 after one scan; heartbeat frozen 3 s → `Alm_CommLost`, frozen at FALSE **and** at TRUE; Reset with a dead heartbeat keeps the alarm. Debugger: `E_Stop_OK` FALSE → `Master_Enable` FALSE.
+
+## Stage 2 – Analog values  *(week VIII: math, compare; week X: data types)*
+
+All rungs combinational, every scan (`state-diagram.md` rules 5 and 6). Nothing drives an output yet: the results go into helper variables, so the math can be tested with numbers alone.
+
+```
+Oven window (rule 5, as the packer's Oven_Ready):
+──[SUB OvenSetpoint, OvenBand → Oven_Low_Lim]──[ADD OvenSetpoint, OvenBand → Oven_High_Lim]──
+──┤ GE OvenTemp,Oven_Low_Lim ├──┤ LE OvenTemp,Oven_High_Lim ├───────────────────────────( Oven_Ready )──
+──[LT OvenTemp, OvenMax → Oven_BelowMax]──
+
+P controller (rule 5):
+──[SUB OvenSetpoint, OvenTemp → OvenError]──[LIMIT MN:=ErrMin, IN:=OvenError, MX:=ErrMax → Err_Lim]──
+──[MUL Kp, Err_Lim → P_x10]──[DIV P_x10, 10 → P_Term]──[ADD Bias, P_Term → Lamp_Sum]──[LIMIT MN:=0, IN:=Lamp_Sum, MX:=100 → Lamp_Calc]──
+
+Pressure scaling (rule 6) – DINT in the middle:
+──[TO_DINT BlowPressure_Raw → Raw_D]──[MUL Raw_D, PressFull → Raw_x400]──[DIV Raw_x400, RawFull → Press_D]──[TO_INT Press_D → BlowPressure]──
+──┤ GE BlowPressure_Raw,RawMin ├──┤ LE BlowPressure_Raw,RawMax ├──────────────────────────( Press_Range_OK )──
+──┤ GE BlowPressure,BlowSetpoint ├────────────────────────────────────────────────────────( Pressure_Reached )──
+──┤ LT BlowPressure,ExhaustLimit ├──┤ Press_Range_OK ├────────────────────────────────────( Pressure_Safe )──
+```
+
+- **Order of MUL and DIV** is the lesson of this stage: `Kp · error` first, then `/ 10`; `Raw · 400` first, then `/ 27648`. Dividing first truncates to 0.
+- `PressFull` / `RawFull` are declared as **DINT** (400, 27648), so the MUL and DIV have one data type on both inputs.
+- `Pressure_Safe` uses `Press_Range_OK` now; stage 9 adds `NOT Alm_PressureSensor`, so a sensor that comes back after a wire break still keeps the mould closed until Reset.
+
+**Test** (`test_blowmoulder_values.py`): `OvenTemp` 990 / 1000 / 1050 / 1100 / 1110 → `Oven_Ready` F / T / T / T / F; `OvenBand` 100 → 950 T. **P term** (`Lamp_Calc` located at `%MW40`, HR 1064, decision 2026-11-25): `OvenTemp` 200 → 100 (clamped); 1030 → 20 (`Kp` 10 · 2 °C); 1050 → 0; 1080 → 0 (negative clamped); `Bias` 30 at 1050 → 30; `Kp` 30 at `OvenTemp` −2000 (error 3050 → clamped 1000) → no overflow, 100. **Scaling:** raw 0 → 0, 13824 → 200, 24192 → 350, 27648 → 400, −2000 → −28; `Press_Range_OK` (no address): F at −1001 seen through `Pressure_Safe` (−14 is low, yet F), 32511 / 32512 in the debugger; `Pressure_Reached` at 350 vs 349; `Pressure_Safe` at raw 345 (4 → T) and 346 (5 → F), T at −1000, F at −1001 / −2000; `Oven_BelowMax` (no address) 1299 / 1300 in the debugger. **Result 2026-11-25: 39/39 + both debugger checks.**
+
+## Stage 3 – Conditioning  *(weeks IV, VII: seal-in, timers)*
+
+- **`Outfeed_Full`** (%MX3.0): the standard filter on `C1_Full` – `Full_OnTimer` TON 2 s, `Full_OffTimer` TON 3 s, seal-in (report 5.3).
+- **Starved filter timer:** `Feed_Empty_Timer := TON(IN := NOT Preform_At_Loader, PT := StarvedDelay)` (the step contact `Oven_Feed` is added in stage 8, when the step decode exists).
+- **Mould toggle edge:** `┤P Man_MouldClose├ → ( Mould_Click )` (used in stage 7).
+
+**Test** (`test_blowmoulder_conditioning.py`): `C1_Full` ON 1 s → `Outfeed_Full` F, ON 3 s → T, OFF 2 s → still T, OFF 4 s → F; blinking 0.5 s / 0.5 s for 5 s → stays F.
+
+## Stage 4 – Oven station sequencer  *(weeks VII, VIII, XI: TON as a condition, compare, move, sequencer)*
+
+- **Step decode** of `Step` (EQ → `Oven_Idle`, `Oven_Feed`, `Oven_Load`, `Step_Heat`, `Oven_Hot`, `Oven_Fault`) and of `MouldStep` (EQ → `Mould_Idle`, `Mould_WaitPreform`, `Mould_Grip`, `Mould_Swing`, `Mould_Release`, `Mould_ArmBack`, `Mould_Closing`, `Mould_Stretch`, `Mould_Blow`, `Mould_Hold`, `Mould_Exhaust`, `Mould_RodUp`, `Mould_Opening`, `Mould_Eject`, `Mould_Fault` – 30 and 70 are `Mould_Closing` / `Mould_Opening`, so they never clash with the sensors `Mould_Closed` / `Mould_Open`; also `Mould_CloseSteps` = 30–62 with `GE MouldStep,30` and `LE MouldStep,62`). `Seq_Enable := Mode_Auto AND Master_Enable`.
+- **`Lamps_On`** (%MX3.7) := `Master_Enable AND Mode_Auto AND NOT Oven_Fault AND Preform_In_Oven` (used from stage 6).
+- **Done bit** (section 5): `Soak_Timer := TON(IN := Step_Heat AND Oven_Ready, PT := SoakTime)`, `Preform_Hot := Soak_Timer.Q` (%MX3.3).
+- **Transitions** (section 6), no outputs yet:
+  - **Start** (Auto, `Start_Cmd`, both steps 0; the alarm contact comes in stage 9) → `Start_Accepted` (one coil), then MOVE rungs from it: `Preform_In_Oven` → 20 else 10 → `Step`; `Mould_Closed` → 60, `Mould_Open AND Bottle_In_Mould` → 80, else 10 → `MouldStep` (rule 9; the three mould branches are mutually exclusive by their contacts).
+  - 10 → 15 (`Preform_At_Loader AND NOT Preform_In_Oven AND NOT Outfeed_Full`; `NOT Stop_Request` in stage 8); 15 → 20 (`Preform_In_Oven`); 20 → 25 (`Preform_Hot`); 25 → 10 (`NOT Preform_In_Oven`).
+- **Abort rung:** `NOT Master_Enable OR NOT Mode_Auto` → MOVE 0 → `Step` **and** MOVE 0 → `MouldStep`.
+
+The mould station has no transitions yet, so `MouldStep` stays at what Start set: the oven can be tested alone, the hand-over is done by writing `Preform_In_Oven` FALSE.
+
+**Test** (`test_blowmoulder_oven_seq.py`): Start with an empty pocket → `Step` 10, `MouldStep` 10; with `Preform_In_Oven` → `Step` 20; with `Mould_Closed` → `MouldStep` 60; with `Mould_Open` + `Bottle_In_Mould` → 80. `Preform_At_Loader` → 15; `Outfeed_Full` in 10 → stays 10; `Preform_In_Oven` → 20; `OvenTemp` 900 → stays 20; 1050 for 0.5 s → 20, for 1.2 s → 25; `OvenTemp` drops out of the window in 20 → soak starts again; `Preform_In_Oven` FALSE → 10. Mode Stop → both 0.
+
+## Stage 5 – Mould station sequencer  *(weeks VII, VIII, XI: TON as step time, compare, sequencer)*
+
+- **Done bits** (section 5): `Grip_Timer := TON(IN := Mould_Grip OR Mould_Release, PT := GripTime)`, `Hold_Timer := TON(IN := Mould_Hold, PT := HoldTime)`.
+- **Transitions** from the step table: 10 → 20 (`Oven_Hot AND Mould_Open AND NOT Bottle_In_Mould AND Arm_At_Oven AND Rod_Up`), 20 → 22 (`Grip_Timer.Q`), 22 → 24 (`Arm_At_Mould`), 24 → 26 (`Grip_Timer.Q AND Bottle_In_Mould`), 26 → 30 (`Arm_At_Oven`), 30 → 40 (`Mould_Closed`), 40 → 50 (`Rod_Down`), 50 → 52 (`Pressure_Reached`), 52 → 60 (`Hold_Timer.Q`), 60 → 62 (`Pressure_Safe`), 62 → 70 (`Rod_Up`), 70 → 80 (`Mould_Open`), 80 → 10 (`NOT Bottle_In_Mould`).
+- **Rung order:** 20 → 22 above 24 → 26: both use `Grip_Timer.Q`, and SWING lies between, so the timer is always reset before RELEASE.
+
+**Test** (`test_blowmoulder_mould_seq.py`), oven station brought to 25 first (Start with `Preform_In_Oven` and `OvenTemp` 1050 → 20 → 25 after the soak), sensors written by hand: the whole cycle 10 → 20 → … → 80 → 10, each step waiting for its sensor; BLOW waits at raw 24000 (347) and goes on at 24192 (350); HOLD lasts 1.0 s; EXHAUST waits at raw 400 (5 = 0.5 bar) and goes on at raw 345 (4, `Pressure_Safe`); 10 → 20 does not start with `Bottle_In_Mould`, with the rod down, or with `Step` ≠ 25. Restart cases: Mode Stop in BLOW (mould still closed) → Start → 60; Mode Stop in EJECT (bottle still in the open mould) → Start → 80.
+
+## Stage 6 – The lamps: P controller on the analog output  *(week VIII: math, analog output)*
+
+Rung in section 7, above the other outputs (`state-diagram.md` rule 5):
+
+```
+──┤ Lamps_On ├──┤ Oven_BelowMax ├────────────────────[MOVE Lamp_Calc → LampPower]──
+──┤/ Lamps_On ├──────────────────┬───────────────────[MOVE 0 → LampPower]──
+──┤/ Oven_BelowMax ├─────────────┘
+```
+
+Two MOVE rungs with opposite conditions, so `%QW0` has exactly one value per scan. No FB: an analog value has no run hours and no feedback.
+
+**Test** (`test_blowmoulder_lamps.py`, reads HR 0): Mode Stop → 0; Auto without a preform → 0; Auto + `Preform_In_Oven`, `OvenTemp` 200 → 100; 1030 → 20; 1050 → 0; `Bias` 30 at 1050 → 30; **steady offset demo:** with `Bias` 0 the power at 1047 is 30 (3 °C below the setpoint gives the 30 % a hot preform needs); `OvenTemp` 1300 → 0 (`OvenMax`); Manual → 0; E-stop → 0.
+
+## Stage 7 – Outputs and interlocks  *(weeks III, IV, VI, IX: seal-in, interlocks, FBs, toggle)*
+
+Section 7, in this order:
+
+- 7.0 **Jog watchdog** (`Jog_TON` 10 s on any of the six hold-to-run `Man_*`, **not** `Man_MouldClose`; `Jog_Block` %MX3.2).
+- 7.1 **Exhaust, normally open** (rule 3): `ExhaustValve := NOT ((Mould_Stretch OR Mould_Blow OR Mould_Hold) AND Master_Enable)` – a **plain coil, no FB**: an FB's `Enable` = `Master_Enable` would close the valve on E-stop, the opposite of what is wanted.
+- 7.2 **Mould toggle** (rule 11), one coil:
+
+  ```
+  Load_Mould := Manual_Entry OR NOT Master_Enable                (enter Manual or E-stop: copy the real position)
+  Man_Mould_Closed := Mode_Manual AND ( (Load_Mould AND Mould_Closed)
+                                     OR (NOT Load_Mould AND (Man_Mould_Closed XOR Mould_Click)) )
+  ```
+
+  `XOR` with the click flips the latch on each rising edge and keeps it otherwise (two branches: `Man_Mould_Closed AND NOT Mould_Click` / `NOT Man_Mould_Closed AND Mould_Click`). Reloading it during an E-stop means that the release never moves the mould.
+- 7.3 **Mould seal-in** (rule 4), a **plain coil, no FB** (an FB would drop it with `Enable`):
+
+  ```
+  Close_Cmd  := Master_Enable AND ((Seq_Enable AND Mould_CloseSteps) OR (Mode_Manual AND Man_Mould_Closed))
+                AND Arm_At_Oven AND NOT Ejector
+  Open_Cmd   := Master_Enable AND ((Seq_Enable AND NOT Mould_CloseSteps AND NOT Mould_Fault AND NOT Mould_Idle)
+                                   OR (Mode_Manual AND NOT Man_Mould_Closed))
+  MouldClose := (Close_Cmd OR (MouldClose AND Mould_Closed)) AND NOT (Open_Cmd AND Pressure_Safe AND Rod_Up)
+  ```
+
+- 7.4 **Request rungs** (every Auto branch with `Seq_Enable`, every Manual branch `Mode_Manual AND Man_… AND NOT Jog_Block`, interlocks in series after the OR; table in `state-diagram.md` rule 10):
+  - `Req_HopperFeed := (Oven_Feed AND NOT Preform_At_Loader) OR Manual`
+  - `Req_Loader := (Oven_Load OR Manual) AND NOT Preform_In_Oven AND NOT Gripper`
+  - `Req_Gripper := Mould_Grip OR Mould_Swing OR Manual`
+  - `Req_Arm := (Mould_Swing OR Mould_Release OR Manual) AND Mould_Open AND Rod_Up AND NOT Ejector`
+  - `Req_Rod := (Mould_Stretch OR Mould_Blow OR Mould_Hold OR Mould_Exhaust OR Manual) AND Mould_Closed`
+  - `Req_PreBlow := Mould_Stretch AND Mould_Closed` (no Manual branch)
+  - `Req_HighBlow := (Mould_Blow OR Mould_Hold) AND Mould_Closed AND NOT ExhaustValve AND BlowPressure < MaxPressure` (no Manual branch; the `LT` goes into a helper `Below_MaxPress` in section 2)
+  - `Req_Ejector := (Mould_Eject OR Manual) AND Mould_Open AND Arm_At_Oven AND NOT Outfeed_Full`
+- 7.5 **FB instances**, `Enable` = `Master_Enable`, one writer per `%QX`: FB_Motor `Mot_HopperFeed`; FB_Valve `Vlv_Loader`, `Vlv_Arm`, `Vlv_Gripper`, `Vlv_Rod`, `Vlv_PreBlow`, `Vlv_HighBlow`, `Vlv_Ejector`. `ExhaustValve` and `MouldClose` are the two plain coils of 7.1 and 7.3.
+
+**Test** (`test_blowmoulder_outputs.py`): each step of both stations switches exactly its outputs (one preform and one bottle driven through by writing the sensors); exhaust ON in IDLE, Manual, FAULT (written 900 is not possible: test with E-stop and Mode Stop), OFF only in 40 / 50 / 52; **mould stays closed** with Mode Stop and with E-stop during HOLD; a mould still closing (not `Mould_Closed`) drops on E-stop; mould does not open at raw 400 (0.5 bar) or with the rod down, opens at raw 345 (0.4 bar) with the rod up; high blow never with the exhaust open; ejector held off with `Outfeed_Full`. **Manual:** click *Mould* → closes, click again → opens; enter Manual with the mould closed → stays closed (latch loaded); E-stop and release in Manual → no motion; rod only with the mould closed; arm only into an open mould with the rod up; no button for the blow valves; button held 11 s → `Jog_Block`, the mould latch untouched.
+
+## Stage 8 – Stop, counter, State  *(weeks IV, VII: latch, CTU)*
+
+- `Stop_Request := (Stop_Cmd OR Stop_Request) AND NOT (Oven_Idle AND Mould_Idle)`; go-to-0 rungs (rule 7): oven FEED → 0 at once; mould WAIT_PREFORM → 0 **only with `Oven_Idle`**; `NOT Stop_Request` in 10 → 15. No other step gets a Stop branch: the last preform is always blown and ejected.
+- `Bottle_Counter` (CTU, `CU := Bottle_Ejected`, `R := Count_Reset_Cmd`, `PV` 32767, `CV` → `BottleCount` %MW53).
+- `Feed_Empty_Timer` gets the step contact: `IN := Oven_Feed AND NOT Preform_At_Loader`; `Starved` (%MX3.6) := `Feed_Empty_Timer.Q AND Mould_WaitPreform`; `Alm_NoPreforms` (%MX5.0) := `Oven_Feed AND Hopper_Empty AND NOT Preform_At_Loader` (warning, not latched).
+- `State` (%MW50): mutually exclusive MOVE rungs in the priority of rule 8: Fault (`Oven_Fault`), Stopped (both idle, or Mode Stop / Manual), Blocked (`Outfeed_Full AND (Mould_Eject OR Oven_Feed)`), Starved, Running.
+
+**Test** (`test_blowmoulder_stop_state.py`): Stop in FEED with the mould idle → both 0 at once; Stop in HEAT → the preform is heated, handed over, blown, ejected, then both 0 (no new load); Stop in BLOW → the cycle finishes to 10, then 0; three `Bottle_Ejected` pulses → `BottleCount` +3, `Cmd` 4 → 0, `Cmd` 3 keeps it; no preform 1 s → State 1, 3 s with the mould waiting → 2, 3 s while a bottle is blown → 1; `Hopper_Empty` in FEED → `Alm_NoPreforms` follows the sensor; `Outfeed_Full` in EJECT → State 3, ejector off; Mode Stop / Manual → 0.
+
+## Stage 9 – Alarms and FAULT  *(week VII: timers as timeouts, week VIII: compare)*
+
+One TON per step (each restarts at its own step), `MoveTimeout` 3 s unless stated:
+
+- `Alm_HandlingJam` (%MX5.1): `Load_Timer` (`Oven_Load`), `Swing_Timer` (`Mould_Swing`), `Release_Timer` (`Mould_Release`), `ArmBack_Timer` (`Mould_ArmBack`), `Eject_Timer` (`Mould_Eject AND Ejector`: only while the ejector really pushes, not while C1 is full).
+- `Alm_OutfeedBlocked` (%MX5.2): `Blocked_Timer` (TON `BlockedWarn`, `IN := State = 3`) – warning, no FAULT.
+- `Alm_MouldFault` (%MX5.4): `Close_Timer` (`Mould_Closing`), `Stretch_Timer` (`Mould_Stretch`), `RodUp_Timer` (`Mould_RodUp`), `Open_Timer` (`Mould_Opening`).
+- `Alm_OvenOverTemp` (%MX5.5): `NOT Oven_BelowMax` → FAULT in every mode; Reset only below `OvenMax`.
+- `Alm_OvenHeatTimeout` (%MX5.6): `Heat_Timer` (TON `HeatTimeout` 15 s, `IN := Step_Heat`).
+- `Alm_BlowFault` (%MX5.7): `Blow_Timer` (TON `BlowTimeout` 2 s, `IN := Mould_Blow`).
+- `Alm_ExhaustFault` (%MX7.0): `Exhaust_Timer` (TON `ExhaustTimeout` 3 s, `IN := Mould_Exhaust`); Reset only with `Pressure_Safe`.
+- `Alm_OverPressure` (%MX7.1): `NOT Below_MaxPress` → FAULT in every mode; Reset only below `MaxPressure`.
+- `Alm_PressureSensor` (%MX7.2): `NOT Press_Range_OK` → FAULT in every mode; Reset only with the raw value back in range. Then `Pressure_Safe` gets `NOT Alm_PressureSensor` (section 2 reads the alarm of the last scan – one scan late, harmless, the mould needs far longer to move).
+- Each FAULT alarm: (S) by its cause, (R) by `Reset_Cmd AND NOT cause`. `No_Fault` (De Morgan over the 9 FAULT bits), `NOT No_Fault` in the Start rung, 900 → 0 for both with Auto + `Reset_Cmd`, last rung: `NOT No_Fault` → MOVE 900 → `Step` **and** MOVE 900 → `MouldStep` (last writer of both).
+
+**Test** (`test_blowmoulder_alarms.py`; `--quick` without the 2 min blocked warning): no alarm in a normal cycle; LOAD without `Preform_In_Oven` → FAULT after 3 s, both steps 900, all off, **exhaust open**; CLOSE without `Mould_Closed` → FAULT; HEAT at 900 → FAULT after 15 s, lamps 0; BLOW at raw 20000 → `Alm_BlowFault` after 2 s, **mould stays closed**, exhaust open; Reset → Start → 60 EXHAUST → open → eject; EXHAUST at raw 10000 → `Alm_ExhaustFault` after 3 s, Reset refused until raw ≤ 345 (`Pressure_Safe`); `OvenTemp` 1300 → FAULT also in Mode Stop; raw 27700 (> 400) → `Alm_OverPressure`; raw −2000 → `Alm_PressureSensor`, `Pressure_Safe` FALSE, mould closed, Reset refused until the raw value is back; EJECT with `Outfeed_Full` for 10 s → no jam (timer only with the ejector ON); State 3 for 2 min → warning, no FAULT. Earlier scripts adapted so no step lasts longer than its timeout.
+
+## After stage 9
+
+- Run all stage scripts once more (`tests/run_blowmoulder.py`, shared code `tests/suite.py`); `progress.md` part A done.
+- Then **part B, the Python simulator** gets its own plan (`docs/simulator/roadmap.md`, new section "Blow moulder simulator": hopper and loader, the preform's surface temperature under `LampPower` (first-order lag, the P offset visible), arm and mould positions, pressure build-up and exhaust as raw counts, ejector onto C1 replacing `Supply`, `BlowmoulderPlc` on port 5025).
+- The **first conveyor link of the line** becomes real: stop the filler → C1 fills → S1 → blow moulder **Blocked** with a blown bottle waiting in the open mould (report 5.5).
