@@ -24,7 +24,7 @@ main
  ├─ 1  Modes and safety        (defaults, mode/cmd decode incl. Cmd 4, Master_Enable, heartbeat, Manual entry edge)
  ├─ 2  Analog values           (Oven_Ready window, Oven_BelowMax, OvenError, P term + LIMIT -> Lamp_Calc,
  │                              pressure scaling in DINT -> BlowPressure, Press_Range_OK, Pressure_Reached, Pressure_Safe)
- ├─ 3  Conditioning            (Outfeed_Full filter on C1_Full, Feed_Empty_Timer, Mould toggle edge)
+ ├─ 3  Conditioning            (Outfeed_Full filter on C1_Full)
  ├─ 4  Step decode             (Step -> Oven_Idle ... Oven_Fault; MouldStep -> Mould_Idle ... Mould_Fault; Seq_Enable, Lamps_On)
  ├─ 5  Done bits and timers    (Soak_Timer -> Preform_Hot, Grip_Timer, Hold_Timer)
  ├─ 6  Sequencer transitions   (abort, Start of both, oven station, mould station; Stop_Request in stage 8)
@@ -86,11 +86,10 @@ Pressure scaling (rule 6) – DINT in the middle:
 
 ## Stage 3 – Conditioning  *(weeks IV, VII: seal-in, timers)*
 
-- **`Outfeed_Full`** (%MX3.0): the standard filter on `C1_Full` – `Full_OnTimer` TON 2 s, `Full_OffTimer` TON 3 s, seal-in (report 5.3).
-- **Starved filter timer:** `Feed_Empty_Timer := TON(IN := NOT Preform_At_Loader, PT := StarvedDelay)` (the step contact `Oven_Feed` is added in stage 8, when the step decode exists).
-- **Mould toggle edge:** `┤P Man_MouldClose├ → ( Mould_Click )` (used in stage 7).
+- **`Outfeed_Full`** (%MX3.0): the standard filter on `C1_Full` – `Full_OnTimer` TON 2 s, `Full_OffTimer` TON 3 s, seal-in (report 5.3). Rungs cloned from the packer's (18–20), only the sensor renamed; every scan in every mode.
+- **Moved out (plan review 2026-11-25):** `Feed_Empty_Timer` is built in **stage 8** directly above `Starved`, complete with the step contact `Oven_Feed` – without it the timer runs during HEAT (loader empty) and is already done when FEED starts, so Starved would show at once instead of after 2 s; nothing can read it before stage 8 anyway. The **`Mould_Click`** edge is built in **stage 7.2** as the first toggle rung (as the labeler's bell toggle 1/4): a one-scan pulse is invisible over Modbus and in the debugger, its only user is the toggle.
 
-**Test** (`test_blowmoulder_conditioning.py`): `C1_Full` ON 1 s → `Outfeed_Full` F, ON 3 s → T, OFF 2 s → still T, OFF 4 s → F; blinking 0.5 s / 0.5 s for 5 s → stays F.
+**Test** (`test_blowmoulder_conditioning.py`, F0–F6): `C1_Full` ON 1 s → `Outfeed_Full` F, ON 3 s → T, OFF 2 s → still T, OFF 4 s → F; blinking 0.5 s / 0.5 s for 5 s → stays F; with `E_Stop_OK` FALSE and Mode Stop the filter still works (ON 3 s → T, OFF 4 s → F).
 
 ## Stage 4 – Oven station sequencer  *(weeks VII, VIII, XI: TON as a condition, compare, move, sequencer)*
 
@@ -134,7 +133,7 @@ Section 7, in this order:
 
 - 7.0 **Jog watchdog** (`Jog_TON` 10 s on any of the six hold-to-run `Man_*`, **not** `Man_MouldClose`; `Jog_Block` %MX3.2).
 - 7.1 **Exhaust, normally open** (rule 3): `ExhaustValve := NOT ((Mould_Stretch OR Mould_Blow OR Mould_Hold) AND Master_Enable)` – a **plain coil, no FB**: an FB's `Enable` = `Master_Enable` would close the valve on E-stop, the opposite of what is wanted.
-- 7.2 **Mould toggle** (rule 11), one coil:
+- 7.2 **Mould toggle** (rule 11): first the edge `┤P Man_MouldClose├ → ( Mould_Click )` (moved here from stage 3), then one coil:
 
   ```
   Load_Mould := Manual_Entry OR NOT Master_Enable                (enter Manual or E-stop: copy the real position)
@@ -170,7 +169,7 @@ Section 7, in this order:
 
 - `Stop_Request := (Stop_Cmd OR Stop_Request) AND NOT (Oven_Idle AND Mould_Idle)`; go-to-0 rungs (rule 7): oven FEED → 0 at once; mould WAIT_PREFORM → 0 **only with `Oven_Idle`**; `NOT Stop_Request` in 10 → 15. No other step gets a Stop branch: the last preform is always blown and ejected.
 - `Bottle_Counter` (CTU, `CU := Bottle_Ejected`, `R := Count_Reset_Cmd`, `PV` 32767, `CV` → `BottleCount` %MW53).
-- `Feed_Empty_Timer` gets the step contact: `IN := Oven_Feed AND NOT Preform_At_Loader`; `Starved` (%MX3.6) := `Feed_Empty_Timer.Q AND Mould_WaitPreform`; `Alm_NoPreforms` (%MX5.0) := `Oven_Feed AND Hopper_Empty AND NOT Preform_At_Loader` (warning, not latched).
+- `Feed_Empty_Timer` (moved here from stage 3), directly above `Starved`: `IN := Oven_Feed AND NOT Preform_At_Loader`, `PT := StarvedDelay`; `Starved` (%MX3.6) := `Feed_Empty_Timer.Q AND Mould_WaitPreform`; `Alm_NoPreforms` (%MX5.0) := `Oven_Feed AND Hopper_Empty AND NOT Preform_At_Loader` (warning, not latched).
 - `State` (%MW50): mutually exclusive MOVE rungs in the priority of rule 8: Fault (`Oven_Fault`), Stopped (both idle, or Mode Stop / Manual), Blocked (`Outfeed_Full AND (Mould_Eject OR Oven_Feed)`), Starved, Running.
 
 **Test** (`test_blowmoulder_stop_state.py`): Stop in FEED with the mould idle → both 0 at once; Stop in HEAT → the preform is heated, handed over, blown, ejected, then both 0 (no new load); Stop in BLOW → the cycle finishes to 10, then 0; three `Bottle_Ejected` pulses → `BottleCount` +3, `Cmd` 4 → 0, `Cmd` 3 keeps it; no preform 1 s → State 1, 3 s with the mould waiting → 2, 3 s while a bottle is blown → 1; `Hopper_Empty` in FEED → `Alm_NoPreforms` follows the sensor; `Outfeed_Full` in EJECT → State 3, ejector off; Mode Stop / Manual → 0.

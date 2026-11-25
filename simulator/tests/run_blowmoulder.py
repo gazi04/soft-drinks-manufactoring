@@ -16,6 +16,7 @@ SCRIPTS = [
     Script("test_blowmoulder_stage0.py", "own Modbus port, %MX4 sensor byte, %MX7 alarm byte, %QW0 = HR 0, other PLCs' memory separate"),
     Script("test_blowmoulder_stage1.py", "defaults, Cmd 1-4 clear, heartbeat watchdog frozen at FALSE and TRUE"),
     Script("test_blowmoulder_values.py", "Oven_Ready window, OvenError, lamp P controller Lamp_Calc, DINT pressure scaling, Pressure_Reached, Pressure_Safe"),
+    Script("test_blowmoulder_conditioning.py", "Outfeed_Full filter on C1_Full: 2 s on, 3 s off, blinking ignored, works without Master_Enable"),
 ]
 
 if __name__ == "__main__":
