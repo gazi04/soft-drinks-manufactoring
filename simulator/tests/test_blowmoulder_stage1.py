@@ -141,7 +141,7 @@ def main() -> int:
         # B1 defaults
         values = dict(zip(DEFAULTS, read_hr(client, HR_SETPOINTS, len(DEFAULTS))))
         wrong = {n: v for n, v in values.items() if v != DEFAULTS[n]}
-        results.append(check("B1", not wrong, "all 4 defaults present" if not wrong else
+        results.append(check("B1", not wrong, f"all {len(DEFAULTS)} defaults present" if not wrong else
                              f"differ: {wrong} (changed since the upload? restart the PLC to re-run the first scan)"))
 
         # B2 a later write is kept
@@ -194,7 +194,7 @@ def main() -> int:
 
     passed = sum(results)
     print(f"\n{passed}/{len(results)} checks passed")
-    print("Debugger (127.0.0.4): force E_Stop_OK FALSE -> Master_Enable FALSE; then release all forces.")
+    print("Debugger (127.0.0.5): force E_Stop_OK FALSE -> Master_Enable FALSE; then release all forces.")
     return 0 if passed == len(results) else 1
 
 
@@ -202,5 +202,5 @@ if __name__ == "__main__":
     try:
         sys.exit(main())
     except ConnectionError as error:
-        raise SystemExit(f"Modbus connection dropped ({error}). Program uploaded and RUNNING on 127.0.0.4? "
+        raise SystemExit(f"Modbus connection dropped ({error}). Program uploaded and RUNNING on 127.0.0.5? "
                          "Without libplc_*.so the runtime starts no Modbus server.") from None
