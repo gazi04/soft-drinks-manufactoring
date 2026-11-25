@@ -3,6 +3,7 @@
     uv run python tests/run_blowmoulder.py              # all scripts
     uv run python tests/run_blowmoulder.py stage0       # only the scripts whose name contains "stage0"
     uv run python tests/run_blowmoulder.py --fail-fast  # stop at the first failing script
+    uv run python tests/run_blowmoulder.py --quick      # alarms without the 2 min blocked warning
     uv run python tests/run_blowmoulder.py --list       # show the list
 
 Stage 0 checks the other four PLCs (502, 5022, 5023, 5024) only when they are up and prints
@@ -22,6 +23,8 @@ SCRIPTS = [
     Script("test_blowmoulder_lamps.py", "LampPower %QW0 = Lamp_Calc only with Lamps_On, OvenMax interlock, 0 in Stop / Manual / E-stop / comm lost / FAULT"),
     Script("test_blowmoulder_outputs.py", "complete output set per step, exhaust normally open, mould seal-in held in every safe state, interlocks, Manual toggle and jog watchdog"),
     Script("test_blowmoulder_stop_state.py", "Stop at safe points of both stations, BottleCount with Cmd 4, Starved only in FEED with the mould waiting, Alm_NoPreforms, State 0/1/2/3/9"),
+    Script("test_blowmoulder_alarms.py", "timeouts -> FAULT (both 900, exhaust open, closed mould held), limit alarms in every mode, Reset only when the cause is gone, ejector jam only while pushing, blocked warning",
+           quick_args=("--quick",)),
 ]
 
 if __name__ == "__main__":

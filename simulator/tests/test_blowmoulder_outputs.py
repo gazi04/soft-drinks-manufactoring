@@ -14,7 +14,8 @@ Mould station, one bottle (the oven stays HOT: its preform is not taken out):
     Q9  ARM_BACK -> exhaust only   Q10 CLOSE -> MouldClose
     Q11 STRETCH -> MouldClose, StretchRod, PreBlowValve (exhaust SHUT)
     Q12 BLOW -> MouldClose, StretchRod, HighBlowValve     Q13 HOLD -> the same
-    Q14 HOLD at 40.0 bar (MaxPressure) -> HighBlowValve off
+    Q14 HOLD at 39.9 bar, just below MaxPressure -> HighBlowValve still on (40.0 bar trips Alm_OverPressure:
+        test_blowmoulder_alarms.py)
     Q15 EXHAUST -> MouldClose, StretchRod, ExhaustValve   Q16 ROD_UP -> MouldClose, ExhaustValve
     Q17 OPEN with 0.5 bar left -> MouldClose held        Q18 OPEN, 0.4 bar, rod down -> still held
     Q19 rod up -> the mould opens (MouldClose off)
@@ -59,7 +60,7 @@ COIL_MAN = {"feed": 8208, "loader": 8209, "arm": 8210, "gripper": 8211, "mould":
 COIL_JOG_BLOCK = 8218  # %MX3.2
 OUTPUTS = ["HopperFeed", "Loader", "ArmToMould", "Gripper", "MouldClose", "StretchRod", "PreBlowValve",
            "HighBlowValve", "ExhaustValve", "Ejector"]  # coils 0-9 (%QX0.0-0.7, %QX1.0-1.1)
-RAW_35_BAR, RAW_40_BAR, RAW_05_BAR, RAW_04_BAR = 24192, 27648, 400, 345
+RAW_35_BAR, RAW_399, RAW_05_BAR, RAW_04_BAR = 24192, 27579, 400, 345  # 27579 -> 399 = 39.9 bar
 EX = "ExhaustValve"
 OUTPUT_LAG = 0.1  # s: wait after a step change before reading the outputs (one scan lag, 20 ms task)
 
@@ -168,8 +169,8 @@ def main() -> int:
         at_mould("Q12", 50, {"MouldClose", "StretchRod", "HighBlowValve"}, "rod down -> BLOW")
         plc.write(HR_RAW, RAW_35_BAR)
         at_mould("Q13", 52, {"MouldClose", "StretchRod", "HighBlowValve"}, "35.0 bar -> HOLD")
-        plc.write(HR_RAW, RAW_40_BAR)
-        expect("Q14", {"MouldClose", "StretchRod"}, "HOLD at 40.0 bar (MaxPressure)", 0.15)
+        plc.write(HR_RAW, RAW_399)
+        expect("Q14", {"MouldClose", "StretchRod", "HighBlowValve"}, "HOLD at 39.9 bar (just below MaxPressure)", 0.15)
         plc.write(HR_RAW, RAW_35_BAR)
         at_mould("Q15", 60, {"MouldClose", "StretchRod", EX}, "HoldTime over -> EXHAUST")
         plc.write(HR_RAW, RAW_04_BAR)

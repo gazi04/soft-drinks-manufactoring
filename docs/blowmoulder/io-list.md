@@ -144,7 +144,7 @@ Manual buttons (hold-to-run, Manual mode only, interlocks still apply, jog watch
 | BlowPressure | INT (0.1 bar) | %MW41 | HR 1065 | Scaled pressure: `BlowPressure_Raw · 400 / 27648`, e.g. 24192 counts = 350 = 35.0 bar. **Computed in DINT** (`INT_TO_DINT`, `MUL`, `DIV`, `DINT_TO_INT`): 27648 · 400 overflows an INT (max 32767). Negative raw values give a negative pressure (only for the sensor alarm) |
 | OvenError | INT (0.1 °C) | %MW42 | HR 1066 | `OvenSetpoint − OvenTemp` (SUB), the P controller's input – for the HMI trend, shows the steady offset |
 
-Internal only (no address): step bits of both stations, output helpers (`Exhaust_Shut`, `Mould_Click`, `Load_Mould`, `Man_Mould_Closed`, `Close_Cmd`, `Open_Cmd`, `Open_OK`, `Below_MaxPress`, one `Req_*` per output), FB instances (`Mot_HopperFeed`, `Vlv_*`), timers (`Soak_Timer`, `Hold_Timer`, `Grip_Timer`, `Release_Timer`, the timeout TONs, filter TONs), `Bottle_Counter` (CTU behind `BottleCount`), edge bits, `Stop_Request`, the constants of `state-diagram.md`.
+Internal only (no address): step bits of both stations, output helpers (`Exhaust_Shut`, `Mould_Click`, `Load_Mould`, `Man_Mould_Closed`, `Close_Cmd`, `Open_Cmd`, `Open_OK`, `Below_MaxPress`, one `Req_*` per output), FB instances (`Mot_HopperFeed`, `Vlv_*`), timeout timers (`Load_TO`, `Swing_TO`, `Release_TO`, `ArmBack_TO`, `Eject_TO`, `Close_TO`, `Stretch_TO`, `RodUp_TO`, `Open_TO`, `Heat_TO`, `Blow_TO`, `Exhaust_TO`, `Blocked_TO`), `No_Fault`, `Both_Idle`, timers (`Soak_Timer`, `Hold_Timer`, `Grip_Timer`, `Release_Timer`, the timeout TONs, filter TONs), `Bottle_Counter` (CTU behind `BottleCount`), edge bits, `Stop_Request`, the constants of `state-diagram.md`.
 
 ## Animation data
 

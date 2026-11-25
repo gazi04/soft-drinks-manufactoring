@@ -50,6 +50,8 @@ HR_BLOW_SETPOINT = 1058  # %MW34
 HR_LAMP_CALC = 1064  # %MW40
 HR_BLOW_PRESSURE = 1065  # %MW41
 HR_OVEN_ERROR = 1066  # %MW42
+HR_CMD = 1024  # %MW0
+RESET = 3
 COIL_OVEN_READY = 8217  # %MX3.1
 COIL_PRESSURE_REACHED = 8220  # %MX3.4
 COIL_PRESSURE_SAFE = 8221  # %MX3.5
@@ -129,6 +131,10 @@ def main() -> int:
         for register, value in DEFAULTS.items():  # start from the defaults the expected values assume
             write(client, register, value)
         for name, (kind, address, steps) in CHECKS.items():
+            if name == "V8 Pressure_Safe":  # V6 latched Alm_PressureSensor (raw -2000): Reset first (stage 9)
+                write(client, HR_RAW, 0)
+                write(client, HR_CMD, RESET)
+                time.sleep(SETTLE)
             for writes, expected, note in steps:
                 for register, value in writes.items():
                     write(client, register, value)
@@ -143,6 +149,8 @@ def main() -> int:
             write(client, register, value)
         write(client, HR_OVEN_TEMP, 0)
         write(client, HR_RAW, 0)
+        time.sleep(SETTLE)
+        write(client, HR_CMD, RESET)  # clear the sensor alarm the wire-break values latched (stage 9)
         client.close()
 
     passed = sum(results)

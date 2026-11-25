@@ -277,20 +277,49 @@ Plan reviewed in three rounds (2026-11-25); 14 rungs.
 
 ## Stage 9 – Alarms and FAULT  *(week VII: timers as timeouts, week VIII: compare)*
 
-One TON per step (each restarts at its own step), `MoveTimeout` 3 s unless stated:
+Plan reviewed in three rounds (2026-11-25). Section 9 has 28 rungs, and the `Pressure_Safe` rung in section 2 is regenerated in place.
 
-- `Alm_HandlingJam` (%MX5.1): `Load_Timer` (`Oven_Load`), `Swing_Timer` (`Mould_Swing`), `Release_Timer` (`Mould_Release`), `ArmBack_Timer` (`Mould_ArmBack`), `Eject_Timer` (`Mould_Eject AND Ejector`: only while the ejector really pushes, not while C1 is full).
-- `Alm_OutfeedBlocked` (%MX5.2): `Blocked_Timer` (TON `BlockedWarn`, `IN := State = 3`) – warning, no FAULT.
-- `Alm_MouldFault` (%MX5.4): `Close_Timer` (`Mould_Closing`), `Stretch_Timer` (`Mould_Stretch`), `RodUp_Timer` (`Mould_RodUp`), `Open_Timer` (`Mould_Opening`).
-- `Alm_OvenOverTemp` (%MX5.5): `NOT Oven_BelowMax` → FAULT in every mode; Reset only below `OvenMax`.
-- `Alm_OvenHeatTimeout` (%MX5.6): `Heat_Timer` (TON `HeatTimeout` 15 s, `IN := Oven_Heat`).
-- `Alm_BlowFault` (%MX5.7): `Blow_Timer` (TON `BlowTimeout` 2 s, `IN := Mould_Blow`).
-- `Alm_ExhaustFault` (%MX7.0): `Exhaust_Timer` (TON `ExhaustTimeout` 3 s, `IN := Mould_Exhaust`); Reset only with `Pressure_Safe`.
-- `Alm_OverPressure` (%MX7.1): `NOT Below_MaxPress` → FAULT in every mode; Reset only below `MaxPressure`.
-- `Alm_PressureSensor` (%MX7.2): `NOT Press_Range_OK` → FAULT in every mode; Reset only with the raw value back in range. Then `Pressure_Safe` gets `NOT Alm_PressureSensor` (section 2 reads the alarm of the last scan – one scan late, harmless, the mould needs far longer to move).
-- Each FAULT alarm: (S) by its cause, (R) by `Reset_Cmd AND NOT cause`. `No_Fault` (De Morgan over the 9 FAULT bits; declared in stage 4 with initial TRUE, its contact is already in `Start_Accepted`, this stage adds only the rung that computes it), 900 → 0 for both with Auto + `Reset_Cmd`, last rung: `NOT No_Fault` → MOVE 900 → `Step` **and** MOVE 900 → `MouldStep` (last writer of both).
+- **One rung per step timeout:** `step bit → TON → (S) alarm` (the packer's pattern). The timeout timers carry the suffix **`_TO`**, because the draft's `Release_Timer` already exists as RELEASE's step time (stage 5) and `Open_Timer` is FB_Valve's internal name. `MoveTimeout` is 3 s unless stated otherwise.
+  - `Alm_HandlingJam` (%MX5.1): `Load_TO` (`Oven_Load`), `Swing_TO` (`Mould_Swing`), `Release_TO` (`Mould_Release`), `ArmBack_TO` (`Mould_ArmBack`), `Eject_TO` (`Mould_Eject AND Ejector`: only while the ejector really pushes, not while C1 is full).
+  - `Alm_MouldFault` (%MX5.4): `Close_TO`, `Stretch_TO`, `RodUp_TO`, `Open_TO`.
+  - `Alm_OvenHeatTimeout` (%MX5.6): `Heat_TO` (`HeatTimeout` 15 s).
+  - `Alm_BlowFault` (%MX5.7): `Blow_TO` (`BlowTimeout` 2 s).
+  - `Alm_ExhaustFault` (%MX7.0): `Exhaust_TO` (`ExhaustTimeout` 3 s).
+- **`Alm_OutfeedBlocked`** (%MX5.2), a warning (plain coil, no FAULT): `(Mould_Eject OR Oven_Feed) AND Outfeed_Full` (the State 3 condition) → `Blocked_TO` (`BlockedWarn` 2 min).
+- **Limit alarms, set in every mode:** `NOT Oven_BelowMax` → (S) `Alm_OvenOverTemp`; `NOT Below_MaxPress` → (S) `Alm_OverPressure`; `NOT Press_Range_OK` → (S) `Alm_PressureSensor`.
+- **Resets, one rung each:**
+  - Timeout alarms: `Reset_Cmd` alone, because at 900 every step bit is FALSE, so the cause is always gone.
+  - `Alm_ExhaustFault`: `Reset_Cmd AND Pressure_Safe`.
+  - `Alm_OvenOverTemp`: `Reset_Cmd AND Oven_BelowMax`.
+  - `Alm_OverPressure`: `Reset_Cmd AND Below_MaxPress`.
+  - `Alm_PressureSensor`: `Reset_Cmd AND Press_Range_OK`.
+  - An alarm can be reset in any mode; 900 → 0 needs Auto.
+- **`No_Fault`** = 8 NC contacts. The draft said 9; the FAULT bits are HandlingJam, MouldFault, OvenOverTemp, OvenHeatTimeout, BlowFault, ExhaustFault, OverPressure and PressureSensor, while `Alm_CommLost` works through `Master_Enable` and the two warnings never stop the machine. It was declared in stage 4 with initial TRUE, and its contact is already in `Start_Accepted`.
+- **`Seq_Enable AND Oven_Fault AND Reset_Cmd`** → MOVE 0 → both. Then the **last rung:** `NOT No_Fault` → MOVE 900 → `Step` and `MouldStep`, which also runs in Mode Stop and Manual. If a cause is still there, its alarm stays latched and the last rung puts 900 back in the same scan.
+- **`Pressure_Safe`** := `Press_Low AND Press_Range_OK AND NOT Alm_PressureSensor`. It reads last scan's alarm, which is harmless. Once the sensor failed, the mould stays closed until Reset.
+- **Earlier tests adapted to the timeouts:**
+  - `stop_state` T6 waits 2.5 s, not 3 s (`ExhaustTimeout`).
+  - `values` resets before V8 and at the end (V6's raw −2000 latches `Alm_PressureSensor`).
+  - `lamps` resets in Auto after L6 (130.0 °C latches `Alm_OvenOverTemp`).
+  - `outputs` Q14 checks 39.9 bar, where high blow stays on, because 40.0 bar is now a FAULT.
 
-**Test** (`test_blowmoulder_alarms.py`; `--quick` without the 2 min blocked warning): no alarm in a normal cycle; LOAD without `Preform_In_Oven` → FAULT after 3 s, both steps 900, all off, **exhaust open**; CLOSE without `Mould_Closed` → FAULT; HEAT at 900 → FAULT after 15 s, lamps 0; BLOW at raw 20000 → `Alm_BlowFault` after 2 s, **mould stays closed**, exhaust open; Reset → Start → 60 EXHAUST → open → eject; EXHAUST at raw 10000 → `Alm_ExhaustFault` after 3 s, Reset refused until raw ≤ 345 (`Pressure_Safe`); `OvenTemp` 1300 → FAULT also in Mode Stop; raw 27700 (> 400) → `Alm_OverPressure`; raw −2000 → `Alm_PressureSensor`, `Pressure_Safe` FALSE, mould closed, Reset refused until the raw value is back; EJECT with `Outfeed_Full` for 10 s → no jam (timer only with the ejector ON); State 3 for 2 min → warning, no FAULT. Earlier scripts adapted so no step lasts longer than its timeout.
+**Test** (`test_blowmoulder_alarms.py`, A1–A13, ~3 min; `--quick` ~70 s without A13):
+- **Timeouts:** each check sees no alarm shortly before the timeout and the alarm, 900 and State 9 after it.
+  - LOAD jam: only the exhaust is ON.
+  - Start is ignored in FAULT. Reset in Mode Stop clears the alarm, but the steps stay 900 until Auto + Reset; then Start runs again.
+  - CLOSE jam.
+  - HEAT 15 s with the lamps going 100 → 0.
+  - BLOW at 28.9 bar: the mould stays closed and the exhaust opens.
+  - Reset → Start → 60, then EXHAUST at 14.4 bar → `Alm_ExhaustFault`. Reset is refused under pressure and works at 0.4 bar.
+- **Limit alarms:** 130.0 °C in Mode Stop (Reset refused at 130.0, accepted at 129.9); 40.0 bar; raw −2000, after which `Pressure_Safe` stays FALSE with the sensor back until Reset.
+- **Not a fault:** C1 full for 10 s in EJECT → no jam, State 3. Blocked for 2 min → warning only, which clears when C1 frees.
+
+**Result 2026-11-25: 13/13 on the PLC**, `run_blowmoulder.py --quick` all 10 scripts passed (195 checks); stage 0's B6 now expects the latched `Alm_PressureSensor` after its raw −2000.
+
+**Checked offline before upload:**
+- 13/13, and every earlier test passes with its adaptation.
+- Four planted bugs are caught: `Eject_TO` without `Ejector`, the exhaust reset without `Pressure_Safe`, `Pressure_Safe` without the latched alarm, and `No_Fault` missing an alarm.
+- **Two conditions cannot be tested over Modbus:** the cause-gone condition on a *limit* alarm's reset, and the order "Reset 900 → 0 above MOVE 900". Without them the machine shows 0 for a single scan (20 ms) before the cause sets 900 again: the set rung runs every scan before the reset. They stay in the program to prevent that glitch.
 
 ## After stage 9
 

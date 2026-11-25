@@ -108,6 +108,8 @@ def main() -> int:
                              "(expected 76 / 0: Oven_BelowMax cuts the lamps although the controller still asks)"))
         for address, value in DEFAULTS.items():
             plc.write(address, value)
+        plc.write(HR_OVEN_TEMP, 200)
+        plc.cmd(RESET)  # 130.0 degC latched Alm_OvenOverTemp (stage 9): Reset in Auto clears it and 900 -> 0
 
         plc.mode(MODE_MANUAL)
         manual, _ = at(200)

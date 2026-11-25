@@ -8,7 +8,8 @@ receive the values. Checks:
     B3  BlowPressure_Raw (%MW13, HR 1037) holds a negative value (-2000): INT is signed
     B4  E_Stop_OK (%MX1.1, coil 8201) write sticks
     B5  C1_Full (%MX4.4, coil 8228) write sticks: the sensor byte %MX4 is inside mx_bits = 64
-    B6  Alm_PressureSensor (%MX7.2, coil 8250) can be read and is FALSE: the %MX7 alarm byte is served
+    B6  Alm_PressureSensor (%MX7.2, coil 8250) is served and TRUE: B3's raw -2000 is a wire break, the PLC
+        latches the alarm (since ladder stage 9; Reset with the raw value back at the end)
     B7  LampPower (%QW0) readable as holding register 0
     B8  (only with --qw0 and the stage 0 test rung E_Stop_OK -> MOVE 42 -> LampPower)
         E_Stop_OK FALSE, HR 0 written to 0 -> stays 0; E_Stop_OK TRUE -> HR 0 = 42.
@@ -37,6 +38,8 @@ OTHER_PLCS = {"B9": ("filler", 502), "B10": ("syrup room", 5022), "B11": ("label
 
 HR_LAMPPOWER = 0  # %QW0 (to be confirmed by B7/B8)
 HR_OVENTEMP = 1036  # %MW12
+HR_CMD = 1024  # %MW0
+RESET = 3
 HR_RAW = 1037  # %MW13
 HR_STEP = 1075  # %MW51
 HR_MOULDSTEP = 1076  # %MW52
@@ -129,8 +132,9 @@ def main() -> int:
         results.append(check("B4", estop, f"E_Stop_OK coil {COIL_ESTOP} = {estop} (wrote TRUE)"))
         results.append(check("B5", c1_full, f"C1_Full coil {COIL_C1_FULL} = {c1_full} (wrote TRUE)"))
         sensor_alarm = read_coil(bm, COIL_PRESSURE_SENSOR)
-        results.append(check("B6", not sensor_alarm,
-                             f"Alm_PressureSensor coil {COIL_PRESSURE_SENSOR} readable, = {sensor_alarm} (expected FALSE)"))
+        results.append(check("B6", sensor_alarm,
+                             f"Alm_PressureSensor coil {COIL_PRESSURE_SENSOR} readable, = {sensor_alarm} (expected TRUE: "
+                             f"raw {TEST_RAW} is a wire break, latched since stage 9)"))
         results.append(check("B7", True, f"LampPower %QW0 readable as HR {HR_LAMPPOWER} = {lamp_on}"))
         if qw0_rung:
             results.append(check("B8", lamp_off == 0 and lamp_on == MOVE_VALUE,
@@ -157,6 +161,8 @@ def main() -> int:
 
         bm.write_register(HR_OVENTEMP, 0)
         bm.write_register(HR_RAW, 0)
+        time.sleep(0.3)
+        bm.write_register(HR_CMD, RESET)  # clear Alm_PressureSensor (raw back in range) and leave no FAULT behind
         bm.write_coil(COIL_ESTOP, False)
         bm.write_coil(COIL_C1_FULL, False)
         results.append(check("B13", snapshot(bm) == (0, 0, False, False),

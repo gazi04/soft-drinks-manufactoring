@@ -10,7 +10,7 @@ State and Starved:
     T2  Auto, Start, no preform, mould waiting, 1 s -> State 1 Running, Starved FALSE (filter 2 s)
     T3  3 s -> Starved TRUE, State 2         T4  preform at the loader -> Starved FALSE, State 1
     T5  FEED + Hopper_Empty -> Alm_NoPreforms TRUE; hopper refilled -> FALSE (warning, not latched)
-    T6  no preform for 3 s while a bottle is blown (MouldStep 60) -> Starved FALSE, State 1
+    T6  no preform for 2.5 s while a bottle is blown (MouldStep 60) -> Starved FALSE, State 1
     T7  bottle waits in EJECT, C1 full -> State 3 Blocked, ejector off; C1 free -> ejector, bottle out -> 10
     T8  Step 900 (FAULT, written) -> State 9
     T9  HEAT 3 s, loader empty, mould waiting -> not Starved, State 1 (Feed_Empty_Timer only in FEED)
@@ -186,10 +186,10 @@ def main() -> int:
         plc.write(HR_RAW, RAW_35_BAR)
         plc.mode(MODE_AUTO)
         plc.cmd(START)
-        time.sleep(3.0)
+        time.sleep(2.5)  # > StarvedDelay 2 s, < ExhaustTimeout 3 s (stage 9)
         steps, starved, st = plc.steps(), plc.coil(COIL_STARVED), state()
         results.append(check("T6", steps == (10, 60) and not starved and st == 1,
-                             f"no preform 3 s while the mould blows (EXHAUST) -> steps {steps}, Starved {starved}, "
+                             f"no preform 2.5 s while the mould blows (EXHAUST) -> steps {steps}, Starved {starved}, "
                              f"State {st} (expected (10, 60) / False / 1)"))
         home()
         sensors(bottle=True, c1_full=True)
