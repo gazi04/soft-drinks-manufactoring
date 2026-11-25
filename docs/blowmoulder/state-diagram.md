@@ -191,7 +191,7 @@ Loader, arm, rod and ejector are **spring-return** (single-acting cylinders): th
 ExhaustValve := NOT ((Mould_Stretch OR Mould_Blow OR Mould_Hold) AND Master_Enable)
 ```
 
-The exhaust is closed only in the three steps that build pressure; in **every other case** – IDLE, Manual, Mode Stop, FAULT, E-stop, comm lost – it is open (answer 2). This is how a real machine uses a **normally-open** exhaust valve: lose the PLC, lose the air, and the bottle vents by itself. Because this rung does **not** go through `Master_Enable` like every other output, it is the one output ON in a safe state. High blow and exhaust are never open together (interlock, rule 10).
+The exhaust is closed only in the three steps that build pressure; in **every other case** – IDLE, Manual, Mode Stop, FAULT, E-stop, comm lost – it is open (answer 2). This is how a real machine uses a **normally-open** exhaust valve: lose the PLC, lose the air, and the bottle vents by itself. Because this rung does **not** go through `Master_Enable` like every other output, it is the one output ON in a safe state. In the ladder it is two rungs (stage 7): `(Mould_Stretch OR Mould_Blow OR Mould_Hold) AND Master_Enable → Exhaust_Shut`, then `NOT Exhaust_Shut → ExhaustValve`. High blow and exhaust are never open together (interlock, rule 10).
 
 ### 4. The mould never opens under pressure: a seal-in on the output
 

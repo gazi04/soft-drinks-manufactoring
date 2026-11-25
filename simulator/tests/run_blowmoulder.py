@@ -20,6 +20,7 @@ SCRIPTS = [
     Script("test_blowmoulder_oven_seq.py", "oven station 10 -> 15 -> 20 -> 25 -> 10, soak restart, Lamps_On, Start by sensors, abort keeps FAULT"),
     Script("test_blowmoulder_mould_seq.py", "mould station 10 -> ... -> 80 -> 10, hand-over guards, GRIP / HOLD times, BLOW and EXHAUST pressures, both stations in parallel, restart by sensors"),
     Script("test_blowmoulder_lamps.py", "LampPower %QW0 = Lamp_Calc only with Lamps_On, OvenMax interlock, 0 in Stop / Manual / E-stop / comm lost / FAULT"),
+    Script("test_blowmoulder_outputs.py", "complete output set per step, exhaust normally open, mould seal-in held in every safe state, interlocks, Manual toggle and jog watchdog"),
 ]
 
 if __name__ == "__main__":

@@ -28,7 +28,7 @@ main
  ├─ 4  Step decode             (Step -> Oven_Idle ... Oven_Fault; MouldStep -> Mould_Idle ... Mould_Fault; Seq_Enable, Lamps_On)
  ├─ 5  Done bits and timers    (Soak_Timer -> Preform_Hot, Grip_Timer, Release_Timer, Hold_Timer)
  ├─ 6  Sequencer transitions   (abort, Start of both, oven station, mould station; Stop_Request in stage 8)
- ├─ 7  Outputs                 (jog watchdog, LampPower, exhaust, mould seal-in + manual toggle, request rungs, interlocks, FBs)
+ ├─ 7  Outputs                 (LampPower, jog watchdog, exhaust, mould toggle + seal-in, request rungs, interlocks, FBs)
  ├─ 8  Counter and status      (BottleCount with Cmd 4 reset, Starved, Alm_NoPreforms, State)
  └─ 9  Alarms                  (timeouts, limits, sensor check, latches, reset, MOVE 900 last)
 Function blocks: FB_Motor, FB_Valve (copied from plcs/packer/)
@@ -173,41 +173,63 @@ Plan reviewed in three rounds (2026-11-25). Section 7 starts here: a header and 
 
 ## Stage 7 – Outputs and interlocks  *(weeks III, IV, VI, IX: seal-in, interlocks, FBs, toggle)*
 
-Section 7, below the lamp rungs of stage 6, in this order:
+Plan reviewed in three rounds (2026-11-25). There are 22 rungs: one in section 2 (`Below_MaxPress`, LT, after `Pressure_Safe`) and 21 in section 7 below the lamps, in this order.
 
-- 7.0 **Jog watchdog** (`Jog_TON` 10 s on any of the six hold-to-run `Man_*`, **not** `Man_MouldClose`; `Jog_Block` %MX3.2).
-- 7.1 **Exhaust, normally open** (rule 3): `ExhaustValve := NOT ((Mould_Stretch OR Mould_Blow OR Mould_Hold) AND Master_Enable)` – a **plain coil, no FB**: an FB's `Enable` = `Master_Enable` would close the valve on E-stop, the opposite of what is wanted.
-- 7.2 **Mould toggle** (rule 11): first the edge `┤P Man_MouldClose├ → ( Mould_Click )` (moved here from stage 3), then one coil:
-
-  ```
-  Load_Mould := Manual_Entry OR NOT Master_Enable                (enter Manual or E-stop: copy the real position)
-  Man_Mould_Closed := Mode_Manual AND ( (Load_Mould AND Mould_Closed)
-                                     OR (NOT Load_Mould AND (Man_Mould_Closed XOR Mould_Click)) )
-  ```
-
-  `XOR` with the click flips the latch on each rising edge and keeps it otherwise (two branches: `Man_Mould_Closed AND NOT Mould_Click` / `NOT Man_Mould_Closed AND Mould_Click`). Reloading it during an E-stop means that the release never moves the mould.
-- 7.3 **Mould seal-in** (rule 4), a **plain coil, no FB** (an FB would drop it with `Enable`):
+- 7.0 **Jog watchdog:** `Jog_TON` 10 s on the OR of the six hold-to-run `Man_*` → (S) `Jog_Block` (%MX3.2). All six released → (R) `Jog_Block`. **`Man_MouldClose` is not in the list:** it is a toggle click, and the mould is a position, not a motion.
+- 7.1 **Exhaust, normally open (rule 3)**, built as two plain rungs because no proven negated-coil template exists:
+  - `(Mould_Stretch OR Mould_Blow OR Mould_Hold) AND Master_Enable` → `Exhaust_Shut`;
+  - `NOT Exhaust_Shut` → `ExhaustValve`.
+  This is the same logic as `NOT(...)`, with `Exhaust_Shut` visible in the debugger. There is **no FB**: its `Enable` = `Master_Enable` would shut the valve on E-stop.
+- 7.2 **Mould toggle (rule 11), 3 rungs:**
+  - `┤P Man_MouldClose├ → Mould_Click` (moved here from stage 3);
+  - `Load_Mould := Manual_Entry OR NOT Master_Enable`;
+  - `Man_Mould_Closed := Mode_Manual AND ((Load_Mould AND Mould_Closed) OR (NOT Load_Mould AND Man_Mould_Closed AND NOT Mould_Click) OR (NOT Load_Mould AND NOT Man_Mould_Closed AND Mould_Click))`. The XOR is written as two branches.
+- 7.3 **Mould seal-in (rule 4), 4 rungs, a plain coil and no FB:**
 
   ```
-  Close_Cmd  := Master_Enable AND ((Seq_Enable AND Mould_CloseSteps) OR (Mode_Manual AND Man_Mould_Closed))
-                AND Arm_At_Oven AND NOT Ejector
-  Open_Cmd   := Master_Enable AND ((Seq_Enable AND NOT Mould_CloseSteps AND NOT Mould_Fault AND NOT Mould_Idle)
-                                   OR (Mode_Manual AND NOT Man_Mould_Closed))
-  MouldClose := (Close_Cmd OR (MouldClose AND Mould_Closed)) AND NOT (Open_Cmd AND Pressure_Safe AND Rod_Up)
+  Close_Cmd  := ((Seq_Enable AND Mould_CloseSteps) OR (Mode_Manual AND Man_Mould_Closed)) AND Master_Enable AND Arm_At_Oven AND NOT Ejector
+  Open_Cmd   := ((Seq_Enable AND NOT Mould_CloseSteps AND NOT Mould_Idle AND NOT Mould_Fault) OR (Mode_Manual AND NOT Man_Mould_Closed)) AND Master_Enable
+  Open_OK    := Open_Cmd AND Pressure_Safe AND Rod_Up          (own coil: keeps the seal-in rung readable)
+  MouldClose := (Close_Cmd OR (MouldClose AND Mould_Closed)) AND NOT Open_OK
   ```
 
-- 7.4 **Request rungs** (every Auto branch with `Seq_Enable`, every Manual branch `Mode_Manual AND Man_… AND NOT Jog_Block`, interlocks in series after the OR; table in `state-diagram.md` rule 10):
+- 7.4 **Request rungs:** every Auto branch has `Seq_Enable` and every Manual branch is `Mode_Manual AND Man_… AND NOT Jog_Block`; the interlocks come in series after the OR (`state-diagram.md` rule 10).
   - `Req_HopperFeed := (Oven_Feed AND NOT Preform_At_Loader) OR Manual`
   - `Req_Loader := (Oven_Load OR Manual) AND NOT Preform_In_Oven AND NOT Gripper`
   - `Req_Gripper := Mould_Grip OR Mould_Swing OR Manual`
   - `Req_Arm := (Mould_Swing OR Mould_Release OR Manual) AND Mould_Open AND Rod_Up AND NOT Ejector`
   - `Req_Rod := (Mould_Stretch OR Mould_Blow OR Mould_Hold OR Mould_Exhaust OR Manual) AND Mould_Closed`
-  - `Req_PreBlow := Mould_Stretch AND Mould_Closed` (no Manual branch)
-  - `Req_HighBlow := (Mould_Blow OR Mould_Hold) AND Mould_Closed AND NOT ExhaustValve AND BlowPressure < MaxPressure` (no Manual branch; the `LT` goes into a helper `Below_MaxPress` in section 2)
+  - `Req_PreBlow := Seq_Enable AND Mould_Stretch AND Mould_Closed` (no Manual branch)
+  - `Req_HighBlow := (Mould_Blow OR Mould_Hold) AND Mould_Closed AND NOT ExhaustValve AND Below_MaxPress` (no Manual branch)
   - `Req_Ejector := (Mould_Eject OR Manual) AND Mould_Open AND Arm_At_Oven AND NOT Outfeed_Full`
-- 7.5 **FB instances**, `Enable` = `Master_Enable`, one writer per `%QX`: FB_Motor `Mot_HopperFeed`; FB_Valve `Vlv_Loader`, `Vlv_Arm`, `Vlv_Gripper`, `Vlv_Rod`, `Vlv_PreBlow`, `Vlv_HighBlow`, `Vlv_Ejector`. `ExhaustValve` and `MouldClose` are the two plain coils of 7.1 and 7.3.
+- 7.5 **FB instances**, 2 chained rungs, `Enable` = `Master_Enable`, one writer per `%QX`:
+  - FB_Motor `Mot_HopperFeed`;
+  - FB_Valve `Vlv_Loader`, `Vlv_Arm`, `Vlv_Gripper`, `Vlv_Rod`, `Vlv_PreBlow`, `Vlv_HighBlow`, `Vlv_Ejector`.
 
-**Test** (`test_blowmoulder_outputs.py`): each step of both stations switches exactly its outputs (one preform and one bottle driven through by writing the sensors); exhaust ON in IDLE, Manual, FAULT (written 900 is not possible: test with E-stop and Mode Stop), OFF only in 40 / 50 / 52; **mould stays closed** with Mode Stop and with E-stop during HOLD; a mould still closing (not `Mould_Closed`) drops on E-stop; mould does not open at raw 400 (0.5 bar) or with the rod down, opens at raw 345 (0.4 bar) with the rod up; high blow never with the exhaust open; ejector held off with `Outfeed_Full`. **Manual:** click *Mould* → closes, click again → opens; enter Manual with the mould closed → stays closed (latch loaded); E-stop and release in Manual → no motion; rod only with the mould closed; arm only into an open mould with the rod up; no button for the blow valves; button held 11 s → `Jog_Block`, the mould latch untouched.
+  Interlocks that read another output (`NOT Gripper`, `NOT Ejector`) see last scan's value, as in the packer.
+
+**Test** (`test_blowmoulder_outputs.py`, Q1–Q41, ~70 s). Every check compares the **complete set** of the ten digital outputs that are ON.
+- Mode Stop / Auto IDLE → only the exhaust.
+- FEED, LOAD, HEAT.
+- Every mould step from GRIP to EJECT, with the exhaust shut only in STRETCH / BLOW / HOLD.
+- High blow off at 40.0 bar.
+- The mould held in OPEN with 0.5 bar left, and with the rod down; it opens with 0.4 bar and the rod up.
+- Ejector held off while C1 is full.
+- Mould held in HOLD on Mode Stop and on E-stop; held in Auto IDLE **with 0 bar and the rod up** (only `NOT Mould_Idle` keeps it closed there); a closing mould drops on E-stop.
+- **Manual:**
+  - entering Manual keeps the mould where it is;
+  - rod only with the mould closed; arm only into an open mould with the rod up;
+  - ejector, hopper, loader (blocked by a preform in the pocket and by the closed gripper);
+  - the toggle opens and closes the mould;
+  - E-stop and release move nothing, open or closed;
+  - a button held 11 s sets `Jog_Block` and leaves the mould alone.
+
+**Result 2026-11-25: 41/41 on the PLC** after one test fix: the outputs follow a step change one scan later, because section 7 still uses the step bits decoded at the top of the scan in which section 6 moved the step. The test now waits 0.1 s after each step change before it reads the outputs (the first PLC run read inside that scan: 31/41).
+
+**Checked offline before upload:**
+- Every OR rung matches its formula for every input combination: 11 rungs, 1,816 cases, 0 wrong.
+- The test passes 41/41, and all earlier tests still pass.
+- Ten planted bugs are each caught. The first draft missed "`Open_Cmd` without `NOT Mould_Idle`", because Q24 ran with 35 bar, which blocked the opening anyway. Q24 now runs with 0 bar and the rod up.
 
 ## Stage 8 – Stop, counter, State  *(weeks IV, VII: latch, CTU)*
 
