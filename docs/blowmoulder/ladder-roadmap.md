@@ -233,12 +233,47 @@ Plan reviewed in three rounds (2026-11-25). There are 22 rungs: one in section 2
 
 ## Stage 8 – Stop, counter, State  *(weeks IV, VII: latch, CTU)*
 
-- `Stop_Request := (Stop_Cmd OR Stop_Request) AND NOT (Oven_Idle AND Mould_Idle)` (declared in stage 4, where 10 → 15 already reads `NOT Stop_Request`); go-to-0 rungs (rule 7): oven FEED → 0 at once; mould WAIT_PREFORM → 0 **only with `Oven_Idle`**; `NOT Stop_Request` in 10 → 15. No other step gets a Stop branch: the last preform is always blown and ejected.
-- `Bottle_Counter` (CTU, `CU := Bottle_Ejected`, `R := Count_Reset_Cmd`, `PV` 32767, `CV` → `BottleCount` %MW53).
-- `Feed_Empty_Timer` (moved here from stage 3), directly above `Starved`: `IN := Oven_Feed AND NOT Preform_At_Loader`, `PT := StarvedDelay`; `Starved` (%MX3.6) := `Feed_Empty_Timer.Q AND Mould_WaitPreform`; `Alm_NoPreforms` (%MX5.0) := `Oven_Feed AND Hopper_Empty AND NOT Preform_At_Loader` (warning, not latched).
-- `State` (%MW50): mutually exclusive MOVE rungs in the priority of rule 8: Fault (`Oven_Fault`), Stopped (both idle, or Mode Stop / Manual), Blocked (`Outfeed_Full AND (Mould_Eject OR Oven_Feed)`), Starved, Running.
+Plan reviewed in three rounds (2026-11-25); 14 rungs.
 
-**Test** (`test_blowmoulder_stop_state.py`): Stop in FEED with the mould idle → both 0 at once; Stop in HEAT → the preform is heated, handed over, blown, ejected, then both 0 (no new load); Stop in BLOW → the cycle finishes to 10, then 0; three `Bottle_Ejected` pulses → `BottleCount` +3, `Cmd` 4 → 0, `Cmd` 3 keeps it; no preform 1 s → State 1, 3 s with the mould waiting → 2, 3 s while a bottle is blown → 1; `Hopper_Empty` in FEED → `Alm_NoPreforms` follows the sensor; `Outfeed_Full` in EJECT → State 3, ejector off; Mode Stop / Manual → 0.
+- **Section 4:** `Both_Idle := Oven_Idle AND Mould_Idle` (the packer's pattern). The latch's `NOT (Oven_Idle AND Mould_Idle)` would otherwise need an OR branch (De Morgan), and `State` uses the same bit.
+- **Section 6, right after Start 4/4 and before the transitions:**
+  - `Stop_Request := (Stop_Cmd OR Stop_Request) AND NOT Both_Idle` (declared in stage 4; 10 → 15 already reads `NOT Stop_Request`);
+  - stop 1/2: `Seq_Enable AND Oven_Feed AND Stop_Request` → `Step` := 0;
+  - stop 2/2: `Seq_Enable AND Mould_WaitPreform AND Oven_Idle AND Stop_Request` → `MouldStep` := 0.
+
+  No other step gets a Stop branch, and the mould's 10 → 20 does **not** read `Stop_Request`: a hot preform is always taken, blown and ejected.
+- **Section 8 (new, at the end):**
+  - `Bottle_Counter`: the packer's `Pack_Counter` rung cloned (CTU, `CU := Bottle_Ejected`, `R := Count_Reset_Cmd`, PV 32767, `CV` → `BottleCount`);
+  - `Feed_Empty_Timer := TON(Oven_Feed AND NOT Preform_At_Loader, StarvedDelay)` (moved here from stage 3);
+  - `Starved := Feed_Empty_Timer.Q AND Mould_WaitPreform`;
+  - `Alm_NoPreforms := Oven_Feed AND Hopper_Empty AND NOT Preform_At_Loader` (warning, not latched);
+  - `State` as **default, then override in rising priority**: MOVE 1 always; `Starved` → 2; `Outfeed_Full AND (Mould_Eject OR Oven_Feed)` → 3; `Both_Idle` → 0; `Oven_Fault` → 9 last. This is the same pattern as the lamps and Start, and needs no NOT contacts of the higher priorities. Modbus sees only the value at the end of the scan. Stopped = `Both_Idle` also covers Mode Stop and Manual, because the abort keeps both at 0 there (in FAULT, 9 wins).
+
+**Test** (`test_blowmoulder_stop_state.py`, C1–C3, T1–T10, P1–P5, ~80 s):
+- **Counter:** +3 on three pulses; `Cmd` 3 keeps it; `Cmd` 4 → 0.
+- **State and alarms:**
+  - State 0 in Mode Stop.
+  - No preform 1 s → 1; 3 s with the mould waiting → Starved, 2; preform → 1.
+  - `Alm_NoPreforms` follows the hopper sensor.
+  - Not Starved while the mould blows.
+  - **Not Starved in HEAT** with an empty loader (the reason for the `Oven_Feed` contact).
+  - Bottle in EJECT with C1 full → 3, ejector off, then ejected.
+  - **Starved AND Blocked → 3** (priority).
+  - 900 → 9.
+- **Stop:**
+  - Stop in IDLE leaves no latch.
+  - Stop in FEED → both 0.
+  - Stop in HEAT (with a new preform already at the loader): heated, handed over, blown, ejected, and the waiting preform is not loaded → both 0.
+  - Restart after a Stop works (latch released).
+  - Stop in EXHAUST: the oven stops at once, the mould finishes its cycle.
+
+**Result 2026-11-25: 18/18 on the PLC** (regression outputs 41/41, mould_seq 29/29, oven_seq 18/18). Checked offline before upload: 18/18, all earlier tests unchanged. Six planted bugs are each caught by their own check:
+- latch never released;
+- mould stop without `Oven_Idle`;
+- timer without `Oven_Feed`;
+- Starved without the mould waiting;
+- Blocked without the FEED branch;
+- Starved / Blocked priority swapped.
 
 ## Stage 9 – Alarms and FAULT  *(week VII: timers as timeouts, week VIII: compare)*
 
