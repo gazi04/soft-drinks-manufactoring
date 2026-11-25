@@ -150,21 +150,30 @@ The sensors are written in order: the one that blocks a transition comes first. 
 
 ## Stage 6 – The lamps: P controller on the analog output  *(week VIII: math, analog output)*
 
-Rung in section 7, above the other outputs (`state-diagram.md` rule 5):
+Plan reviewed in three rounds (2026-11-25). Section 7 starts here: a header and two rungs, above every other output (`state-diagram.md` rule 5):
 
 ```
-──┤ Lamps_On ├──┤ Oven_BelowMax ├────────────────────[MOVE Lamp_Calc → LampPower]──
-──┤/ Lamps_On ├──────────────────┬───────────────────[MOVE 0 → LampPower]──
-──┤/ Oven_BelowMax ├─────────────┘
+────────────────────────────────────────────────────[MOVE 0 → LampPower]──          (safe default, every scan)
+──┤ Lamps_On ├──┤ Oven_BelowMax ├───────────────────[MOVE Lamp_Calc → LampPower]──  (overwrites it)
 ```
 
-Two MOVE rungs with opposite conditions, so `%QW0` has exactly one value per scan. No FB: an analog value has no run hours and no feedback.
+- **Safe default, then override.** The roadmap draft had two rungs with opposite conditions, and the 0 rung needed an OR branch (`NOT Lamps_On OR NOT Oven_BelowMax`). Now rung 1 writes 0 in every scan and rung 2 writes `Lamp_Calc` when every permissive is TRUE. Within one scan the last write wins, and %QW0 is copied to the output only at the end of the scan, so the lamps never see the 0 in between. If nothing else is written, the lamps are off (fail-safe). This is the same pattern as the Start rungs of stage 4.
+- The PLC owns %QW0: a Modbus write to HR 0 is overwritten in the next scan.
+- No FB: an analog value has no feedback and no run hours.
 
-**Test** (`test_blowmoulder_lamps.py`, reads HR 0): Mode Stop → 0; Auto without a preform → 0; Auto + `Preform_In_Oven`, `OvenTemp` 200 → 100; 1030 → 20; 1050 → 0; `Bias` 30 at 1050 → 30; **steady offset demo:** with `Bias` 0 the power at 1047 is 30 (3 °C below the setpoint gives the 30 % a hot preform needs); `OvenTemp` 1300 → 0 (`OvenMax`); Manual → 0; E-stop → 0.
+**Test** (`test_blowmoulder_lamps.py`, L1–L10, ~25 s, reads HR 0; Mode Auto without Start, `Lamps_On` already in IDLE):
+- Mode Stop → 0, and HR 0 written 77 → 0 again.
+- Auto without a preform → 0.
+- Auto + preform, with `LampPower` = `Lamp_Calc`: 200 → 100; 1030 → 20; **1020 → 30** (3 °C below the setpoint gives the 30 % a P controller needs, the steady offset; the draft's "1047 → 30" was wrong: 1047 is 0.3 °C below → 3 %); 1050 → 0; 1080 → 0.
+- `Bias` 30 at 1050 → 30.
+- **`OvenMax` interlock proven:** Kp 1, Bias 100 → 1299 gives 76, 1300 gives 0 while `Lamp_Calc` is still 75. With Kp 10 the controller alone is already at 0 there, so it would not prove the interlock.
+- Manual → 0; E-stop → 0; heartbeat frozen (`Alm_CommLost`) → 0, back + Reset → 100; Step 900 → 0.
+
+**Result 2026-11-25: 14/14 on the PLC.** Checked offline before upload: 14/14, all earlier blow moulder tests still pass. Three planted bugs fail the matching checks: no `Oven_BelowMax`, `Seq_Enable` instead of `Lamps_On`, and the default rung below the override.
 
 ## Stage 7 – Outputs and interlocks  *(weeks III, IV, VI, IX: seal-in, interlocks, FBs, toggle)*
 
-Section 7, in this order:
+Section 7, below the lamp rungs of stage 6, in this order:
 
 - 7.0 **Jog watchdog** (`Jog_TON` 10 s on any of the six hold-to-run `Man_*`, **not** `Man_MouldClose`; `Jog_Block` %MX3.2).
 - 7.1 **Exhaust, normally open** (rule 3): `ExhaustValve := NOT ((Mould_Stretch OR Mould_Blow OR Mould_Hold) AND Master_Enable)` – a **plain coil, no FB**: an FB's `Enable` = `Master_Enable` would close the valve on E-stop, the opposite of what is wanted.

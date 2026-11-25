@@ -85291,6 +85291,1918 @@ PROGRAM main
           "targetHandle": "right-rail"
         }
       ]
+    },
+    {
+      "id": "rung_main_083011ea-b0be-436b-960a-57423e79e246",
+      "comment": "SECTION 7 OUTPUTS. The lamps first (analog output %QW0); jog watchdog, exhaust, mould seal-in, mould toggle, request rungs, interlocks and FB instances follow in stage 7. (Header rung, no logic)",
+      "defaultBounds": [
+        300,
+        100
+      ],
+      "reactFlowViewport": [
+        303,
+        120
+      ],
+      "nodes": [
+        {
+          "id": "left-rail-rung_main_083011ea-b0be-436b-960a-57423e79e246",
+          "type": "powerRail",
+          "position": {
+            "x": 0,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 3,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "left-rail",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "right": -3
+              }
+            },
+            "numericId": "6975158",
+            "variant": "left",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "right-rail-rung_main_083011ea-b0be-436b-960a-57423e79e246",
+          "type": "powerRail",
+          "position": {
+            "x": 300,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 297,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 297,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 297,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "right-rail",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "left": -3
+              }
+            },
+            "numericId": "2247370",
+            "variant": "right",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_left-rail-rung_main_083011ea-b0be-436b-960a-57423e79e246_right-rail-rung_main_083011ea-b0be-436b-960a-57423e79e246",
+          "source": "left-rail-rung_main_083011ea-b0be-436b-960a-57423e79e246",
+          "target": "right-rail-rung_main_083011ea-b0be-436b-960a-57423e79e246",
+          "sourceHandle": "left-rail",
+          "targetHandle": "right-rail",
+          "type": "smoothstep"
+        }
+      ],
+      "selectedNodes": [],
+      "handleBranches": []
+    },
+    {
+      "id": "rung_main_2a0eaf52-94ee-4357-a022-5b5d06170b90",
+      "comment": "Lamps 1/2, safe default: LampPower := 0 in every scan (no contact). The rung below overwrites it only when every permissive is TRUE; within one scan the LAST write wins and %QW0 is copied to the output only at the end of the scan, so the lamps never see this 0 while they are on. Nothing written = lamps off (fail-safe). The PLC owns %QW0: a Modbus write is overwritten",
+      "defaultBounds": [
+        300,
+        100
+      ],
+      "reactFlowViewport": [
+        484,
+        134
+      ],
+      "selectedNodes": [],
+      "handleBranches": [],
+      "nodes": [
+        {
+          "id": "left-rail-rung_main_2a0eaf52-94ee-4357-a022-5b5d06170b90",
+          "type": "powerRail",
+          "position": {
+            "x": 0,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 3,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "left-rail",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "right": -3
+              }
+            },
+            "numericId": "4718018",
+            "variant": "left",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "BLOCK_1ba60ec5-185b-497c-b119-178dbe087736",
+          "type": "block",
+          "position": {
+            "x": 143,
+            "y": 14
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 36
+                },
+                "id": "EN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 76
+                },
+                "id": "IN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 221,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 78,
+                  "y": 36
+                },
+                "id": "ENO",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 221,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 78,
+                  "y": 76
+                },
+                "id": "OUT",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "right": 0
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 36
+                },
+                "id": "EN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 143,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 76
+                },
+                "id": "IN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "left": 0
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 221,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 78,
+                  "y": 36
+                },
+                "id": "ENO",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 221,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 78,
+                  "y": 76
+                },
+                "id": "OUT",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "right": 0
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 143,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 36
+              },
+              "id": "EN",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 36,
+                "left": 0
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 221,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 78,
+                "y": 36
+              },
+              "id": "ENO",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 36,
+                "right": 0
+              }
+            },
+            "numericId": "1180624",
+            "variant": {
+              "name": "MOVE",
+              "type": "function",
+              "language": "st",
+              "variables": [
+                {
+                  "name": "EN",
+                  "class": "input",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "ENO",
+                  "class": "output",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "OUT",
+                  "class": "output",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "ANY"
+                  }
+                },
+                {
+                  "name": "IN",
+                  "class": "input",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "ANY"
+                  }
+                }
+              ],
+              "body": "",
+              "documentation": "",
+              "extensible": false,
+              "category": "Selection"
+            },
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "executionControl": true,
+            "lockExecutionControl": false,
+            "connectedVariables": [
+              {
+                "handleId": "IN",
+                "type": "input",
+                "variable": {
+                  "name": "0"
+                }
+              },
+              {
+                "handleId": "OUT",
+                "type": "output",
+                "variable": {
+                  "id": "",
+                  "name": "LampPower",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "INT"
+                  },
+                  "class": "local",
+                  "location": "%QW0",
+                  "documentation": "Analog output: IR lamp power 0-100 % (P controller)",
+                  "debug": false
+                }
+              }
+            ],
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 78,
+          "height": 100,
+          "measured": {
+            "width": 78,
+            "height": 100
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "right-rail-rung_main_2a0eaf52-94ee-4357-a022-5b5d06170b90",
+          "type": "powerRail",
+          "position": {
+            "x": 481,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 484,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 484,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 484,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "right-rail",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "left": -3
+              }
+            },
+            "numericId": "1012672",
+            "variant": "right",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_f537d623-8dc7-48c1-8207-e9de64a1e720",
+          "type": "variable",
+          "position": {
+            "x": 33,
+            "y": 74
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 113,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 113,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 113,
+                "y": 90
+              },
+              "relPosition": {
+                "x": 80,
+                "y": 16
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source"
+            },
+            "numericId": "8047275",
+            "variable": {
+              "name": "0"
+            },
+            "executionOrder": 0,
+            "variant": "input",
+            "block": {
+              "id": "BLOCK_1ba60ec5-185b-497c-b119-178dbe087736",
+              "handleId": "IN",
+              "variableType": {
+                "name": "IN",
+                "class": "input",
+                "type": {
+                  "definition": "generic-type",
+                  "value": "ANY"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_6bdef013-fafe-4cd5-91a5-157d23ed6579",
+          "type": "variable",
+          "position": {
+            "x": 251,
+            "y": 74
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 251,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 251,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 251,
+                "y": 90
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 16
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target"
+            },
+            "numericId": "1213676",
+            "variable": {
+              "id": "",
+              "name": "LampPower",
+              "type": {
+                "definition": "base-type",
+                "value": "INT"
+              },
+              "class": "local",
+              "location": "%QW0",
+              "documentation": "Analog output: IR lamp power 0-100 % (P controller)",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "output",
+            "block": {
+              "id": "BLOCK_1ba60ec5-185b-497c-b119-178dbe087736",
+              "handleId": "OUT",
+              "variableType": {
+                "name": "OUT",
+                "class": "output",
+                "type": {
+                  "definition": "generic-type",
+                  "value": "ANY"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_left-rail-rung_main_2a0eaf52-94ee-4357-a022-5b5d06170b90_BLOCK_1ba60ec5-185b-497c-b119-178dbe087736__left-rail_EN",
+          "source": "left-rail-rung_main_2a0eaf52-94ee-4357-a022-5b5d06170b90",
+          "target": "BLOCK_1ba60ec5-185b-497c-b119-178dbe087736",
+          "sourceHandle": "left-rail",
+          "targetHandle": "EN"
+        },
+        {
+          "id": "e_VARIABLE_f537d623-8dc7-48c1-8207-e9de64a1e720_BLOCK_1ba60ec5-185b-497c-b119-178dbe087736__output_IN",
+          "source": "VARIABLE_f537d623-8dc7-48c1-8207-e9de64a1e720",
+          "target": "BLOCK_1ba60ec5-185b-497c-b119-178dbe087736",
+          "sourceHandle": "output",
+          "targetHandle": "IN"
+        },
+        {
+          "id": "e_BLOCK_1ba60ec5-185b-497c-b119-178dbe087736_VARIABLE_6bdef013-fafe-4cd5-91a5-157d23ed6579__OUT_input",
+          "source": "BLOCK_1ba60ec5-185b-497c-b119-178dbe087736",
+          "target": "VARIABLE_6bdef013-fafe-4cd5-91a5-157d23ed6579",
+          "sourceHandle": "OUT",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_BLOCK_1ba60ec5-185b-497c-b119-178dbe087736_right-rail-rung_main_2a0eaf52-94ee-4357-a022-5b5d06170b90__ENO_right-rail",
+          "source": "BLOCK_1ba60ec5-185b-497c-b119-178dbe087736",
+          "target": "right-rail-rung_main_2a0eaf52-94ee-4357-a022-5b5d06170b90",
+          "sourceHandle": "ENO",
+          "targetHandle": "right-rail"
+        }
+      ]
+    },
+    {
+      "id": "rung_main_3ac4f577-ef27-4eae-8d09-0898f2e238a4",
+      "comment": "Lamps 2/2: LampPower := Lamp_Calc (P controller, section 2) while Lamps_On (Auto, Master_Enable, no FAULT, preform in the pocket) AND Oven_BelowMax (OvenTemp < 130.0 degC, in every mode: with a big Bias the controller alone would still heat). No FB: an analog value has no feedback and no run hours",
+      "defaultBounds": [
+        300,
+        100
+      ],
+      "reactFlowViewport": [
+        712,
+        134
+      ],
+      "selectedNodes": [],
+      "handleBranches": [],
+      "nodes": [
+        {
+          "id": "left-rail-rung_main_3ac4f577-ef27-4eae-8d09-0898f2e238a4",
+          "type": "powerRail",
+          "position": {
+            "x": 0,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 3,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "left-rail",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "right": -3
+                }
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 3,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "left-rail",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "right": -3
+              }
+            },
+            "numericId": "4069829",
+            "variant": "left",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_68db5484-9841-41af-aabe-bf71fd55d707",
+          "type": "contact",
+          "position": {
+            "x": 68,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 68,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 92,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "default",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 68,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 92,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 68,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 92,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "8110585",
+            "variable": {
+              "id": "",
+              "name": "Lamps_On",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "%MX3.7",
+              "documentation": "Conditioned: Master_Enable AND Auto AND no FAULT AND Preform_In_Oven, enables LampPower",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "CONTACT_d228199c-501d-41b2-b198-fac771ad7eb3",
+          "type": "contact",
+          "position": {
+            "x": 182,
+            "y": 38
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 182,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 206,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "variant": "default",
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 182,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 12
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target",
+                "style": {
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 206,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 24,
+                  "y": 12
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source",
+                "style": {
+                  "right": -3
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 182,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 12
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target",
+              "style": {
+                "left": -3
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 206,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 24,
+                "y": 12
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source",
+              "style": {
+                "right": -3
+              }
+            },
+            "numericId": "2296309",
+            "variable": {
+              "id": "",
+              "name": "Oven_BelowMax",
+              "type": {
+                "definition": "base-type",
+                "value": "BOOL"
+              },
+              "class": "local",
+              "location": "",
+              "documentation": "OvenTemp < OvenMax: lamps allowed (no over-temperature)",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 24,
+          "height": 24,
+          "measured": {
+            "width": 24,
+            "height": 24
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "BLOCK_974e8d43-dca5-4a51-ac26-ac03819ed49e",
+          "type": "block",
+          "position": {
+            "x": 371,
+            "y": 14
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 371,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 36
+                },
+                "id": "EN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 371,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 76
+                },
+                "id": "IN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 449,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 78,
+                  "y": 36
+                },
+                "id": "ENO",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 449,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 78,
+                  "y": 76
+                },
+                "id": "OUT",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "right": 0
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 371,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 36
+                },
+                "id": "EN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "left": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 371,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 76
+                },
+                "id": "IN",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "left": 0
+                }
+              }
+            ],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 449,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 78,
+                  "y": 36
+                },
+                "id": "ENO",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 36,
+                  "right": 0
+                }
+              },
+              {
+                "glbPosition": {
+                  "x": 449,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 78,
+                  "y": 76
+                },
+                "id": "OUT",
+                "position": "right",
+                "type": "source",
+                "isConnectable": false,
+                "style": {
+                  "top": 76,
+                  "right": 0
+                }
+              }
+            ],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 371,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 36
+              },
+              "id": "EN",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 36,
+                "left": 0
+              }
+            },
+            "outputConnector": {
+              "glbPosition": {
+                "x": 449,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 78,
+                "y": 36
+              },
+              "id": "ENO",
+              "position": "right",
+              "type": "source",
+              "isConnectable": false,
+              "style": {
+                "top": 36,
+                "right": 0
+              }
+            },
+            "numericId": "1997535",
+            "variant": {
+              "name": "MOVE",
+              "type": "function",
+              "language": "st",
+              "variables": [
+                {
+                  "name": "EN",
+                  "class": "input",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "ENO",
+                  "class": "output",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "BOOL"
+                  }
+                },
+                {
+                  "name": "OUT",
+                  "class": "output",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "ANY"
+                  }
+                },
+                {
+                  "name": "IN",
+                  "class": "input",
+                  "type": {
+                    "definition": "generic-type",
+                    "value": "ANY"
+                  }
+                }
+              ],
+              "body": "",
+              "documentation": "",
+              "extensible": false,
+              "category": "Selection"
+            },
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "executionControl": true,
+            "lockExecutionControl": false,
+            "connectedVariables": [
+              {
+                "handleId": "IN",
+                "type": "input",
+                "variable": {
+                  "id": "",
+                  "name": "Lamp_Calc",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "INT"
+                  },
+                  "class": "local",
+                  "location": "%MW40",
+                  "documentation": "Computed: LIMIT(0, Lamp_Sum, 100), lamp power the P controller asks for, % (LampPower in stage 6)",
+                  "debug": false
+                }
+              },
+              {
+                "handleId": "OUT",
+                "type": "output",
+                "variable": {
+                  "id": "",
+                  "name": "LampPower",
+                  "type": {
+                    "definition": "base-type",
+                    "value": "INT"
+                  },
+                  "class": "local",
+                  "location": "%QW0",
+                  "documentation": "Analog output: IR lamp power 0-100 % (P controller)",
+                  "debug": false
+                }
+              }
+            ],
+            "draggable": true,
+            "selectable": true,
+            "deletable": true
+          },
+          "width": 78,
+          "height": 100,
+          "measured": {
+            "width": 78,
+            "height": 100
+          },
+          "draggable": true,
+          "selectable": true,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "right-rail-rung_main_3ac4f577-ef27-4eae-8d09-0898f2e238a4",
+          "type": "powerRail",
+          "position": {
+            "x": 709,
+            "y": 30
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 712,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                }
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 712,
+                  "y": 50
+                },
+                "relPosition": {
+                  "x": 3,
+                  "y": 20
+                },
+                "id": "right-rail",
+                "position": "left",
+                "type": "target",
+                "isConnectable": false,
+                "style": {
+                  "top": 20,
+                  "left": -3
+                }
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 712,
+                "y": 50
+              },
+              "relPosition": {
+                "x": 3,
+                "y": 20
+              },
+              "id": "right-rail",
+              "position": "left",
+              "type": "target",
+              "isConnectable": false,
+              "style": {
+                "top": 20,
+                "left": -3
+              }
+            },
+            "numericId": "2934234",
+            "variant": "right",
+            "variable": {
+              "name": ""
+            },
+            "executionOrder": 0,
+            "draggable": false,
+            "selectable": false,
+            "deletable": false
+          },
+          "width": 3,
+          "height": 40,
+          "measured": {
+            "width": 3,
+            "height": 40
+          },
+          "draggable": false,
+          "selectable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_288f1854-284b-40d1-9f70-94f2cc728ffc",
+          "type": "variable",
+          "position": {
+            "x": 261,
+            "y": 74
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 341,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "inputHandles": [],
+            "outputHandles": [
+              {
+                "glbPosition": {
+                  "x": 341,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 80,
+                  "y": 16
+                },
+                "id": "output",
+                "position": "right",
+                "isConnectable": false,
+                "type": "source"
+              }
+            ],
+            "outputConnector": {
+              "glbPosition": {
+                "x": 341,
+                "y": 90
+              },
+              "relPosition": {
+                "x": 80,
+                "y": 16
+              },
+              "id": "output",
+              "position": "right",
+              "isConnectable": false,
+              "type": "source"
+            },
+            "numericId": "7972583",
+            "variable": {
+              "id": "",
+              "name": "Lamp_Calc",
+              "type": {
+                "definition": "base-type",
+                "value": "INT"
+              },
+              "class": "local",
+              "location": "%MW40",
+              "documentation": "Computed: LIMIT(0, Lamp_Sum, 100), lamp power the P controller asks for, % (LampPower in stage 6)",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "input",
+            "block": {
+              "id": "BLOCK_974e8d43-dca5-4a51-ac26-ac03819ed49e",
+              "handleId": "IN",
+              "variableType": {
+                "name": "IN",
+                "class": "input",
+                "type": {
+                  "definition": "generic-type",
+                  "value": "ANY"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        },
+        {
+          "id": "VARIABLE_28292095-ed5c-4ca3-a860-6ce164edb3a6",
+          "type": "variable",
+          "position": {
+            "x": 479,
+            "y": 74
+          },
+          "width": 80,
+          "height": 32,
+          "measured": {
+            "width": 80,
+            "height": 32
+          },
+          "data": {
+            "handles": [
+              {
+                "glbPosition": {
+                  "x": 479,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "inputHandles": [
+              {
+                "glbPosition": {
+                  "x": 479,
+                  "y": 90
+                },
+                "relPosition": {
+                  "x": 0,
+                  "y": 16
+                },
+                "id": "input",
+                "position": "left",
+                "isConnectable": false,
+                "type": "target"
+              }
+            ],
+            "outputHandles": [],
+            "inputConnector": {
+              "glbPosition": {
+                "x": 479,
+                "y": 90
+              },
+              "relPosition": {
+                "x": 0,
+                "y": 16
+              },
+              "id": "input",
+              "position": "left",
+              "isConnectable": false,
+              "type": "target"
+            },
+            "numericId": "7120424",
+            "variable": {
+              "id": "",
+              "name": "LampPower",
+              "type": {
+                "definition": "base-type",
+                "value": "INT"
+              },
+              "class": "local",
+              "location": "%QW0",
+              "documentation": "Analog output: IR lamp power 0-100 % (P controller)",
+              "debug": false
+            },
+            "executionOrder": 0,
+            "variant": "output",
+            "block": {
+              "id": "BLOCK_974e8d43-dca5-4a51-ac26-ac03819ed49e",
+              "handleId": "OUT",
+              "variableType": {
+                "name": "OUT",
+                "class": "output",
+                "type": {
+                  "definition": "generic-type",
+                  "value": "ANY"
+                }
+              }
+            },
+            "draggable": false,
+            "selectable": true,
+            "deletable": false
+          },
+          "deletable": false,
+          "selectable": true,
+          "draggable": false,
+          "selected": false,
+          "dragging": false
+        }
+      ],
+      "edges": [
+        {
+          "id": "e_left-rail-rung_main_3ac4f577-ef27-4eae-8d09-0898f2e238a4_CONTACT_68db5484-9841-41af-aabe-bf71fd55d707__left-rail_input",
+          "source": "left-rail-rung_main_3ac4f577-ef27-4eae-8d09-0898f2e238a4",
+          "target": "CONTACT_68db5484-9841-41af-aabe-bf71fd55d707",
+          "sourceHandle": "left-rail",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_68db5484-9841-41af-aabe-bf71fd55d707_CONTACT_d228199c-501d-41b2-b198-fac771ad7eb3__output_input",
+          "source": "CONTACT_68db5484-9841-41af-aabe-bf71fd55d707",
+          "target": "CONTACT_d228199c-501d-41b2-b198-fac771ad7eb3",
+          "sourceHandle": "output",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_CONTACT_d228199c-501d-41b2-b198-fac771ad7eb3_BLOCK_974e8d43-dca5-4a51-ac26-ac03819ed49e__output_EN",
+          "source": "CONTACT_d228199c-501d-41b2-b198-fac771ad7eb3",
+          "target": "BLOCK_974e8d43-dca5-4a51-ac26-ac03819ed49e",
+          "sourceHandle": "output",
+          "targetHandle": "EN"
+        },
+        {
+          "id": "e_VARIABLE_288f1854-284b-40d1-9f70-94f2cc728ffc_BLOCK_974e8d43-dca5-4a51-ac26-ac03819ed49e__output_IN",
+          "source": "VARIABLE_288f1854-284b-40d1-9f70-94f2cc728ffc",
+          "target": "BLOCK_974e8d43-dca5-4a51-ac26-ac03819ed49e",
+          "sourceHandle": "output",
+          "targetHandle": "IN"
+        },
+        {
+          "id": "e_BLOCK_974e8d43-dca5-4a51-ac26-ac03819ed49e_VARIABLE_28292095-ed5c-4ca3-a860-6ce164edb3a6__OUT_input",
+          "source": "BLOCK_974e8d43-dca5-4a51-ac26-ac03819ed49e",
+          "target": "VARIABLE_28292095-ed5c-4ca3-a860-6ce164edb3a6",
+          "sourceHandle": "OUT",
+          "targetHandle": "input"
+        },
+        {
+          "id": "e_BLOCK_974e8d43-dca5-4a51-ac26-ac03819ed49e_right-rail-rung_main_3ac4f577-ef27-4eae-8d09-0898f2e238a4__ENO_right-rail",
+          "source": "BLOCK_974e8d43-dca5-4a51-ac26-ac03819ed49e",
+          "target": "right-rail-rung_main_3ac4f577-ef27-4eae-8d09-0898f2e238a4",
+          "sourceHandle": "ENO",
+          "targetHandle": "right-rail"
+        }
+      ]
     }
   ]
 }
