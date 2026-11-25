@@ -26,7 +26,7 @@ main
  │                              pressure scaling in DINT -> BlowPressure, Press_Range_OK, Pressure_Reached, Pressure_Safe)
  ├─ 3  Conditioning            (Outfeed_Full filter on C1_Full)
  ├─ 4  Step decode             (Step -> Oven_Idle ... Oven_Fault; MouldStep -> Mould_Idle ... Mould_Fault; Seq_Enable, Lamps_On)
- ├─ 5  Done bits and timers    (Soak_Timer -> Preform_Hot, Grip_Timer, Hold_Timer)
+ ├─ 5  Done bits and timers    (Soak_Timer -> Preform_Hot, Grip_Timer, Release_Timer, Hold_Timer)
  ├─ 6  Sequencer transitions   (abort, Start of both, oven station, mould station; Stop_Request in stage 8)
  ├─ 7  Outputs                 (jog watchdog, LampPower, exhaust, mould seal-in + manual toggle, request rungs, interlocks, FBs)
  ├─ 8  Counter and status      (BottleCount with Cmd 4 reset, Starved, Alm_NoPreforms, State)
@@ -119,11 +119,34 @@ The mould station has no transitions yet, so `MouldStep` stays where the Start p
 
 ## Stage 5 – Mould station sequencer  *(weeks VII, VIII, XI: TON as step time, compare, sequencer)*
 
-- **Done bits** (section 5): `Grip_Timer := TON(IN := Mould_Grip OR Mould_Release, PT := GripTime)`, `Hold_Timer := TON(IN := Mould_Hold, PT := HoldTime)`.
-- **Transitions** from the step table: 10 → 20 (`Oven_Hot AND Mould_Open AND NOT Bottle_In_Mould AND Arm_At_Oven AND Rod_Up`), 20 → 22 (`Grip_Timer.Q`), 22 → 24 (`Arm_At_Mould`), 24 → 26 (`Grip_Timer.Q AND Bottle_In_Mould`), 26 → 30 (`Arm_At_Oven`), 30 → 40 (`Mould_Closed`), 40 → 50 (`Rod_Down`), 50 → 52 (`Pressure_Reached`), 52 → 60 (`Hold_Timer.Q`), 60 → 62 (`Pressure_Safe`), 62 → 70 (`Rod_Up`), 70 → 80 (`Mould_Open`), 80 → 10 (`NOT Bottle_In_Mould`).
-- **Rung order:** 20 → 22 above 24 → 26: both use `Grip_Timer.Q`, and SWING lies between, so the timer is always reset before RELEASE.
+Plan reviewed in three rounds (2026-11-25); 16 rungs.
 
-**Test** (`test_blowmoulder_mould_seq.py`), oven station brought to 25 first (Start with `Preform_In_Oven` and `OvenTemp` 1050 → 20 → 25 after the soak), sensors written by hand: the whole cycle 10 → 20 → … → 80 → 10, each step waiting for its sensor; BLOW waits at raw 24000 (347) and goes on at 24192 (350); HOLD lasts 1.0 s; EXHAUST waits at raw 400 (5 = 0.5 bar) and goes on at raw 345 (4, `Pressure_Safe`); 10 → 20 does not start with `Bottle_In_Mould`, with the rod down, or with `Step` ≠ 25. Restart cases: Mode Stop in BLOW (mould still closed) → Start → 60; Mode Stop in EJECT (bottle still in the open mould) → Start → 80.
+- **Done bits** (section 5, inserted below `Soak_Timer`): `Grip_Timer := TON(IN := Mould_Grip, PT := GripTime)`, `Release_Timer := TON(IN := Mould_Release, PT := GripTime)`, `Hold_Timer := TON(IN := Mould_Hold, PT := HoldTime)`. **One timer per step:** the roadmap's shared `Grip_Timer` on `Mould_Grip OR Mould_Release` would need an OR branch and a rung-order rule (SWING must reset it between GRIP and RELEASE). Two timers need neither.
+- **Transitions** (end of section 6, after the oven's), each `Seq_Enable AND` step bit `AND` condition → MOVE:
+  - 10 → 20 `Oven_Hot AND Mould_Open AND NOT Bottle_In_Mould AND Arm_At_Oven AND Rod_Up` (the hand-over);
+  - 20 → 22 `Grip_Timer.Q`; 22 → 24 `Arm_At_Mould`; 24 → 26 `Release_Timer.Q AND Bottle_In_Mould`; 26 → 30 `Arm_At_Oven`;
+  - 30 → 40 `Mould_Closed`; 40 → 50 `Rod_Down`; 50 → 52 `Pressure_Reached`; 52 → 60 `Hold_Timer.Q`;
+  - 60 → 62 `Pressure_Safe`; 62 → 70 `Rod_Up`; 70 → 80 `Mould_Open`; 80 → 10 `NOT Bottle_In_Mould`.
+- **No rung-order rule:** every transition reads the step bits decoded at the top of the scan, so each station makes at most one step per scan, and every step has exactly one exit.
+
+**Test** (`test_blowmoulder_mould_seq.py`, M1–M29, ~50 s):
+- **Hand-over guards:** the mould stays in 10 while the oven heats, with the rod down, with something in the mould, with the arm away, and with the mould not open. With all conditions met → 20.
+- **One bottle 10 → … → 80:**
+  - GRIP takes about 0.3 s and HOLD about 1.0 s (measured).
+  - RELEASE waits for the photo eye.
+  - BLOW waits at raw 24000 (347) and goes on at 24192 (350).
+  - EXHAUST waits at raw 400 (5) and goes on at 345 (4).
+  - EJECT waits while the bottle is in the mould.
+- **Parallel:** the oven loads and heats the next preform during the blow, and the mould goes 80 → 10 → 20 at once.
+- **Restarts:** Mode Stop with 35 bar in the closed mould → Start → 60, waits, then 62 → 70 → 80 → 10. E-stop in HOLD → both 0, then Start → 60.
+
+The sensors are written in order: the one that blocks a transition comes first. Otherwise every condition is TRUE for a moment and the PLC moves on. The offline check found this race in the first draft of the test.
+
+**Checked offline before upload:** all blow moulder tests pass on the stage 5 program, and the stage 4 test passes on both the stage 4 and stage 5 programs. In O11–O14 it now leaves 35 bar in the closed mould, because otherwise the restarted mould goes 60 → 62 during the settle time. Four planted bugs each fail the matching checks:
+- RELEASE without the photo eye;
+- hand-over without `Oven_Hot`;
+- hand-over without `Arm_At_Oven`;
+- `Hold_Timer` with `GripTime`.
 
 ## Stage 6 – The lamps: P controller on the analog output  *(week VIII: math, analog output)*
 

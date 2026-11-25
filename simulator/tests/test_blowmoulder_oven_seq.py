@@ -18,7 +18,7 @@ One preform:
     O9  pocket empty (the arm took the preform) -> 10 FEED, Lamps_On FALSE
 Start by sensors (rule 9), Mode Stop between them:
     O10 Mode Stop -> both 0
-    O11 preform in the pocket, mould closed -> Step 20, MouldStep 60 EXHAUST
+    O11 preform in the pocket, mould closed (35 bar left inside) -> Step 20, MouldStep 60 EXHAUST
     O12 mould open with a bottle -> MouldStep 80 EJECT
     O13 mould open, empty -> MouldStep 10
     O14 mould open AND closed with a bottle (sensor fault) -> MouldStep 60 (closed wins, exhaust first)
@@ -50,6 +50,7 @@ PORT = 5025
 HR_CMD = 1024  # %MW0
 HR_MODE_REQ = 1025  # %MW1
 HR_OVEN_TEMP = 1036  # %MW12
+HR_RAW = 1037  # %MW13 BlowPressure_Raw
 HR_OVEN_SETPOINT = 1054  # %MW30
 HR_OVEN_BAND = 1055  # %MW31
 HR_STEP = 1075  # %MW51
@@ -71,6 +72,7 @@ START, RESET = 1, 3
 MODE_STOP, MODE_AUTO, MODE_MANUAL = 0, 1, 2
 OVEN_SETPOINT, OVEN_BAND = 1050, 50  # defaults (Oven_Ready window 1000-1100)
 OVEN_HOT, OVEN_COLD = 1050, 900
+RAW_35_BAR = 24192  # pressure left in a closed mould: from stage 5 on the restart waits in 60 EXHAUST
 SETTLE = 0.3  # s: many scans of the 20 ms task
 SOAK_MIN, SOAK_MAX = 0.9, 1.5  # s: window entry -> HOT with SoakTime 1 s (poll 50 ms, Modbus delays)
 
@@ -282,6 +284,7 @@ def main() -> int:
 
         # ---------- Start by sensors ----------
         plc.mode(MODE_STOP)
+        plc.write(HR_RAW, RAW_35_BAR)
         steps = plc.steps()
         results.append(check("O10", steps == (0, 0), f"Mode Stop -> Step / MouldStep {steps} (expected (0, 0))"))
         start_with("O11", {COIL_PREFORM_IN_OVEN: True, COIL_MOULD_CLOSED: True}, (20, 60), "preform in the pocket, mould closed")
@@ -335,12 +338,13 @@ def main() -> int:
             plc.write(address, 0)
         plc.clear_sensors()
         plc.write(HR_OVEN_TEMP, 0)
+        plc.write(HR_RAW, 0)
         plc.coil(COIL_E_STOP_OK, e_stop_before)
         heartbeat.stop()
         client.close()
 
     passed = sum(results)
-    print(f"\n{passed}/{len(results)} checks passed (Mode Stop, both steps 0, sensors FALSE, OvenTemp 0, "
+    print(f"\n{passed}/{len(results)} checks passed (Mode Stop, both steps 0, sensors FALSE, OvenTemp and raw 0, "
           "E_Stop_OK as before)")
     return 0 if passed == len(results) else 1
 

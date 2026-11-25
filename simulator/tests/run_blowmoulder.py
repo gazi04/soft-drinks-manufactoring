@@ -18,6 +18,7 @@ SCRIPTS = [
     Script("test_blowmoulder_values.py", "Oven_Ready window, OvenError, lamp P controller Lamp_Calc, DINT pressure scaling, Pressure_Reached, Pressure_Safe"),
     Script("test_blowmoulder_conditioning.py", "Outfeed_Full filter on C1_Full: 2 s on, 3 s off, blinking ignored, works without Master_Enable"),
     Script("test_blowmoulder_oven_seq.py", "oven station 10 -> 15 -> 20 -> 25 -> 10, soak restart, Lamps_On, Start by sensors, abort keeps FAULT"),
+    Script("test_blowmoulder_mould_seq.py", "mould station 10 -> ... -> 80 -> 10, hand-over guards, GRIP / HOLD times, BLOW and EXHAUST pressures, both stations in parallel, restart by sensors"),
 ]
 
 if __name__ == "__main__":

@@ -68,7 +68,7 @@ Why two sequencers (as the packer): a step word can be in one step only. While t
       │                                                         ▼                                                    │
       │                     20 GRIP      Gripper                         ── Grip_Timer.Q (GripTime) ──►               │
       │                     22 SWING     Gripper, ArmToMould             ── Arm_At_Mould ──►                          │
-      │                     24 RELEASE   ArmToMould                      ── Grip_Timer.Q AND Bottle_In_Mould ──►      │
+      │                     24 RELEASE   ArmToMould                      ── Release_Timer.Q AND Bottle_In_Mould ──►   │
       │                     26 ARM_BACK  –                               ── Arm_At_Oven ──►                           │
       │                     30 CLOSE     MouldClose                      ── Mould_Closed ──►                          │
       │                     40 STRETCH   MouldClose, StretchRod, PreBlowValve        ── Rod_Down ──►                  │
@@ -108,7 +108,7 @@ Why two sequencers (as the packer): a step word can be in one step only. While t
 | 10 | WAIT_PREFORM | – | `Step = 25 AND Mould_Open AND NOT Bottle_In_Mould AND Arm_At_Oven AND Rod_Up` → 20 | none |
 | 20 | GRIP | Gripper | `Grip_Timer.Q` (`GripTime` 0.3 s) → 22 | – |
 | 22 | SWING | Gripper, ArmToMould | `Arm_At_Mould` → 24 | 3 s (`Alm_HandlingJam`) |
-| 24 | RELEASE | ArmToMould | `Grip_Timer.Q AND Bottle_In_Mould` → 26 | 3 s (`Alm_HandlingJam`, preform not in the mould) |
+| 24 | RELEASE | ArmToMould | `Release_Timer.Q AND Bottle_In_Mould` → 26 (`GripTime` 0.3 s) | 3 s (`Alm_HandlingJam`, preform not in the mould) |
 | 26 | ARM_BACK | – (arm returns when `ArmToMould` drops) | `Arm_At_Oven` → 30 | 3 s (`Alm_HandlingJam`) |
 | 30 | CLOSE | MouldClose | `Mould_Closed` → 40 | 3 s (`Alm_MouldFault`) |
 | 40 | STRETCH | MouldClose, StretchRod, PreBlowValve | `Rod_Down` → 50 | 3 s (`Alm_MouldFault`) |
@@ -120,7 +120,7 @@ Why two sequencers (as the packer): a step word can be in one step only. While t
 | 80 | EJECT | Ejector while `NOT Outfeed_Full` | `NOT Bottle_In_Mould` → 10 | 3 s while the ejector is ON (`Alm_HandlingJam`); `Outfeed_Full` = **Blocked** |
 | 900 | FAULT | – (ExhaustValve open, closed mould held, rule 4) | Auto + Reset (cause gone) → 0 | – |
 
-`GripTime` is one timer for both steps (`Grip_Timer := TON(IN := Mould_Grip OR Mould_Release, PT := GripTime)`): SWING lies between GRIP and RELEASE, so the timer is reset there and starts again from 0 in RELEASE.
+`GripTime` is used by two step timers, one per step (decision 2026-11-25, ladder stage 5): `Grip_Timer := TON(IN := Mould_Grip, PT := GripTime)` and `Release_Timer := TON(IN := Mould_Release, PT := GripTime)`. One shared timer on `Mould_Grip OR Mould_Release` would need an OR branch and rely on SWING resetting it in between.
 
 **Computed values** (every scan):
 
