@@ -14,6 +14,7 @@ from suite import Script, main
 
 SCRIPTS = [
     Script("test_blowmoulder_stage0.py", "own Modbus port, %MX4 sensor byte, %MX7 alarm byte, %QW0 = HR 0, other PLCs' memory separate"),
+    Script("test_blowmoulder_stage1.py", "defaults, Cmd 1-4 clear, heartbeat watchdog frozen at FALSE and TRUE"),
 ]
 
 if __name__ == "__main__":
