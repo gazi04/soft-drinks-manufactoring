@@ -17,6 +17,7 @@ SCRIPTS = [
     Script("test_blowmoulder_stage1.py", "defaults, Cmd 1-4 clear, heartbeat watchdog frozen at FALSE and TRUE"),
     Script("test_blowmoulder_values.py", "Oven_Ready window, OvenError, lamp P controller Lamp_Calc, DINT pressure scaling, Pressure_Reached, Pressure_Safe"),
     Script("test_blowmoulder_conditioning.py", "Outfeed_Full filter on C1_Full: 2 s on, 3 s off, blinking ignored, works without Master_Enable"),
+    Script("test_blowmoulder_oven_seq.py", "oven station 10 -> 15 -> 20 -> 25 -> 10, soak restart, Lamps_On, Start by sensors, abort keeps FAULT"),
 ]
 
 if __name__ == "__main__":

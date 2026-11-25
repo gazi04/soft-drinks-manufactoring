@@ -93,17 +93,29 @@ Pressure scaling (rule 6) – DINT in the middle:
 
 ## Stage 4 – Oven station sequencer  *(weeks VII, VIII, XI: TON as a condition, compare, move, sequencer)*
 
-- **Step decode** of `Step` (EQ → `Oven_Idle`, `Oven_Feed`, `Oven_Load`, `Step_Heat`, `Oven_Hot`, `Oven_Fault`) and of `MouldStep` (EQ → `Mould_Idle`, `Mould_WaitPreform`, `Mould_Grip`, `Mould_Swing`, `Mould_Release`, `Mould_ArmBack`, `Mould_Closing`, `Mould_Stretch`, `Mould_Blow`, `Mould_Hold`, `Mould_Exhaust`, `Mould_RodUp`, `Mould_Opening`, `Mould_Eject`, `Mould_Fault` – 30 and 70 are `Mould_Closing` / `Mould_Opening`, so they never clash with the sensors `Mould_Closed` / `Mould_Open`; also `Mould_CloseSteps` = 30–62 with `GE MouldStep,30` and `LE MouldStep,62`). `Seq_Enable := Mode_Auto AND Master_Enable`.
-- **`Lamps_On`** (%MX3.7) := `Master_Enable AND Mode_Auto AND NOT Oven_Fault AND Preform_In_Oven` (used from stage 6).
-- **Done bit** (section 5): `Soak_Timer := TON(IN := Step_Heat AND Oven_Ready, PT := SoakTime)`, `Preform_Hot := Soak_Timer.Q` (%MX3.3).
-- **Transitions** (section 6), no outputs yet:
-  - **Start** (Auto, `Start_Cmd`, both steps 0; the alarm contact comes in stage 9) → `Start_Accepted` (one coil), then MOVE rungs from it: `Preform_In_Oven` → 20 else 10 → `Step`; `Mould_Closed` → 60, `Mould_Open AND Bottle_In_Mould` → 80, else 10 → `MouldStep` (rule 9; the three mould branches are mutually exclusive by their contacts).
-  - 10 → 15 (`Preform_At_Loader AND NOT Preform_In_Oven AND NOT Outfeed_Full`; `NOT Stop_Request` in stage 8); 15 → 20 (`Preform_In_Oven`); 20 → 25 (`Preform_Hot`); 25 → 10 (`NOT Preform_In_Oven`).
-- **Abort rung:** `NOT Master_Enable OR NOT Mode_Auto` → MOVE 0 → `Step` **and** MOVE 0 → `MouldStep`.
+Plan reviewed in three rounds (2026-11-25); 25 rungs in sections 4–6.
 
-The mould station has no transitions yet, so `MouldStep` stays at what Start set: the oven can be tested alone, the hand-over is done by writing `Preform_In_Oven` FALSE.
+- **Section 4, step decode:** `Step` → `Oven_Idle`, `Oven_Feed`, `Oven_Load`, `Oven_Heat`, `Oven_Hot`, `Oven_Fault` (2 rungs of chained EQ); `MouldStep` → `Mould_Idle`, `Mould_WaitPreform`, `Mould_Grip`, `Mould_Swing`, `Mould_Release`, `Mould_ArmBack`, `Mould_Closing`, `Mould_Stretch`, `Mould_Blow`, `Mould_Hold`, `Mould_Exhaust`, `Mould_RodUp`, `Mould_Opening`, `Mould_Eject`, `Mould_Fault` (5 rungs; 30 and 70 are `Mould_Closing` / `Mould_Opening`, so they never clash with the sensors); `Mould_CloseSteps` = `GE MouldStep,30` → `Mould_From30`, `LE MouldStep,62` → `Mould_To62`, AND rung. `Seq_Enable := Mode_Auto AND Master_Enable`. **`Lamps_On`** (%MX3.7) := `Seq_Enable AND NOT Oven_Fault AND Preform_In_Oven` (also in IDLE: a preform left in the pocket stays warm).
+- **Section 5, done bit:** `Soak_Timer := TON(IN := Oven_Heat AND Oven_Ready, PT := SoakTime)` → `Preform_Hot` (%MX3.3). It is TRUE for one scan only, because the step moves on in the same scan, so the test checks it by timing.
+- **Section 6, transitions:**
+  - **Abort:** `(NOT Mode_Auto OR NOT Master_Enable) AND NOT Oven_Fault` → MOVE 0 → `Step`, MOVE 0 → `MouldStep`. **`NOT Oven_Fault` keeps a FAULT** (both words 900) until Reset in stage 9, as the packer does.
+  - **Start accepted:** `Seq_Enable AND Oven_Idle AND Mould_Idle AND Start_Cmd AND No_Fault` → `Start_Accepted`.
+  - **Start 1/4–4/4 by sensors (rule 9), default then override:** 1/4 MOVE 10 → both words; 2/4 `Preform_In_Oven` → `Step` 20; 3/4 `Mould_Open AND Bottle_In_Mould` → `MouldStep` 80; 4/4 `Mould_Closed` → `MouldStep` 60. Within one scan the **last write wins**, so the rung order is the priority. No OR branch is needed for the mould's "else", and with both mould sensors TRUE (sensor fault) closed wins: exhaust first.
+  - 10 → 15 `Preform_At_Loader AND NOT Preform_In_Oven AND NOT Outfeed_Full AND NOT Stop_Request`; 15 → 20 `Preform_In_Oven`; 20 → 25 `Preform_Hot`; 25 → 10 `NOT Preform_In_Oven`.
+- **No later rung edits:** `Stop_Request` (FALSE) and `No_Fault` (initial **TRUE**) are declared now and their contacts are already in the rungs. Stage 8 and stage 9 only **add** the rungs that compute them (the packer had to edit its Start rung in stage 9).
 
-**Test** (`test_blowmoulder_oven_seq.py`): Start with an empty pocket → `Step` 10, `MouldStep` 10; with `Preform_In_Oven` → `Step` 20; with `Mould_Closed` → `MouldStep` 60; with `Mould_Open` + `Bottle_In_Mould` → 80. `Preform_At_Loader` → 15; `Outfeed_Full` in 10 → stays 10; `Preform_In_Oven` → 20; `OvenTemp` 900 → stays 20; 1050 for 0.5 s → 20, for 1.2 s → 25; `OvenTemp` drops out of the window in 20 → soak starts again; `Preform_In_Oven` FALSE → 10. Mode Stop → both 0.
+The mould station has no transitions yet, so `MouldStep` stays where the Start put it. The oven is tested alone, and the hand-over is played by writing `Preform_In_Oven` FALSE.
+
+**Test** (`test_blowmoulder_oven_seq.py`, O1–O18, ~45 s):
+- `Lamps_On` in IDLE with and without a preform.
+- One preform 10 → 15 → 20 → 25 → 10, with C1 full holding FEED and the off-filter releasing it.
+- The cold oven holding HEAT, and the soak restarting when `OvenTemp` leaves the window (25 about 1 s after the second entry).
+- Start by sensors: (20, 60), (20, 80), (20, 10), and the sensor conflict giving 60.
+- Start refused unless both stations are IDLE.
+- E-stop in HEAT → both 0, lamps off; Manual → lamps off.
+- 900 written: lamps off, Start ignored, Mode Stop keeps 900.
+
+**Checked offline before upload:** an offline scan interpreter of `main.ld` with a fake Modbus client on a virtual clock runs the real test script. It reproduces the stage 1–3 results (8/8, 39/39, 8/8) and gives 18/18 here. Three deliberately broken programs (swapped Start priority, abort without `NOT Oven_Fault`, soak without `Oven_Ready`) each fail the matching checks.
 
 ## Stage 5 – Mould station sequencer  *(weeks VII, VIII, XI: TON as step time, compare, sequencer)*
 
@@ -167,7 +179,7 @@ Section 7, in this order:
 
 ## Stage 8 – Stop, counter, State  *(weeks IV, VII: latch, CTU)*
 
-- `Stop_Request := (Stop_Cmd OR Stop_Request) AND NOT (Oven_Idle AND Mould_Idle)`; go-to-0 rungs (rule 7): oven FEED → 0 at once; mould WAIT_PREFORM → 0 **only with `Oven_Idle`**; `NOT Stop_Request` in 10 → 15. No other step gets a Stop branch: the last preform is always blown and ejected.
+- `Stop_Request := (Stop_Cmd OR Stop_Request) AND NOT (Oven_Idle AND Mould_Idle)` (declared in stage 4, where 10 → 15 already reads `NOT Stop_Request`); go-to-0 rungs (rule 7): oven FEED → 0 at once; mould WAIT_PREFORM → 0 **only with `Oven_Idle`**; `NOT Stop_Request` in 10 → 15. No other step gets a Stop branch: the last preform is always blown and ejected.
 - `Bottle_Counter` (CTU, `CU := Bottle_Ejected`, `R := Count_Reset_Cmd`, `PV` 32767, `CV` → `BottleCount` %MW53).
 - `Feed_Empty_Timer` (moved here from stage 3), directly above `Starved`: `IN := Oven_Feed AND NOT Preform_At_Loader`, `PT := StarvedDelay`; `Starved` (%MX3.6) := `Feed_Empty_Timer.Q AND Mould_WaitPreform`; `Alm_NoPreforms` (%MX5.0) := `Oven_Feed AND Hopper_Empty AND NOT Preform_At_Loader` (warning, not latched).
 - `State` (%MW50): mutually exclusive MOVE rungs in the priority of rule 8: Fault (`Oven_Fault`), Stopped (both idle, or Mode Stop / Manual), Blocked (`Outfeed_Full AND (Mould_Eject OR Oven_Feed)`), Starved, Running.
@@ -182,12 +194,12 @@ One TON per step (each restarts at its own step), `MoveTimeout` 3 s unless state
 - `Alm_OutfeedBlocked` (%MX5.2): `Blocked_Timer` (TON `BlockedWarn`, `IN := State = 3`) – warning, no FAULT.
 - `Alm_MouldFault` (%MX5.4): `Close_Timer` (`Mould_Closing`), `Stretch_Timer` (`Mould_Stretch`), `RodUp_Timer` (`Mould_RodUp`), `Open_Timer` (`Mould_Opening`).
 - `Alm_OvenOverTemp` (%MX5.5): `NOT Oven_BelowMax` → FAULT in every mode; Reset only below `OvenMax`.
-- `Alm_OvenHeatTimeout` (%MX5.6): `Heat_Timer` (TON `HeatTimeout` 15 s, `IN := Step_Heat`).
+- `Alm_OvenHeatTimeout` (%MX5.6): `Heat_Timer` (TON `HeatTimeout` 15 s, `IN := Oven_Heat`).
 - `Alm_BlowFault` (%MX5.7): `Blow_Timer` (TON `BlowTimeout` 2 s, `IN := Mould_Blow`).
 - `Alm_ExhaustFault` (%MX7.0): `Exhaust_Timer` (TON `ExhaustTimeout` 3 s, `IN := Mould_Exhaust`); Reset only with `Pressure_Safe`.
 - `Alm_OverPressure` (%MX7.1): `NOT Below_MaxPress` → FAULT in every mode; Reset only below `MaxPressure`.
 - `Alm_PressureSensor` (%MX7.2): `NOT Press_Range_OK` → FAULT in every mode; Reset only with the raw value back in range. Then `Pressure_Safe` gets `NOT Alm_PressureSensor` (section 2 reads the alarm of the last scan – one scan late, harmless, the mould needs far longer to move).
-- Each FAULT alarm: (S) by its cause, (R) by `Reset_Cmd AND NOT cause`. `No_Fault` (De Morgan over the 9 FAULT bits), `NOT No_Fault` in the Start rung, 900 → 0 for both with Auto + `Reset_Cmd`, last rung: `NOT No_Fault` → MOVE 900 → `Step` **and** MOVE 900 → `MouldStep` (last writer of both).
+- Each FAULT alarm: (S) by its cause, (R) by `Reset_Cmd AND NOT cause`. `No_Fault` (De Morgan over the 9 FAULT bits; declared in stage 4 with initial TRUE, its contact is already in `Start_Accepted`, this stage adds only the rung that computes it), 900 → 0 for both with Auto + `Reset_Cmd`, last rung: `NOT No_Fault` → MOVE 900 → `Step` **and** MOVE 900 → `MouldStep` (last writer of both).
 
 **Test** (`test_blowmoulder_alarms.py`; `--quick` without the 2 min blocked warning): no alarm in a normal cycle; LOAD without `Preform_In_Oven` → FAULT after 3 s, both steps 900, all off, **exhaust open**; CLOSE without `Mould_Closed` → FAULT; HEAT at 900 → FAULT after 15 s, lamps 0; BLOW at raw 20000 → `Alm_BlowFault` after 2 s, **mould stays closed**, exhaust open; Reset → Start → 60 EXHAUST → open → eject; EXHAUST at raw 10000 → `Alm_ExhaustFault` after 3 s, Reset refused until raw ≤ 345 (`Pressure_Safe`); `OvenTemp` 1300 → FAULT also in Mode Stop; raw 27700 (> 400) → `Alm_OverPressure`; raw −2000 → `Alm_PressureSensor`, `Pressure_Safe` FALSE, mould closed, Reset refused until the raw value is back; EJECT with `Outfeed_Full` for 10 s → no jam (timer only with the ejector ON); State 3 for 2 min → warning, no FAULT. Earlier scripts adapted so no step lasts longer than its timeout.
 

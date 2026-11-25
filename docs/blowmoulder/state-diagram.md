@@ -132,7 +132,7 @@ Why two sequencers (as the packer): a step word can be in one step only. While t
 | `Oven_Ready` | `OvenTemp ≥ OvenSetpoint − OvenBand AND OvenTemp ≤ OvenSetpoint + OvenBand` | VIII window compare |
 | `Pressure_Reached` | `BlowPressure ≥ BlowSetpoint` (GE) | VIII compare |
 | `Pressure_Safe` | `BlowPressure < ExhaustLimit AND NOT Alm_PressureSensor` | VIII compare |
-| `Preform_Hot` | `Soak_Timer := TON(IN := Step_Heat AND Oven_Ready, PT := SoakTime)` | VII timers |
+| `Preform_Hot` | `Soak_Timer := TON(IN := Oven_Heat AND Oven_Ready, PT := SoakTime)` | VII timers |
 
 **Fixed constants** (internal variables with initial values, tuned with the simulator):
 
@@ -162,7 +162,7 @@ The ladder sketches below are for understanding only; the real rungs are written
 
 ### 1. Steps decide the outputs (same as the other machines)
 
-Two step words with their own transition rungs (`EQ Step,x AND … → MOVE y → Step`, `EQ MouldStep,x AND … → MOVE y → MouldStep`) and step bits (`Oven_Feed`, `Oven_Load`, `Step_Heat`, `Oven_Hot`, `Mould_WaitPreform`, `Mould_Grip`, …). Output requests:
+Two step words with their own transition rungs (`EQ Step,x AND … → MOVE y → Step`, `EQ MouldStep,x AND … → MOVE y → MouldStep`) and step bits (`Oven_Feed`, `Oven_Load`, `Oven_Heat`, `Oven_Hot`, `Mould_WaitPreform`, `Mould_Grip`, …). Output requests:
 
 ```
 HopperFeed     := Oven_Feed AND NOT Preform_At_Loader
@@ -243,7 +243,7 @@ BlowPressure := DINT_TO_INT( INT_TO_DINT(BlowPressure_Raw) * 400 / 27648 )      
 | Oven | FEED (no new preform loaded: `NOT Stop_Request` in 10 → 15) | LOAD → HEAT → HOT → handed to the mould → FEED → IDLE |
 | Mould | WAIT_PREFORM, **only when the oven station is already IDLE** (no hot preform left for it) | every step of the cycle up to EJECT |
 
-So Stop always ends with an **empty oven and an empty mould**: the last preform is blown and ejected. **Mode Stop** and **E-stop** abort both at once (steps → 0); the mould keeps its position (rule 4).
+So Stop always ends with an **empty oven and an empty mould**: the last preform is blown and ejected. **Mode Stop** and **E-stop** abort both at once (steps → 0), **except in FAULT**: both words stay 900 until Auto + Reset (the abort rung has `NOT Oven_Fault`); the mould keeps its position (rule 4).
 
 ### 8. Waiting is not a fault; one State for two stations
 
