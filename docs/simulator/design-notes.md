@@ -321,6 +321,22 @@ Every scenario starts with a fresh plant, but the PLC keeps its counters. A bott
 **Why does the test controller wait 0.5 s in WAIT_WRAP (`SETTLE_S`)?**
 Stage 4 found it: the PLC counts the 6th bottle at the gate and pushes in the same scan if the wrap side waits, but the bottle reaches the table 0.4 s later. The proposed PLC rung is a settle timer on WAIT_WRAP (roadmap, "Stage 4 as built"); until the user adds it, the real PLC makes the simulator warn "bottle onto the collation table with the pusher out" on every group. The physics was not bent to hide it: a count sensor at the table instead would let a 7th bottle through.
 
+## Blow moulder physics (`machines/blowmoulder.py`)
+
+Oven station (stage 1) parameters and their checks: `roadmap.md`, "Stage 1 as built".
+
+**Why does a preform only drop onto the loader place with the loader home?**
+The loader's pusher face covers the place while it is out. Without this rule a preform could arrive during the stroke and be pushed in by the same stroke, or land behind the pusher. Preforms only back up in the chute meanwhile; the chute keeps the time it already ran.
+
+**What does `OvenTemp` show with an empty pocket?**
+The pyrometer looks into the pocket: with a preform it sees the preform's surface, without one the pocket wall. When the arm takes the preform the wall starts at the preform's temperature (no jump on the HMI trend) and follows the lamps with τ 30 s. The PLC switches the lamps off without a preform (rule 5), so the wall only matters for the trend and for a lamp stuck on.
+
+**Why can the P controller not reach the window at Kp 5?**
+A preform at 100 °C needs about 28 % lamp power (`(100 − 20) / 2.83`). With `Bias` 0 that power comes only from the error: `Kp · error ≥ 28` needs an error of 5.7 °C at Kp 5, which is below 100 °C, outside the window: HEAT never ends (`Alm_OvenHeatTimeout` on the PLC). Kp ≥ 6 or a `Bias` near 30 % fixes it. That is the P offset of rule 5 taken to its end, not a model bug.
+
+**Why does the lamp loop oscillate at Kp 30?**
+The loop has dead time: the PLC's `LampPower` reaches the physics one tick (0.1 s) after the `OvenTemp` it was computed from, two when a scan is missed. With τ 8 s and 2.83 °C per % the loop gain is 2.83 · Kp, about 85 at Kp 30: the correction for one tick's error overshoots before the next reading arrives. With two ticks of dead time the temperature swings 102.9–105.3 °C (still inside the window, far below `OvenMax`); at Kp ≤ 25 it settles. Kept as a teaching point (P gain vs. dead time, roadmap Q5); the HMI limit of `Kp` (1–30) stays.
+
 ## Syrup room in the plant (`plant.py`)
 
 **Where is the cable between the two PLCs?**

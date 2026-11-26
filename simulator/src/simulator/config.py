@@ -192,3 +192,19 @@ TABLE_PACKS = 6  # places on the outfeed table
 TABLE_FULL_PACKS = 3  # Table_Full from this many packs: 3 places stay behind the sensor for every pack that is
 #                       already past READY (1 on the wrap conveyor + up to 2 in the oven, Q3)
 PALLETIZER_TAKE_S = 10.0  # the palletizer stand-in takes one pack every 10 s (a wrap cycle takes ~13 s)
+
+# --- Blow moulder: oven station (docs/blowmoulder/state-diagram.md rules 1, 5; PLC: MoveTimeout 3 s,
+#     OvenSetpoint 105.0 degC, OvenBand 5.0 (Oven_Ready 100-110 degC), SoakTime 1 s, HeatTimeout 15 s,
+#     OvenMax 130.0 degC, Kp 10 %/degC, Bias 0 %) ----------------------------------------------------------
+HOPPER_PREFORMS = 1000  # preforms in a full hopper (about 90 min at ~11 bottles/min)
+PREFORM_LOW = 50  # Preform_Low at or below this many preforms in the hopper (warning in FUXA); Hopper_Empty at 0
+CHUTE_S = 0.6  # HopperFeed ON -> the next preform reaches the loader. The PLC feeds only in FEED (after the
+#                hand-over), so it is part of the oven's cycle: chute 0.6 + LOAD 0.4 + heat ~2.8 + soak 1.0
+#                ~ 4.8 s, inside the ~5.1 s the mould needs between two hand-overs
+LOADER_OUT_S = 0.4  # loader home -> full stroke (Loader ON); MoveTimeout 3 s
+LOADER_RETURN_S = 0.3  # full stroke -> home on the spring (Loader OFF)
+LAMP_GAIN_C_PER_PCT = 2.83  # balance temperature above the room per % of LampPower: 100 % -> 303 degC,
+#                             30 % -> 105 degC (so P controller Kp 10 / Bias 0 settles ~3 degC low, rule 5)
+PREFORM_TAU_S = 8.0  # preform in the pocket: 20 -> 100 degC at 100 % in 2.8 s, + SoakTime 1 s (HeatTimeout 15 s);
+#                      100 % held reaches OvenMax 130 degC in 3.9 s
+POCKET_WALL_TAU_S = 30.0  # empty pocket: the pyrometer sees the wall, which cools slowly to the room
