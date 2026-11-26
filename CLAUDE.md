@@ -39,6 +39,7 @@ uv run python tests/run_filler.py         # ALL filler PLC test scripts in one c
 uv run python tests/run_syrup.py          # ALL syrup room PLC test scripts in one command (~4.5 min, --quick ~2.5 min; stage 0 also needs the filler on 502, else NOT RUN)
 uv run python tests/run_packer.py          # ALL packer PLC test scripts in one command (port 5024; stages 0–9 + the simulator link, 235 checks, ~11 min, --quick ~7 min without the two 2 min alarm timeouts)
 uv run python tests/run_blowmoulder.py     # ALL blow moulder PLC test scripts in one command (port 5025; stages 0–9, ~9.5 min, --quick ~7.5 min without the 2 min blocked warning; names to pick some, --list, --fail-fast)
+uv run python ../tools/ladder/bm_ladder.py all  # offline check of the blow moulder's main.ld: a fake PLC (scan interpreter + fake Modbus on a virtual clock) runs the real test scripts without runtime or Editor (~1 min; `test <script>` for one; tools/ladder/README.md also shows how rungs are written into main.ld)
 uv run python tests/run_labeler.py         # ALL labeler PLC test scripts in one command (~7.5 min, --quick ~3 min; stage 0 SKIPs its filler / syrup room checks when those PLCs are down)
 uv run python tests/test_signal_conditioning.py  # stage 3: Outfeed_Full filter + S6 edge (counted via GoodCount)
 uv run python tests/test_sequencer.py         # stage 4 (add --done with done bits forced in the debugger)
