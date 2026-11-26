@@ -446,7 +446,7 @@ Its conditions (`in_step`, `alarm`, `in_state`, `plc_running`) look at one PLC's
 **What cannot be a scenario?** Reset and Start (the HMI writes them), and `buffer_starved` is not in the live test script because it needs the filler PLC running too; run it by hand with both PLCs.
 
 
-## Pre-demo check with three PLCs (`tests/demo_check.py`, stage 8; labeler 2026-11-18)
+## Pre-demo check with three PLCs (`tests/demo_check.py`, stage 8; labeler 2026-11-18; five PLCs since the blow moulder 2026-11-26)
 
 **Why is the syrup room now a FAIL and not a WARN?**
 Since stage 5 the default `uv run simulator` drives both PLCs, and the filler only fills while the syrup room's real `Product_Available` is TRUE. Without the syrup runtime the demo line starves, so a missing container, program or Modbus server of `plc-syrup-carb` must stop the demo like the filler's does.
@@ -468,6 +468,9 @@ FUXA has no labeler device yet (the labeler HMI is not planned). A connection st
 
 **Why is the packer's FUXA link a note in D4, not a check?**
 FUXA has no packer device until the packer HMI (part C). A missing connection status tag would read as "not connected" and fail D4 forever, as it would have for the labeler before its HMI. The note says where the packer is operated instead (`tests/hmi.py --packer`); D7 still checks its mode and alarms, reading both step words and the second alarm byte (%MX7) that only the packer has.
+
+**Why is the blow moulder's FUXA link a note in D4, and how does D6 name the start options with five PLCs?**
+As the packer before its HMI: the blow moulder has no FUXA device until its part C, so D4 prints where it is operated (`tests/hmi.py --blowmoulder`) and D7 still checks its mode, both step words (`Step` / `MouldStep`) and the alarms in `%MX5` + `%MX7`. The CLI leaves PLCs out in fixed groups (`--filler-only` all but the filler, `--no-labeler` labeler + packer, `--no-packer` the packer, `--no-blowmoulder` the blow moulder, combinable with the two before), so D6 builds the option text from the set of free plant locks, e.g. "started with --no-packer --no-blowmoulder?"; a set no single simulator can produce gets the generic "restart `uv run simulator`".
 
 **Why does D6 name `--no-packer`, `--no-labeler` or `--filler-only`?**
 There is one plant lock per PLC port. The CLI can leave PLCs out in three ways: `--no-packer` (packer lock free), `--no-labeler` (labeler and packer free) and `--filler-only` (syrup room, labeler and packer free). D6 names the option that fits the free locks, so the fix is one restart without it instead of a search; other combinations (cannot come from one simulator) get the generic text.
