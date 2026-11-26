@@ -18,6 +18,12 @@ def qx(byte: int, bit: int) -> int:
     return byte * 8 + bit
 
 
+def qw(n: int) -> int:
+    """%QWn -> holding register number (analog output word; %QW0 = HR 0, verified 2026-11-25
+    with the blow moulder's LampPower). Same register table as %MW, below its offset."""
+    return n
+
+
 def mx(byte: int, bit: int) -> int:
     """%MXbyte.bit -> coil number (Boolean memory)."""
     return MX_COIL_OFFSET + byte * 8 + bit
