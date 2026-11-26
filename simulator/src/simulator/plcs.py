@@ -6,6 +6,8 @@
                 its reads and writes are documented at the class
     LabelerPlc  the labeler (port 5023): same pattern, own addresses (address_map_labeler.py)
     PackerPlc   the packer (port 5024): same pattern, own addresses (address_map_packer.py)
+    BlowmoulderPlc  the blow moulder (port 5025): same pattern, own addresses (address_map_blowmoulder.py);
+                also reads the analog output LampPower (HR 0) and writes a signed raw value
 
     PLC (OpenPLC runtime, Modbus TCP server)
       coils 0-5            ── read_outputs() ──►  FillerOutputs   ──► plant.step()
@@ -76,14 +78,16 @@ from simulator.address_map import (
     STATUS_START,
     UNUSED_MX0_7,
 )
+from simulator import address_map_blowmoulder as bm
 from simulator import address_map_labeler as lm
 from simulator import address_map_packer as pm
 from simulator import address_map_syrup as sm
+from simulator.machines.blowmoulder import BlowmoulderOutputs
 from simulator.machines.filler import FillerOutputs
 from simulator.machines.labeler import LabelerOutputs
 from simulator.machines.packer import PackerOutputs
 from simulator.machines.syrup import SyrupOutputs
-from simulator.plant import LabelerWrites, PackerWrites, SimWrites, SyrupSignals, SyrupWrites
+from simulator.plant import BlowmoulderWrites, LabelerWrites, PackerWrites, SimWrites, SyrupSignals, SyrupWrites
 
 RECONNECT_S = 2.0  # default: at most one connection attempt every 2 s while the PLC is away
 MAX_BACKOFF = 8  # a PLC that never answered is retried at most every RECONNECT_S x 8 (16 s by default)
@@ -520,6 +524,143 @@ def decode_packer_status(regs: list[int], alarm_span: list[bool], mode: int) -> 
     return PackerStatus(state, step, wrap_step, pack_count, *computed, *map(bool, alarms), mode)
 
 
+BLOWMOULDER_STEP_NAMES = {0: "IDLE", 10: "FEED", 15: "LOAD", 20: "HEAT", 25: "HOT", 900: "FAULT"}
+BLOWMOULDER_MOULD_STEP_NAMES = {0: "IDLE", 10: "WAIT_PREFORM", 20: "GRIP", 22: "SWING", 24: "RELEASE",
+                                26: "ARM_BACK", 30: "CLOSE", 40: "STRETCH", 50: "BLOW", 52: "HOLD", 60: "EXHAUST",
+                                62: "ROD_UP", 70: "OPEN", 80: "EJECT", 900: "FAULT"}
+BLOWMOULDER_STATE_NAMES = {0: "Stopped", 1: "Running", 2: "Starved", 3: "Blocked", 9: "Fault"}
+BLOWMOULDER_ALARM_NAMES = ("Alm_NoPreforms", "Alm_HandlingJam", "Alm_OutfeedBlocked", "Alm_CommLost",
+                           "Alm_MouldFault", "Alm_OvenOverTemp", "Alm_OvenHeatTimeout", "Alm_BlowFault",  # %MX5.0-5.7
+                           "Alm_ExhaustFault", "Alm_OverPressure", "Alm_PressureSensor")  # %MX7.0-7.2
+
+# The coils the simulator writes, looked up BY ADDRESS (as the packer). First block %MX0.0-%MX1.2: the 8
+# sensors and the wiring, the unused %MX1.0 sent FALSE. Second block %MX4.0-4.4: the five extra sensors.
+BLOWMOULDER_COIL_FIELDS = {
+    bm.PREFORM_AT_LOADER: ("preform_at_loader", lambda w: w.sensors.preform_at_loader),
+    bm.PREFORM_IN_OVEN: ("preform_in_oven", lambda w: w.sensors.preform_in_oven),
+    bm.ARM_AT_OVEN: ("arm_at_oven", lambda w: w.sensors.arm_at_oven),
+    bm.ARM_AT_MOULD: ("arm_at_mould", lambda w: w.sensors.arm_at_mould),
+    bm.MOULD_CLOSED: ("mould_closed", lambda w: w.sensors.mould_closed),
+    bm.MOULD_OPEN: ("mould_open", lambda w: w.sensors.mould_open),
+    bm.ROD_UP: ("rod_up", lambda w: w.sensors.rod_up),
+    bm.ROD_DOWN: ("rod_down", lambda w: w.sensors.rod_down),
+    bm.E_STOP_OK: ("e_stop_ok", lambda w: w.e_stop_ok),
+    bm.HEARTBEAT: ("heartbeat", lambda w: w.heartbeat),
+}
+BLOWMOULDER_EXTRA_FIELDS = {
+    bm.BOTTLE_IN_MOULD: ("bottle_in_mould", lambda w: w.sensors.bottle_in_mould),
+    bm.BOTTLE_EJECTED: ("bottle_ejected", lambda w: w.sensors.bottle_ejected),
+    bm.HOPPER_EMPTY: ("hopper_empty", lambda w: w.sensors.hopper_empty),
+    bm.PREFORM_LOW: ("preform_low", lambda w: w.sensors.preform_low),
+    bm.C1_FULL: ("c1_full", lambda w: w.sensors.c1_full),
+}
+BLOWMOULDER_ANALOG_FIELDS = ("oven_temp", "blow_pressure_raw")  # %MW12, %MW13 (signed)
+
+assert set(BLOWMOULDER_COIL_FIELDS) | {bm.UNUSED_MX1_0} == set(bm.SENSOR_BLOCK)
+assert set(BLOWMOULDER_EXTRA_FIELDS) == set(bm.EXTRA_SENSOR_BLOCK)
+assert set(bm.SENSOR_BLOCK) | set(bm.EXTRA_SENSOR_BLOCK) == bm.SIM_WRITE_COILS
+assert len(BLOWMOULDER_ANALOG_FIELDS) == bm.ANALOG_COUNT and bm.SIM_WRITE_REGISTERS == {bm.OVEN_TEMP,
+                                                                                         bm.BLOW_PRESSURE_RAW}
+
+# Reads that span gaps (read only, as the packer's):
+# - status: HR %MW40..%MW53 = the 3 computed words, 7 unused, the 4 status words (one request, not two);
+# - alarms: coils %MX5.0..%MX7.2 = 8 alarms, the unused %MX6, 3 alarms (one request, not two);
+# - read-back: coils %MX0.0..%MX4.4 = both sensor blocks and the HMI / PLC bytes between them.
+BLOWMOULDER_REGS_START = bm.COMPUTED_START
+BLOWMOULDER_REGS_COUNT = bm.STATUS_START + bm.STATUS_COUNT - bm.COMPUTED_START  # 14
+BLOWMOULDER_ALARM_SPAN = bm.EXTRA_ALARMS_START + bm.EXTRA_ALARMS_COUNT - bm.ALARMS_START  # 19
+BLOWMOULDER_READBACK_COUNT = bm.EXTRA_SENSOR_BLOCK[-1] + 1 - bm.SENSOR_BLOCK_START  # 37
+assert bm.COMPUTED_START < bm.STATUS_START and bm.ALARMS_START < bm.EXTRA_ALARMS_START
+
+
+def decode_blowmoulder_outputs(bits: list[bool], lamp_raw: int) -> BlowmoulderOutputs:
+    """Coils 0-9 (%QX0.0-%QX1.1, pymodbus pads them to 16 bits: sliced) + HR 0 (%QW0 LampPower, signed INT)."""
+    return BlowmoulderOutputs(*bits[: bm.OUTPUTS_COUNT], lamp_power=from_register(lamp_raw))
+
+
+def encode_blowmoulder_sensor_block(w: BlowmoulderWrites) -> list[bool]:
+    """BlowmoulderWrites -> the 11 coil values of the first bulk write, in bm.SENSOR_BLOCK order."""
+    return [bool(BLOWMOULDER_COIL_FIELDS[a][1](w)) if a in BLOWMOULDER_COIL_FIELDS else False
+            for a in bm.SENSOR_BLOCK]
+
+
+def encode_blowmoulder_extra_block(w: BlowmoulderWrites) -> list[bool]:
+    """BlowmoulderWrites -> the 5 coil values of the second bulk write (%MX4.0-4.4)."""
+    return [bool(BLOWMOULDER_EXTRA_FIELDS[a][1](w)) for a in bm.EXTRA_SENSOR_BLOCK]
+
+
+def encode_blowmoulder_analog(w: BlowmoulderWrites) -> list[int]:
+    """OvenTemp (0.1 degC) and BlowPressure_Raw (counts, SIGNED: a wire break is negative) as register values."""
+    return [to_register(getattr(w.sensors, name)) for name in BLOWMOULDER_ANALOG_FIELDS]
+
+
+def foreign_blowmoulder_writes(w: BlowmoulderWrites, span: list[bool], analog: list[int]) -> list[str]:
+    """Signals whose read-back value differs from what the simulator wrote (see foreign_writes).
+
+    `span` = the coils %MX0.0..%MX4.4 read in one request; only the simulator's own two blocks are judged.
+    `analog` = the registers %MW12..13 as read (unsigned register values).
+    """
+    wrong = []
+    for address, expected in zip(bm.SENSOR_BLOCK, encode_blowmoulder_sensor_block(w)):
+        if span[address - bm.SENSOR_BLOCK_START] != expected:
+            wrong.append(BLOWMOULDER_COIL_FIELDS[address][0] if address in BLOWMOULDER_COIL_FIELDS
+                         else f"coil {address}")
+    for address, expected in zip(bm.EXTRA_SENSOR_BLOCK, encode_blowmoulder_extra_block(w)):
+        if span[address - bm.SENSOR_BLOCK_START] != expected:
+            wrong.append(BLOWMOULDER_EXTRA_FIELDS[address][0])
+    for name, raw, expected in zip(BLOWMOULDER_ANALOG_FIELDS, analog, encode_blowmoulder_analog(w)):
+        if raw != expected:
+            wrong.append(name)
+    return wrong
+
+
+@dataclass(frozen=True)
+class BlowmoulderStatus:
+    """What the blow moulder PLC reports about itself (event log, panel)."""
+
+    state: int  # 0 Stopped, 1 Running, 2 Starved, 3 Blocked, 9 Fault (both stations)
+    step: int  # oven station: 0 IDLE, 10 FEED ... 25 HOT, 900 FAULT
+    mould_step: int  # mould station: 0 IDLE, 10 WAIT_PREFORM ... 80 EJECT, 900 FAULT
+    bottle_count: int
+    lamp_calc: int  # % the P controller asks for (LampPower follows it only with Lamps_On)
+    blow_pressure: int  # 0.1 bar, the PLC's scaling of BlowPressure_Raw (signed)
+    oven_error: int  # OvenSetpoint - OvenTemp, 0.1 degC (signed)
+    alm_no_preforms: bool  # a warning, not latched
+    alm_handling_jam: bool
+    alm_outfeed_blocked: bool  # a warning
+    alm_comm_lost: bool
+    alm_mould_fault: bool
+    alm_oven_over_temp: bool
+    alm_oven_heat_timeout: bool
+    alm_blow_fault: bool
+    alm_exhaust_fault: bool
+    alm_over_pressure: bool
+    alm_pressure_sensor: bool
+    mode: int = 1  # ModeReq as the HMI set it: 0 Stop, 1 Auto, 2 Manual (default only for tests)
+
+    @property
+    def alarms(self) -> dict[str, bool]:
+        flags = (self.alm_no_preforms, self.alm_handling_jam, self.alm_outfeed_blocked, self.alm_comm_lost,
+                 self.alm_mould_fault, self.alm_oven_over_temp, self.alm_oven_heat_timeout, self.alm_blow_fault,
+                 self.alm_exhaust_fault, self.alm_over_pressure, self.alm_pressure_sensor)
+        return dict(zip(BLOWMOULDER_ALARM_NAMES, flags))
+
+
+def decode_blowmoulder_status(regs: list[int], alarm_span: list[bool], mode: int) -> BlowmoulderStatus:
+    """regs = %MW40..%MW53 (BLOWMOULDER_REGS_COUNT words), alarm_span = %MX5.0..%MX7.2, mode = %MW1.
+
+    Unlike the packer's, two computed words can be negative (BlowPressure, OvenError): every word goes
+    through from_register()."""
+    words = [from_register(r) for r in regs]
+    lamp_calc, blow_pressure, oven_error = words[: bm.COMPUTED_COUNT]
+    status_at = bm.STATUS_START - BLOWMOULDER_REGS_START
+    state, step, mould_step, bottle_count = words[status_at: status_at + bm.STATUS_COUNT]
+    extra_at = bm.EXTRA_ALARMS_START - bm.ALARMS_START
+    alarms = alarm_span[: bm.ALARMS_COUNT] + alarm_span[extra_at: extra_at + bm.EXTRA_ALARMS_COUNT]
+    return BlowmoulderStatus(state, step, mould_step, bottle_count, lamp_calc, blow_pressure, oven_error,
+                             *map(bool, alarms), mode)
+
+
 # --- Async client ------------------------------------------------------------------
 class PlcLink:
     """Everything a Modbus link to ONE OpenPLC runtime needs, whatever the machine.
@@ -901,3 +1042,72 @@ class PackerPlc(PlcLink):
         client = self._live_client("read back OvenTemp")
         oven = await self._finish("read back OvenTemp", client.read_holding_registers(pm.OVEN_TEMP, count=1))
         return foreign_packer_writes(w, span.bits[:PACKER_READBACK_COUNT], oven.registers[0])
+
+
+class BlowmoulderPlc(PlcLink):
+    """Async Modbus client of the blow moulder PLC (port 5025).
+
+        coils 0-9 + HR 0 (LampPower)    ── read_outputs() ──►  BlowmoulderOutputs (plant.step)
+        coils 8192-8202, 8224-8228,
+        HR 1036-1037 (OvenTemp,
+        BlowPressure_Raw signed)        ◄── write() ────────   BlowmoulderWrites  (plant.blowmoulder_writes)
+        HR 1064-1077, coils 8232-8250, HR 1025 ── read_status() ──► BlowmoulderStatus
+
+    The packer's pattern with two differences. read_outputs() makes TWO requests: the ten digital outputs
+    (coils) and the analog output LampPower (%QW0 = holding register 0, the first analog output of the line).
+    HR 0 is read, never written: it is not in SIM_WRITE_REGISTERS, so the one-writer guard refuses it. And
+    the values are signed in both directions: BlowPressure_Raw is negative on a wire break (written with
+    to_register), BlowPressure and OvenError can be negative (read with from_register).
+    """
+
+    write_coils = bm.SIM_WRITE_COILS
+    write_registers = bm.SIM_WRITE_REGISTERS
+
+    def __init__(
+        self,
+        host: str = config.PLC_HOST,
+        port: int = config.BLOWMOULDER_PORT,
+        reconnect_s: float = RECONNECT_S,
+        timeout_s: float = TIMEOUT_S,
+    ) -> None:
+        super().__init__(host, port, reconnect_s, timeout_s)
+
+    async def read_outputs(self) -> BlowmoulderOutputs:
+        client = self._live_client("read outputs")
+        coils = await self._finish("read outputs", client.read_coils(bm.OUTPUTS_START, count=bm.OUTPUTS_COUNT))
+        client = self._live_client("read LampPower")
+        lamp = await self._finish("read LampPower", client.read_holding_registers(bm.LAMP_POWER, count=1))
+        return decode_blowmoulder_outputs(coils.bits, lamp.registers[0])
+
+    async def write(self, w: BlowmoulderWrites) -> None:
+        """The sensor block, the five extra sensors and the two analog words: three requests."""
+        await self._write_coils(bm.SENSOR_BLOCK_START, encode_blowmoulder_sensor_block(w))
+        await self._write_coils(bm.EXTRA_SENSOR_BLOCK_START, encode_blowmoulder_extra_block(w))
+        await self._write_registers(bm.ANALOG_START, encode_blowmoulder_analog(w))
+
+    async def write_heartbeat(self, value: bool) -> None:
+        """Only the heartbeat coil (first contact)."""
+        await self._write_coils(bm.HEARTBEAT, [value])
+
+    async def read_status(self) -> BlowmoulderStatus:
+        client = self._live_client("read status")
+        regs = await self._finish("read status", client.read_holding_registers(BLOWMOULDER_REGS_START,
+                                                                               count=BLOWMOULDER_REGS_COUNT))
+        client = self._live_client("read alarms")
+        alarms = await self._finish("read alarms", client.read_coils(bm.ALARMS_START, count=BLOWMOULDER_ALARM_SPAN))
+        client = self._live_client("read mode")
+        mode = await self._finish("read mode", client.read_holding_registers(bm.MODE_REQ, count=1))  # read only
+        return decode_blowmoulder_status(regs.registers, alarms.bits, mode.registers[0])
+
+    async def verify_writes(self, w: BlowmoulderWrites) -> list[str]:
+        """Read both coil blocks (one span) and the two analog words back; names of the signals that differ.
+
+        Pass the values written LAST tick and call it before the next write (see FillerPlc).
+        """
+        client = self._live_client("read back sensors")
+        span = await self._finish("read back sensors", client.read_coils(bm.SENSOR_BLOCK_START,
+                                                                         count=BLOWMOULDER_READBACK_COUNT))
+        client = self._live_client("read back analog")
+        analog = await self._finish("read back analog", client.read_holding_registers(bm.ANALOG_START,
+                                                                                      count=bm.ANALOG_COUNT))
+        return foreign_blowmoulder_writes(w, span.bits[:BLOWMOULDER_READBACK_COUNT], analog.registers)

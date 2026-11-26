@@ -358,6 +358,9 @@ Every output OFF except the exhaust, which vents (`plant.BLOWMOULDER_DEAD`). The
 **Why does the backup test use a filler that stops taking, not a filler FAULT?**
 The filler stops C1 only on E-stop or FAULT, and `C1_Full` watches slot 1: a bottle put onto a standing C1 stays in slot 0, so `Outfeed_Full` never comes (HMI issue I18). The blow moulder's dead plate takes one more bottle, then the ejector stops halfway and the PLC raises `Alm_HandlingJam`; `test_plant_blowmoulder.py` documents that. The backup of rule 8 happens when the filler does not take bottles while C1 runs (Stop mode, a slow filler): the queue reaches slot 1, the oven loads nothing new, the bottle waits in the open mould.
 
+**Why does the blow moulder's link read two blocks for its outputs and decode signed words?**
+`LampPower` is an analog OUTPUT (`%QW0`), and OpenPLC puts `%QWn` at holding register n, below the `%MW` area: one more read per tick next to the coils 0–9. The simulator only reads it; it is not in `SIM_WRITE_REGISTERS`, so the one-writer guard raises before any write to HR 0 (the PLC would overwrite it anyway). Modbus registers are unsigned 16-bit, the PLC's INT is signed: `BlowPressure_Raw` is written with `to_register()` (a wire break, −2000, travels as 63536), and every status word is read with `from_register()` because `BlowPressure` and `OvenError` can be negative (the packer's status has no negative word, so its decoder skips that).
+
 ## Syrup room in the plant (`plant.py`)
 
 **Where is the cable between the two PLCs?**
