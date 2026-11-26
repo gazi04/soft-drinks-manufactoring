@@ -208,3 +208,32 @@ LAMP_GAIN_C_PER_PCT = 2.83  # balance temperature above the room per % of LampPo
 PREFORM_TAU_S = 8.0  # preform in the pocket: 20 -> 100 degC at 100 % in 2.8 s, + SoakTime 1 s (HeatTimeout 15 s);
 #                      100 % held reaches OvenMax 130 degC in 3.9 s
 POCKET_WALL_TAU_S = 30.0  # empty pocket: the pyrometer sees the wall, which cools slowly to the room
+
+# --- Blow moulder: mould station (docs/blowmoulder/state-diagram.md rules 1-4, 6; PLC: MoveTimeout 3 s,
+#     GripTime 0.3 s, HoldTime 1.0 s, BlowSetpoint 35.0 bar (HMI max 38.0), BlowTimeout 2 s, MaxPressure
+#     40.0 bar, ExhaustLimit 0.5 bar, ExhaustTimeout 3 s, RawFull 27648 = PressFull 40.0 bar) ------------------
+# Moving parts are positions 0..1; the time is for a full stroke. Every one is far below MoveTimeout 3 s.
+GRIPPER_S = 0.2  # gripper open <-> closed; GripTime 0.3 s (GRIP and RELEASE) gives it time
+ARM_SWING_S = 0.5  # transfer arm oven -> mould (ArmToMould ON)
+ARM_RETURN_S = 0.5  # mould -> oven on the spring (ArmToMould OFF)
+ARM_CLEAR = 0.5  # arm position from which it is inside the mould: needs the mould open, the rod up, the ejector home
+MOULD_CLOSE_S = 0.5  # mould halves open -> closed and locked (MouldClose ON, double acting)
+MOULD_OPEN_S = 0.5  # closed -> open (MouldClose OFF)
+ROD_DOWN_S = 0.4  # stretch rod up -> down (StretchRod ON); pre-blow runs meanwhile
+ROD_UP_S = 0.3  # down -> up on the spring
+EJECTOR_OUT_S = 0.3  # ejector home -> full stroke: the bottle goes onto the dead plate
+EJECTOR_RETURN_S = 0.3  # full stroke -> home on the spring
+EJECTOR_BLOCKED = 0.5  # a bottle still on the dead plate stops the ejector here (it cannot finish: HandlingJam)
+# Blow pressure: one cavity pressure, sealed only while the mould is fully closed. Every open valve pulls it
+# toward its source with its own time constant (parallel paths, solved exactly as the lamps).
+PRE_BLOW_BAR = 8.0  # pre-blow regulator
+PRE_BLOW_TAU_S = 0.1  # ~7.9 bar when the rod is down (0.4 s)
+HIGH_BLOW_BAR = 39.0  # high-blow regulator: below MaxPressure 40.0, above BlowSetpoint (35.0, HMI max 38.0)
+HIGH_BLOW_TAU_S = 0.15  # 8 -> 35 bar in 0.31 s, 8 -> 38 bar in 0.52 s (BlowTimeout 2 s)
+EXHAUST_TAU_S = 0.15  # 39 -> 0.5 bar in 0.65 s (ExhaustTimeout 3 s); with the high blow open it holds ~19.5 bar
+OPEN_SAFE_BAR = 0.5  # audit: the mould opened with more pressure inside (the PLC's ExhaustLimit is the same)
+BLOWN_BAR = 30.0  # a preform stretched and blown to at least this is a good bottle (audit only)
+BLOW_MIN_C = 95.0  # audit: colder at the hand-over = blown cold (PLC window 100-110 degC)
+OVERHEAT_C = 120.0  # audit: hotter at any time = overheated (crystallised); the PLC faults at OvenMax 130 degC
+BOTTLE_EJECTED_S = 0.2  # Bottle_Ejected ON while the bottle drops onto C1: 2 ticks, one per bottle (>= 5 s apart)
+C1_FULL_SLOT = 1  # C1 slot watched by C1_Full, same reason as S7_SLOT / C3_FULL_SLOT (2 s Outfeed_Full filter)

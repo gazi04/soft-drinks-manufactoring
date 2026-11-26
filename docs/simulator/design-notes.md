@@ -337,6 +337,21 @@ A preform at 100 °C needs about 28 % lamp power (`(100 − 20) / 2.83`). With `
 **Why does the lamp loop oscillate at Kp 30?**
 The loop has dead time: the PLC's `LampPower` reaches the physics one tick (0.1 s) after the `OvenTemp` it was computed from, two when a scan is missed. With τ 8 s and 2.83 °C per % the loop gain is 2.83 · Kp, about 85 at Kp 30: the correction for one tick's error overshoots before the next reading arrives. With two ticks of dead time the temperature swings 102.9–105.3 °C (still inside the window, far below `OvenMax`); at Kp ≤ 25 it settles. Kept as a teaching point (P gain vs. dead time, roadmap Q5); the HMI limit of `Kp` (1–30) stays.
 
+**When does the preform leave the oven pocket?**
+At the arm's first move with the gripper fully closed, not when the gripper closes. The PLC's GRIP step only closes the gripper; `Preform_In_Oven` must stay TRUE until SWING, where the oven station sees it drop and goes back to FEED. An arm that leaves with the gripper open leaves the preform in the pocket.
+
+**Why is the preform let go as soon as the gripper starts to open?**
+It makes the release a single moment: either the arm is at an open, empty mould (the preform is in the mould, `Bottle_In_Mould`) or it is not (the preform drops, a warning). RELEASE waits `GripTime` 0.3 s anyway, longer than the 0.2 s the gripper needs.
+
+**How is the blow pressure modelled?**
+One cavity pressure, sealed only while the mould is fully closed; an opening mould vents at once (audit above 0.5 bar). Each open valve is a path toward its source (8 bar, the high-blow regulator, 0 bar) with its own time constant; several open valves give an exponential toward their weighted mean, solved exactly per step as the lamps. That is why high blow with the exhaust open settles at about 19.5 bar: below `BlowSetpoint`, so the PLC's `Alm_BlowFault` catches it. The regulator is an attribute (`high_blow_bar`), so the stage 6 faults (`air_low`, `regulator_failed`) only change one number.
+
+**Why a dead plate between the mould and C1?**
+The filler drives C1 and can stop it (E-stop, FAULT) while its `C1_Full` slot is still free. The ejector always finishes its stroke onto the plate; the bottle drops onto C1's slot 0 when that is free (`Bottle_Ejected` then). Only a second bottle with the plate still occupied stops the ejector halfway: `Bottle_In_Mould` stays and the PLC sees a real `Alm_HandlingJam` (roadmap Q3).
+
+**Why is the bottle judged by its temperature at the hand-over?**
+A preform does not cool outside the oven in the model (a held one would lose ~16 °C at τ 8 s before the blow, a cooling the real machine keeps small with a fast transfer). So `transfer_c` (blown cold below 95 °C) and the peak in the oven (overheated above 120 °C) are what the audit uses.
+
 ## Syrup room in the plant (`plant.py`)
 
 **Where is the cable between the two PLCs?**
