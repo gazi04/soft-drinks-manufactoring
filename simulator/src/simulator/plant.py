@@ -1,15 +1,17 @@
 """Plant: the whole simulated world around the PLCs, in one step().
 
     Supply ─► C1 ─► Filler ─► C2 ─► LabelerStandIn
+    (or Blowmoulder ─► C1, only with_blowmoulder=True)
                  ▲   │ product used    └─► Labeler ─► C3 ─► PackerStandIn   (only with_labeler=True)
     Product_Available│ ▼                                └─► Packer ─► PalletizerStandIn
     (wire)  ◄── SyrupRoom: syrup tank,              (only with_packer=True, needs with_labeler)
                  mixing tank, buffer tank (only with_syrup=True)
                  + wiring: Product_Available, E_Stop_OK, Heartbeats
 
-    PLC outputs (FillerOutputs, SyrupSignals, LabelerOutputs, PackerOutputs)
-        ──► plant.step(out, dt, syrup, labeler, packer) ──► SimWrites + events
-        (SyrupWrites / LabelerWrites / PackerWrites from syrup_writes() / labeler_writes() / packer_writes())
+    PLC outputs (FillerOutputs, SyrupSignals, LabelerOutputs, PackerOutputs, BlowmoulderOutputs)
+        ──► plant.step(out, dt, syrup, labeler, packer, blowmoulder) ──► SimWrites + events
+        (SyrupWrites / LabelerWrites / PackerWrites / BlowmoulderWrites from syrup_writes() / labeler_writes() /
+        packer_writes() / blowmoulder_writes())
 
 The plant is still pure physics: it gets the PLC outputs, moves the world by dt
 seconds and returns every value the simulator writes back to the PLC. It
@@ -25,6 +27,7 @@ from simulator import config
 from simulator.bottle import BottleFactory
 from simulator.conveyor import Conveyor
 from simulator.events import Event
+from simulator.machines.blowmoulder import Blowmoulder, BlowmoulderOutputs, BlowmoulderSensors
 from simulator.machines.filler import Filler, FillerOutputs
 from simulator.machines.labeler import Labeler, LabelerOutputs, LabelerSensors
 from simulator.machines.packer import Packer, PackerOutputs, PackerSensors
@@ -87,6 +90,22 @@ class PackerWrites:
     anim: tuple[int, int, int, int] = (0, 0, 0, 0)  # HMI animation %MW70..73: wrap cells, oven cells, table, sheet
 
 
+@dataclass(frozen=True)
+class BlowmoulderWrites:
+    """Every value the simulator writes to the blow moulder PLC: sensors and wiring (animation words: HMI part C)."""
+
+    sensors: BlowmoulderSensors
+    e_stop_ok: bool
+    heartbeat: bool
+
+
+# What the blow moulder's valves and cylinders do when its PLC does not answer: every output OFF, but the exhaust
+# vents. It is a normally-open valve (docs/blowmoulder/state-diagram.md rule 3): lose the PLC, lose the air, and the
+# bottle vents by itself. The mould then opens on its valve's spring side (a known model limit: the real PLC would
+# hold a closed mould, rule 4).
+BLOWMOULDER_DEAD = BlowmoulderOutputs(exhaust_valve=True)
+
+
 class PulseWire:
     """What the PLC sees of a COUNTED pulse sensor (the packer's Bottle_Counted and Film_Pulse).
 
@@ -129,7 +148,8 @@ class PulseWire:
 
 
 class Plant:
-    def __init__(self, *, with_syrup: bool = False, with_labeler: bool = False, with_packer: bool = False) -> None:
+    def __init__(self, *, with_syrup: bool = False, with_labeler: bool = False, with_packer: bool = False,
+                 with_blowmoulder: bool = False) -> None:
         if with_packer and not with_labeler:
             raise ValueError("with_packer needs with_labeler: the packer takes its bottles from the labeler's C3")
         self.now = 0.0  # simulation time in seconds
@@ -137,7 +157,17 @@ class Plant:
         self.c1 = Conveyor("C1")
         self.c2 = Conveyor("C2")
         self.filler = Filler(self.c1, self.c2)
-        self.supply = Supply(self.c1, self.factory)
+        # The blow moulder is optional: without it Supply puts the bottles onto C1 (the old behaviour). With it,
+        # the blow moulder PLC makes them from preforms; the bottle ids come from the same factory.
+        self.supply: Supply | None = None
+        self.blowmoulder: Blowmoulder | None = None
+        if with_blowmoulder:
+            self.blowmoulder = Blowmoulder(self.c1, self.factory)
+        else:
+            self.supply = Supply(self.c1, self.factory)
+        self.blowmoulder_heartbeat = Heartbeat()
+        # What the blow moulder PLC said in the last tick; None = no answer (BLOWMOULDER_DEAD)
+        self.blowmoulder_outputs: BlowmoulderOutputs | None = None
         # The labeler is optional: without it a stand-in drives C2 and takes its bottles (the old behaviour).
         # With it, the labeler PLC drives C2, the labeler pushes onto C3 and a packer stand-in empties C3 –
         # or, with_packer, the packer PLC drives C3 and the real packer takes its bottles (a palletizer
@@ -186,6 +216,7 @@ class Plant:
         self._spin_seen = False
         self._counted_wire = PulseWire()  # Bottle_Counted and Film_Pulse: the packer's counted pulses
         self._film_wire = PulseWire()
+        self._ejected_seen = False  # Bottle_Ejected: the blow moulder's pulse sensor
 
     def step(
         self,
@@ -194,6 +225,7 @@ class Plant:
         syrup: SyrupSignals | None = None,
         labeler: LabelerOutputs | None = None,
         packer: PackerOutputs | None = None,
+        blowmoulder: BlowmoulderOutputs | None = None,
     ) -> tuple[SimWrites, list[Event]]:
         """Move the world by dt seconds with the given PLC outputs.
 
@@ -203,6 +235,8 @@ class Plant:
         It is ignored when the plant has no labeler (the stand-in drives C2).
         `packer` are the packer PLC's outputs; None = that PLC does not answer: all OFF, so C3 stands
         and the oven is off. It is ignored when the plant has no real packer.
+        `blowmoulder` are the blow moulder PLC's outputs; None = that PLC does not answer: all OFF, the exhaust
+        vents (BLOWMOULDER_DEAD). It is ignored when the plant has no blow moulder (Supply fills C1).
 
         A late tick (dt longer than SUBSTEP_S) is split into equal smaller steps.
         One big step would let two things that happen one after the other happen at
@@ -222,7 +256,8 @@ class Plant:
         sub-step of the tick (report 7.3: every pulse lasts at least one tick).
         Presence sensors (S3-S5) are not stretched: a stale ON would let the PLC
         open a valve over a bottle that has already moved on. The labeler's pulse
-        sensors (Label_Mark, Spin_Pulse) are kept the same way. The packer's counted pulses
+        sensors (Label_Mark, Spin_Pulse) and the blow moulder's Bottle_Ejected (one per bottle, >= 5 s apart)
+        are kept the same way. The packer's counted pulses
         (Bottle_Counted, Film_Pulse) come faster and go through a PulseWire, which never merges two.
         """
         events: list[Event] = []
@@ -233,6 +268,8 @@ class Plant:
         labeler_out = self.labeler_outputs or LabelerOutputs()
         self.packer_outputs = packer if self.packer is not None else None
         packer_out = self.packer_outputs or PackerOutputs()
+        self.blowmoulder_outputs = blowmoulder if self.blowmoulder is not None else None
+        blowmoulder_out = self.blowmoulder_outputs or BLOWMOULDER_DEAD
         if dt > config.SLOW_TICK_S:
             events.append(Event.sim(self.now + dt, f"slow tick: {dt:.2f} s (outputs were old for that long)", warning=True))
         # The heartbeats are stepped once per TICK, not per sub-step: the PLC only sees the value at the
@@ -241,10 +278,11 @@ class Plant:
         self.syrup_heartbeat.step(dt)
         self.labeler_heartbeat.step(dt)
         self.packer_heartbeat.step(dt)
+        self.blowmoulder_heartbeat.step(dt)
         n = max(1, math.ceil(dt / config.SUBSTEP_S - 1e-9))
-        self._s6_seen = self._s8_seen = self._mark_seen = self._spin_seen = False
+        self._s6_seen = self._s8_seen = self._mark_seen = self._spin_seen = self._ejected_seen = False
         for _ in range(n):
-            events += self._advance(out, syrup_out, labeler_out, packer_out, dt / n)
+            events += self._advance(out, syrup_out, labeler_out, packer_out, blowmoulder_out, dt / n)
             s = self.filler.sensors()
             self._s6_seen |= s.s6
             self._s8_seen |= s.s8
@@ -252,6 +290,8 @@ class Plant:
                 ls = self.labeler.sensors()
                 self._mark_seen |= ls.label_mark
                 self._spin_seen |= ls.spin_pulse
+            if self.blowmoulder is not None:
+                self._ejected_seen |= self.blowmoulder.bottle_ejected
             if self.packer is not None:
                 self._counted_wire.sample(self.packer.bottle_counted)
                 self._film_wire.sample(self.packer.wrapper.film.film_pulse)
@@ -266,13 +306,18 @@ class Plant:
         syrup_out: SyrupOutputs,
         labeler_out: LabelerOutputs,
         packer_out: PackerOutputs,
+        blowmoulder_out: BlowmoulderOutputs,
         dt: float,
     ) -> list[Event]:
         """One physics step of at most SUBSTEP_S."""
         self.now += dt
         events: list[Event] = []
-        # Bottles flow from left to right: supply -> C1 -> filler -> C2 -> labeler (-> C3 -> packer -> palletizer)
-        events += self.supply.step(dt, self.now)
+        # Bottles flow from left to right: supply or blow moulder -> C1 -> filler -> C2 -> labeler (-> C3 -> packer
+        # -> palletizer)
+        if self.blowmoulder is not None:
+            events += self.blowmoulder.step(blowmoulder_out, dt, self.now)
+        else:
+            events += self.supply.step(dt, self.now)
         self.c1.step(out.conveyor1, dt)
         if self.syrup is not None:
             events += self.syrup.step(syrup_out, dt, self.now)
@@ -402,3 +447,14 @@ class Plant:
             return None
         s = replace(self.packer.sensors(), bottle_counted=self._counted_wire.value, film_pulse=self._film_wire.value)
         return PackerWrites(s, self.e_stop_ok, self.packer_heartbeat.value, anim=self.packer.anim_words())
+
+    def blowmoulder_writes(self) -> BlowmoulderWrites | None:
+        """Current sensor and wiring values for the blow moulder PLC (None without the blow moulder).
+
+        Bottle_Ejected is ON if it was ON at any sub-step of the last tick (see step()).
+        """
+        if self.blowmoulder is None:
+            return None
+        s = self.blowmoulder.sensors()
+        s = replace(s, bottle_ejected=s.bottle_ejected or self._ejected_seen)
+        return BlowmoulderWrites(s, self.e_stop_ok, self.blowmoulder_heartbeat.value)

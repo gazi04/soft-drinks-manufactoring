@@ -43,6 +43,7 @@ class _Spec:
     labeler: bool = False  # needs the real labeler; with the stand-in the command is ignored with a warning
     packer_standin: bool = False  # needs the packer stand-in; with the real packer the command is ignored with a warning
     packer: bool = False  # needs the real packer; with the stand-in the command is ignored with a warning
+    supply: bool = False  # needs the bottle supply; with the real blow moulder the command is ignored with a warning
 
 
 def _set_supply_rate(plant: Plant, v) -> None:
@@ -242,9 +243,9 @@ def _packer_heartbeat(plant: Plant, v) -> None:
 
 
 COMMANDS: dict[str, _Spec] = {
-    "supply_rate": _Spec(float, _set_supply_rate, "bottles per minute put on C1 (0 = none)"),
-    "add_bottles": _Spec(int, _add_bottles, "put n extra bottles on C1"),
-    "supply_paused": _Spec(bool, _set_supply_paused, "TRUE = the supply puts no bottles on C1"),
+    "supply_rate": _Spec(float, _set_supply_rate, "bottles per minute put on C1 (0 = none)", supply=True),
+    "add_bottles": _Spec(int, _add_bottles, "put n extra bottles on C1", supply=True),
+    "supply_paused": _Spec(bool, _set_supply_paused, "TRUE = the supply puts no bottles on C1", supply=True),
     "fill_flow": _Spec(float, _set_fill_flow, "fill flow in ml/s (100 = normal, < 50 = fill timeout)"),
     "product_available": _Spec(bool, _set_product_available, "Product_Available wire from the syrup room (FALSE = pipe cut)"),
     "e_stop": _Spec(bool, _set_e_stop, "TRUE = E-stop pressed (E_Stop_OK FALSE)"),
@@ -359,6 +360,11 @@ class CommandQueue:
             if spec.packer and plant.packer is None:
                 events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "
                                         "no real packer (run without --no-packer / --no-labeler / --filler-only)",
+                                        warning=True))
+                continue
+            if spec.supply and plant.supply is None:
+                events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "
+                                        "the real blow moulder makes the bottles (run with --no-blowmoulder)",
                                         warning=True))
                 continue
             if spec.packer_standin and plant.packer_standin is None:

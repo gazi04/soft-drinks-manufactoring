@@ -2,11 +2,13 @@
 mould station (arm, gripper, mould, stretch rod, blow air, ejector, dead plate onto C1).  uv run pytest
 
 No PLC here: the tests write the PLC outputs by hand, in ticks of 0.1 s as the plant will.
-`plc_lamp_power` is the PLC's P controller (state-diagram.md rule 5) in the PLC's integer math, and
-`OvenStation` plays the oven station's step table (FEED -> LOAD -> HEAT -> HOT) in the real loop's
-order (read sensors, set outputs, step); `MouldStation` does the same for the mould station's step table
-(10 WAIT_PREFORM -> 20 GRIP -> ... -> 80 EJECT -> 10). Their outputs reach the physics `delay` ticks late: 1 tick is the
-real loop (the PLC scans several times between the simulator's write and its next read), 2 ticks the
+`plc_lamp_power` / `plc_pressure` are the PLC's P controller (rule 5) and pressure scaling (rule 6) in the
+PLC's integer math. `BlowmoulderTestController` plays the PLC's two sequencers (oven station FEED -> LOAD ->
+HEAT -> HOT, mould station 10 WAIT_PREFORM -> 20 GRIP -> ... -> 80 EJECT -> 10), the lamps, the Outfeed_Full
+filter and the interlocks of rule 10, without alarms, Stop or modes (it starts as after Auto + Start). It reads
+only BlowmoulderSensors, as the PLC does, so the plant tests (test_plant_blowmoulder.py) use it too. `Rig`
+runs it in the real loop's order (read sensors, set outputs, step) with the outputs `delay` ticks late: 1 tick
+is the real loop (the PLC scans several times between the simulator's write and its next read), 2 ticks the
 worst case (a scan just missed).
 """
 
@@ -73,47 +75,140 @@ def oven_ready(oven_temp: int) -> bool:
     return PLC_OVEN_SETPOINT - PLC_OVEN_BAND <= oven_temp <= PLC_OVEN_SETPOINT + PLC_OVEN_BAND
 
 
-class OvenStation:
-    """The PLC's oven station (FEED 10 -> LOAD 15 -> HEAT 20 -> HOT 25) with the lamp P controller.
-    No mould: a test takes the hot preform out with take_preform() to end the cycle."""
+OVEN_FEED, OVEN_LOAD, OVEN_HEAT, OVEN_HOT = 10, 15, 20, 25
+WAIT_PREFORM, GRIP, SWING, RELEASE, ARM_BACK, CLOSE, STRETCH_STEP, BLOW_STEP, HOLD, EXHAUST_STEP, ROD_UP, OPEN, EJECT = (
+    10, 20, 22, 24, 26, 30, 40, 50, 52, 60, 62, 70, 80)
+MOULD_NEXT = {10: 20, 20: 22, 22: 24, 24: 26, 26: 30, 30: 40, 40: 50, 50: 52, 52: 60, 60: 62, 62: 70, 70: 80, 80: 10}
+MOULD_TIMEOUTS = {22: 3, 24: 3, 26: 3, 30: 3, 40: 3, 50: PLC_BLOW_TIMEOUT_S, 60: PLC_EXHAUST_TIMEOUT_S, 62: 3,
+                  70: 3, 80: 3}
 
-    def __init__(self, bm: Blowmoulder | None = None, kp: int = PLC_KP, bias: int = PLC_BIAS, delay: int = 1) -> None:
-        self.bm = bm or Blowmoulder()
+
+def plc_pressure(raw: int) -> int:
+    """Rule 6 as the PLC computes it: DINT_TO_INT(INT_TO_DINT(raw) * 400 / 27648), 0.1 bar, truncated toward 0."""
+    return int(raw * PLC_PRESS_FULL / PLC_RAW_FULL)
+
+
+class BlowmoulderTestController:
+    """The blow moulder PLC's two sequencers, lamps, Outfeed_Full filter and interlocks without alarms, Stop or
+    modes. `mould=False` keeps the mould station in IDLE (oven tests: the hot preform stays in the pocket)."""
+
+    __test__ = False  # not a pytest test class
+
+    def __init__(self, kp: int = PLC_KP, bias: int = PLC_BIAS, mould: bool = True) -> None:
         self.kp, self.bias = kp, bias
-        self.step_no = 10
-        self.soak_s = 0.0
+        self.step = OVEN_FEED  # as after Auto + Start with an empty machine
+        self.mould_step = WAIT_PREFORM if mould else 0
+        self.soak_s = 0.0  # Soak_Timer
+        self.step_s = 0.0  # time in the current mould step (Grip / Release / Hold timers and the timeouts)
+        self.outfeed_full = False
+        self.full_on_s = self.full_off_s = 0.0
+        self.mould_close = False  # the output's last value (seal-in, rule 4)
+        self.now = 0.0
+        self.times: dict[int, float] = {OVEN_FEED: 0.0}  # oven step -> time it was first entered
+        self.longest: dict[int, float] = {}  # mould step -> longest time spent in it
+
+    def outputs(self, s: BlowmoulderSensors, dt: float) -> BlowmoulderOutputs:
+        self.now += dt
+        # Conditioning: Outfeed_Full (C1_Full 2 s on, 3 s off), oven window, pressure
+        self.full_on_s = self.full_on_s + dt if s.c1_full else 0.0
+        self.full_off_s = 0.0 if s.c1_full else self.full_off_s + dt
+        if self.full_on_s >= 2.0 - 1e-9:
+            self.outfeed_full = True
+        if self.full_off_s >= 3.0 - 1e-9:
+            self.outfeed_full = False
+        ready = oven_ready(s.oven_temp)
+        pressure = plc_pressure(s.blow_pressure_raw)
+        pressure_safe = pressure < PLC_EXHAUST_LIMIT and -1000 <= s.blow_pressure_raw <= PLC_RAW_MAX
+
+        # Oven station transitions
+        if self.step == OVEN_FEED and s.preform_at_loader and not s.preform_in_oven and not self.outfeed_full:
+            self._oven(OVEN_LOAD)
+        elif self.step == OVEN_LOAD and s.preform_in_oven:
+            self._oven(OVEN_HEAT)
+        elif self.step == OVEN_HEAT and self.soak_s >= PLC_SOAK_S - 1e-9:
+            self._oven(OVEN_HOT)
+        elif self.step == OVEN_HOT and not s.preform_in_oven:
+            self._oven(OVEN_FEED)
+        self.soak_s = self.soak_s + dt if self.step == OVEN_HEAT and ready else 0.0
+
+        # Mould station transitions
+        m = self.mould_step
+        go = {
+            0: False,
+            WAIT_PREFORM: self.step == OVEN_HOT and s.mould_open and not s.bottle_in_mould and s.arm_at_oven
+            and s.rod_up,
+            GRIP: self.step_s >= PLC_GRIP_S - 1e-9,
+            SWING: s.arm_at_mould,
+            RELEASE: self.step_s >= PLC_GRIP_S - 1e-9 and s.bottle_in_mould,
+            ARM_BACK: s.arm_at_oven,
+            CLOSE: s.mould_closed,
+            STRETCH_STEP: s.rod_down,
+            BLOW_STEP: pressure >= PLC_BLOW_SETPOINT,
+            HOLD: self.step_s >= PLC_HOLD_S - 1e-9,
+            EXHAUST_STEP: pressure_safe,
+            ROD_UP: s.rod_up,
+            OPEN: s.mould_open,
+            EJECT: not s.bottle_in_mould,
+        }[m]
+        if go:
+            self.longest[m] = max(self.longest.get(m, 0.0), self.step_s)
+            self.mould_step, self.step_s = MOULD_NEXT[m], 0.0
+        m = self.mould_step
+        self.step_s += dt
+
+        # Outputs (rule 1) with the interlocks of rule 10
+        gripper = m in (GRIP, SWING)
+        ejector = m == EJECT and not self.outfeed_full and s.mould_open and s.arm_at_oven
+        close_steps = CLOSE <= m <= ROD_UP
+        close_cmd = close_steps and s.arm_at_oven and not ejector
+        open_ok = not close_steps and m != 0 and pressure_safe and s.rod_up
+        self.mould_close = (close_cmd or (self.mould_close and s.mould_closed)) and not open_ok
+        exhaust = m not in (STRETCH_STEP, BLOW_STEP, HOLD)
+        return BlowmoulderOutputs(
+            hopper_feed=self.step == OVEN_FEED and not s.preform_at_loader,
+            loader=self.step == OVEN_LOAD and not s.preform_in_oven and not gripper,
+            arm_to_mould=m in (SWING, RELEASE) and s.mould_open and s.rod_up and not ejector,
+            gripper=gripper,
+            mould_close=self.mould_close,
+            stretch_rod=m in (STRETCH_STEP, BLOW_STEP, HOLD, EXHAUST_STEP) and s.mould_closed,
+            pre_blow_valve=m == STRETCH_STEP and s.mould_closed,
+            high_blow_valve=m in (BLOW_STEP, HOLD) and s.mould_closed and not exhaust and pressure < PLC_MAX_PRESSURE,
+            exhaust_valve=exhaust,
+            ejector=ejector,
+            lamp_power=plc_lamp_power(s.oven_temp, self.kp, self.bias) if s.preform_in_oven else 0,  # Lamps_On
+        )
+
+    def _oven(self, step: int) -> None:
+        self.step = step
+        self.times.setdefault(step, self.now)
+
+
+class Rig:
+    """One blow moulder driven by a BlowmoulderTestController, the outputs `delay` ticks late; with `drain` the
+    filler takes every bottle at C1's exit (C1 runs)."""
+
+    def __init__(self, bm: Blowmoulder | None = None, ctrl: BlowmoulderTestController | None = None, delay: int = 1,
+                 drain: bool = False) -> None:
+        self.bm = bm or Blowmoulder()
+        self.ctrl = ctrl or BlowmoulderTestController(mould=False)
+        self.drain = drain
         self.now = 0.0
         self.events: list = []
         self.temps: list[float] = []  # OvenTemp in degC after every tick
+        self.taken: list = []  # bottles taken at C1's exit
         self._pipe: deque[BlowmoulderOutputs] = deque([OFF] * (delay - 1))
-        self.times: dict[int, float] = {10: 0.0}  # step -> time it was first entered (starts in FEED)
-
-    def _plc_scan(self) -> BlowmoulderOutputs:
-        bm = self.bm
-        ready = oven_ready(bm.oven_temp)
-        if self.step_no == 10 and bm.preform_at_loader and not bm.preform_in_oven:
-            self._goto(15)
-        elif self.step_no == 15 and bm.preform_in_oven:
-            self._goto(20)
-        elif self.step_no == 20 and self.soak_s >= PLC_SOAK_S - 1e-9:
-            self._goto(25)
-        elif self.step_no == 25 and not bm.preform_in_oven:
-            self._goto(10)
-        self.soak_s = self.soak_s + TICK if self.step_no == 20 and ready else 0.0
-        lamp = plc_lamp_power(bm.oven_temp, self.kp, self.bias) if bm.preform_in_oven else 0
-        return BlowmoulderOutputs(hopper_feed=self.step_no == 10 and not bm.preform_at_loader,
-                                  loader=self.step_no == 15 and not bm.preform_in_oven, lamp_power=lamp)
-
-    def _goto(self, step_no: int) -> None:
-        self.step_no = step_no
-        self.times.setdefault(step_no, self.now)
 
     def tick(self) -> None:
-        self._pipe.append(self._plc_scan())
+        self._pipe.append(self.ctrl.outputs(self.bm.sensors(), TICK))
         out = self._pipe.popleft()
         self.now += TICK
         self.events += self.bm.step(out, TICK, self.now)
         self.temps.append(self.bm.oven_temp / 10)
+        if self.drain:
+            self.bm.c1.step(True, TICK)
+            bottle = self.bm.c1.take_at_exit()
+            if bottle is not None:
+                self.taken.append(bottle)
 
     def run(self, seconds: float) -> None:
         for _ in range(round(seconds / TICK)):
@@ -242,18 +337,18 @@ def test_full_lamps_reach_oven_max_in_about_four_seconds():
 
 @pytest.mark.parametrize("delay", [1, 2])
 def test_p_controller_heats_a_cold_preform_in_time(delay):
-    st = OvenStation(delay=delay)
-    st.run_until(lambda: st.step_no == 25, limit_s=PLC_HEAT_TIMEOUT_S)
-    heat_s = st.times[25] - st.times[20]
+    st = Rig(delay=delay)
+    st.run_until(lambda: st.ctrl.step == OVEN_HOT, limit_s=PLC_HEAT_TIMEOUT_S)
+    heat_s = st.ctrl.times[OVEN_HOT] - st.ctrl.times[OVEN_HEAT]
     assert heat_s < 4.5  # ready ~2.8 s + soak 1 s, far below HeatTimeout 15 s
-    oven_cycle = st.times[25] - st.times[10]  # chute + load + heat + soak
+    oven_cycle = st.ctrl.times[OVEN_HOT] - st.ctrl.times[OVEN_FEED]  # chute + load + heat + soak
     assert oven_cycle < MOULD_CYCLE_S - 0.3  # ready before the mould is back (its GRIP 0.3 s is after the hand-over)
     assert warnings(st.events) == []
 
 
-def settle(kp: int, bias: int = 0, delay: int = 1, seconds: float = 30.0) -> OvenStation:
-    st = OvenStation(with_preform_in_pocket(), kp=kp, bias=bias, delay=delay)
-    st.step_no = 20
+def settle(kp: int, bias: int = 0, delay: int = 1, seconds: float = 30.0) -> Rig:
+    st = Rig(with_preform_in_pocket(), BlowmoulderTestController(kp, bias, mould=False), delay=delay)
+    st.ctrl.step = OVEN_HEAT
     st.run(seconds)
     return st
 
@@ -338,11 +433,6 @@ def test_lamp_power_outside_range_is_clamped_with_one_warning(power, used):
 # =====================================================================================
 # Stage 2: mould station
 # =====================================================================================
-def plc_pressure(raw: int) -> int:
-    """Rule 6 as the PLC computes it: DINT_TO_INT(INT_TO_DINT(raw) * 400 / 27648), 0.1 bar, truncated toward 0."""
-    return int(raw * PLC_PRESS_FULL / PLC_RAW_FULL)
-
-
 def until(bm: Blowmoulder, out: BlowmoulderOutputs, cond, limit_s: float = PLC_MOVE_TIMEOUT_S) -> float:
     """Step with `out` until cond() holds; the time it took (asserted below limit_s)."""
     t = 0.0
@@ -617,83 +707,9 @@ def test_sensors_at_rest():
     assert not s.bottle_in_mould and not s.c1_full and s.blow_pressure_raw == 0 and s.oven_temp == 200
 
 
-# --- The whole machine with a Python copy of both step tables ----------------------------------------
-MOULD_TIMEOUTS = {22: 3, 24: 3, 26: 3, 30: 3, 40: 3, 50: PLC_BLOW_TIMEOUT_S, 60: PLC_EXHAUST_TIMEOUT_S, 62: 3,
-                  70: 3, 80: 3}
-
-
-class MouldStation:
-    """The PLC's mould station (state-diagram.md step table, rules 1, 3, 4 without the modes), reading
-    the same sensors as the real PLC, with its pressure scaling."""
-
-    def __init__(self, oven: OvenStation) -> None:
-        self.oven = oven
-        self.step_no = 10
-        self.step_s = 0.0
-        self.longest: dict[int, float] = {}  # step -> longest time spent in it
-
-    def scan(self) -> BlowmoulderOutputs:
-        bm, s = self.oven.bm, self.step_no
-        pressure = plc_pressure(bm.blow_pressure_raw)
-        go = {
-            10: self.oven.step_no == 25 and bm.mould_open and not bm.bottle_in_mould and bm.arm_at_oven and bm.rod_up,
-            20: self.step_s >= PLC_GRIP_S - 1e-9,
-            22: bm.arm_at_mould,
-            24: self.step_s >= PLC_GRIP_S - 1e-9 and bm.bottle_in_mould,
-            26: bm.arm_at_oven,
-            30: bm.mould_closed,
-            40: bm.rod_down,
-            50: pressure >= PLC_BLOW_SETPOINT,
-            52: self.step_s >= PLC_HOLD_S - 1e-9,
-            60: pressure < PLC_EXHAUST_LIMIT,
-            62: bm.rod_up,
-            70: bm.mould_open,
-            80: not bm.bottle_in_mould,
-        }[s]
-        if go:
-            nxt = {10: 20, 20: 22, 22: 24, 24: 26, 26: 30, 30: 40, 40: 50, 50: 52, 52: 60, 60: 62, 62: 70, 70: 80,
-                   80: 10}[s]
-            self.longest[s] = max(self.longest.get(s, 0.0), self.step_s)
-            self.step_no, self.step_s = nxt, 0.0
-        s = self.step_no
-        return BlowmoulderOutputs(
-            arm_to_mould=s in (22, 24),
-            gripper=s in (20, 22),
-            mould_close=30 <= s <= 62,
-            stretch_rod=s in (40, 50, 52, 60),
-            pre_blow_valve=s == 40,
-            high_blow_valve=s in (50, 52),
-            exhaust_valve=s not in (40, 50, 52),
-            ejector=s == 80 and not bm.c1_full,
-        )
-
-
-class Machine(OvenStation):
-    """Both stations; C1 drained at its exit (the filler would take the bottles)."""
-
-    def __init__(self) -> None:
-        super().__init__()
-        self.mould = MouldStation(self)
-        self.taken = []
-
-    def _plc_scan(self) -> BlowmoulderOutputs:
-        oven = super()._plc_scan()
-        mould = self.mould.scan()
-        self.mould.step_s += TICK
-        return BlowmoulderOutputs(hopper_feed=oven.hopper_feed, loader=oven.loader, lamp_power=oven.lamp_power,
-                                  **{f.name: getattr(mould, f.name) for f in fields(mould)
-                                     if f.name not in ("hopper_feed", "loader", "lamp_power")})
-
-    def tick(self) -> None:
-        super().tick()
-        self.bm.c1.step(True, TICK)
-        bottle = self.bm.c1.take_at_exit()
-        if bottle is not None:
-            self.taken.append(bottle)
-
-
+# --- The whole machine with the test controller ----------------------------------------------------
 def test_both_stations_make_bottles_without_a_warning():
-    m = Machine()
+    m = Rig(ctrl=BlowmoulderTestController(), drain=True)
     ejected_at = []
     while m.bm.ejected < 4:
         before = m.bm.ejected
@@ -704,7 +720,7 @@ def test_both_stations_make_bottles_without_a_warning():
     assert warnings(m.events) == []
     ids = sorted([b.id for b in m.bm.c1.slots if b] + [b.id for b in m.taken])
     assert ids == [1, 2, 3, 4]
-    for step_no, longest in m.mould.longest.items():
+    for step_no, longest in m.ctrl.longest.items():
         if step_no in MOULD_TIMEOUTS:
             assert longest < MOULD_TIMEOUTS[step_no], (step_no, longest)
     periods = [b - a for a, b in zip(ejected_at, ejected_at[1:])]

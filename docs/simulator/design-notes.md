@@ -352,6 +352,12 @@ The filler drives C1 and can stop it (E-stop, FAULT) while its `C1_Full` slot is
 **Why is the bottle judged by its temperature at the hand-over?**
 A preform does not cool outside the oven in the model (a held one would lose ~16 °C at τ 8 s before the blow, a cooling the real machine keeps small with a fast transfer). So `transfer_c` (blown cold below 95 °C) and the peak in the oven (overheated above 120 °C) are what the audit uses.
 
+**What does the blow moulder do when its PLC does not answer?**
+Every output OFF except the exhaust, which vents (`plant.BLOWMOULDER_DEAD`). The exhaust is a normally-open valve (rule 3): without the PLC there is no air to keep it shut, so a bottle under pressure vents by itself. The other machines' "no answer = all OFF" would have kept the pressure in. Known limit: the mould opens on its valve's spring side; the real PLC holds a closed mould (rule 4), but a PLC that does not answer holds nothing.
+
+**Why does the backup test use a filler that stops taking, not a filler FAULT?**
+The filler stops C1 only on E-stop or FAULT, and `C1_Full` watches slot 1: a bottle put onto a standing C1 stays in slot 0, so `Outfeed_Full` never comes (HMI issue I18). The blow moulder's dead plate takes one more bottle, then the ejector stops halfway and the PLC raises `Alm_HandlingJam`; `test_plant_blowmoulder.py` documents that. The backup of rule 8 happens when the filler does not take bottles while C1 runs (Stop mode, a slow filler): the queue reaches slot 1, the oven loads nothing new, the bottle waits in the open mould.
+
 ## Syrup room in the plant (`plant.py`)
 
 **Where is the cable between the two PLCs?**

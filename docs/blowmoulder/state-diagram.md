@@ -261,7 +261,7 @@ Starved          := Feed_Empty_Timer.Q AND Mould_WaitPreform
 Alm_NoPreforms   := Oven_Feed AND Hopper_Empty AND NOT Preform_At_Loader          (warning, not latched, answer 1)
 ```
 
-- **C1 full (report 5.3):** the oven loads no new preform; the preform already in the oven is heated and handed over, its bottle is blown, and **waits in the open mould** (EJECT, ejector held off) until C1 has room. The machine is Blocked with one bottle in the mould and the oven empty; lamps off (no preform). When `Outfeed_Full` releases, the ejector pushes and the cycle runs on by itself.
+- **C1 full (report 5.3):** the oven loads no new preform; the preform already in the oven is heated and handed over, its bottle is blown, and **waits in the open mould** (EJECT, ejector held off) until C1 has room. The machine is Blocked with one bottle in the mould and the oven empty; lamps off (no preform). When `Outfeed_Full` releases, the ejector pushes and the cycle runs on by itself. *Simulator stage 3 (2026-11-26):* the oven is only empty when `Outfeed_Full` comes before the next preform is loaded; usually the next preform is already in the oven: it is heated, cannot be handed over (the mould holds the waiting bottle) and **waits in HOT, the lamps holding it in the window** (measured 102 °C at ~29 %, no overheating). Same Blocked state, no alarm; the PLC program needs no change.
 - **Starved** only when the mould has nothing to do either: a missing preform while a bottle is still being blown is not Starved.
 
 ### 9. Resume after Stop, FAULT or E-stop: sensors tell where we are

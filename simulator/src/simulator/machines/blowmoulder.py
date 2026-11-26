@@ -198,8 +198,10 @@ class Blowmoulder:
     """The blow moulder: oven station (hopper, loader, oven pocket, lamps) and mould station (arm,
     gripper, mould, stretch rod, blow air, ejector), with the dead plate onto C1."""
 
-    def __init__(self, c1: Conveyor | None = None, hopper_preforms: int = config.HOPPER_PREFORMS) -> None:
-        """`c1`: the conveyor the bottles go onto (the plant's; a test may leave it out)."""
+    def __init__(self, c1: Conveyor | None = None, factory: BottleFactory | None = None,
+                 hopper_preforms: int = config.HOPPER_PREFORMS) -> None:
+        """`c1`: the conveyor the bottles go onto, `factory`: where their ids come from (both the plant's;
+        a test may leave them out)."""
         self.c1 = c1 if c1 is not None else Conveyor("C1")
         # True state. Public: tests, the panel and (stage 6) fault commands read / set them.
         self.hopper = Hopper(hopper_preforms)
@@ -220,7 +222,7 @@ class Blowmoulder:
         self.dropped: list[Preform] = []  # preforms the gripper let fall (taken away by hand)
         self.pressure_bar = 0.0  # cavity pressure
         self.high_blow_bar = config.HIGH_BLOW_BAR  # the high-blow regulator (stage 6 faults change it)
-        self.bottles = BottleFactory()  # bottle ids 1, 2, 3 ... on C1
+        self.bottles = factory if factory is not None else BottleFactory()  # bottle ids 1, 2, 3 ... on C1
         self.ejected = 0  # bottles put onto C1
         self._ejected_timer = 0.0  # remaining time of the Bottle_Ejected pulse
         self._now = 0.0
