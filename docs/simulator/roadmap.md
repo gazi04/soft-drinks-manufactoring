@@ -595,3 +595,94 @@ Commands get a `_Spec(packer=True)` flag (ignored with a warning without the rea
 3. **Pack quality:** audit warnings when a pack leaves with a short sheet, no wrap, not shrunk, or an unlabelled bottle (the PLC cannot see these)? ★ yes, warnings only, counted on the panel.
 4. **Conveyor model:** wrap and oven conveyors with positions in mm (above) instead of the slot `Conveyor`? ★ mm.
 5. **Scenario list** above: complete, or add / drop one (e.g. `bottles_short`: fewer bottles from the labeler = Starved)?
+
+---
+
+## Blow moulder simulator
+
+Fifth machine (part B of `docs/blowmoulder/progress.md`), same pattern as the labeler and the packer, but at the **start** of the line: the real blow moulder **replaces `Supply`** on C1. Filler, syrup room, labeler and packer classes do not change; `Supply` stays for `--no-blowmoulder`. Addresses: `docs/blowmoulder/io-list.md`; behaviour: `docs/blowmoulder/state-diagram.md`; PLC constants the physics must fit: `state-diagram.md`, "Fixed constants". **Planned 2026-11-25, open questions answered the same day (all as recommended ★).**
+
+Before stage 0: part A committed (PLC program complete, `run_blowmoulder.py --quick` 195 checks); the other four runtimes up with their programs (`demo_check.py`).
+
+### What the simulator has to model
+
+Everything the blow moulder PLC reads, nothing more (the PLC decides, the simulator only answers):
+
+```
+ HOPPER ─chute─► LOADER ─► OVEN POCKET ─────────► TRANSFER ARM ─────────► MOULD ─────────────────────► EJECTOR ─► dead plate ─► C1 (filler drives it)
+ preforms (count) Preform_At_  Preform_In_Oven     Arm_At_Oven / _At_Mould  Mould_Closed / Mould_Open    Bottle_In_Mould   Bottle_Ejected   C1_Full = slot 1
+ Preform_Low      Loader       OvenTemp (pyrometer) gripper holds the        Rod_Up / Rod_Down             (eye, content)    (eye at C1's     (as S7 / C3_Full)
+ Hopper_Empty     (HopperFeed)  <- LampPower %QW0   preform by its neck      BlowPressure_Raw (counts)                       entry, pulse)
+                                (P controller)                               <- pre-blow 8 bar, high blow regulator, exhaust
+```
+
+New objects:
+- a **`Preform`** (id, temperature, peak temperature, `blown` / `half-blown` / cold) that moves hopper → loader → pocket → gripper → mould and becomes a `Bottle` (from the plant's `BottleFactory`, so bottle ids stay 1, 2, 3 … on C1) when the ejector puts it on the dead plate; audited there (unblown, blown cold, overheated: warnings, the PLC cannot see them, Q4 of `progress.md`);
+- the first **analog output read by the simulator**: `LampPower` (HR 0, 0–100 %) heats the preform in the pocket (first order); `OvenTemp` (HR 1036) is the **preform's** surface temperature (pyrometer, Q3), the pocket wall when it is empty;
+- the first **raw analog input written by the simulator**: `BlowPressure_Raw` (HR 1037) = `round(bar / 40 · 27648)`, **signed** (a wire break writes a negative value, over range above 27648);
+- moving parts as positions 0..1 with a travel time (as the packer's pusher): loader, arm, gripper, mould, rod, ejector; the PLC's transitions hang on the end-position sensors.
+
+### Stages
+
+| # | Stage | Content | Test |
+| --- | --- | --- | --- |
+| 0 | Address map | `address_map_blowmoulder.py` (converters from `address_map`): 10 outputs (coils 0–9) + **`LAMP_POWER` HR 0**, sensor block 8192–8202 (`%MX0` + unused `%MX1.0`, `E_Stop_OK`, `Heartbeat`), extra block 8224–8228 (`%MX4.0–4.4`), analog HR 1036–1037 (`OvenTemp`, `BlowPressure_Raw` signed), status HR 1074–1077 (State, **Step, MouldStep**, BottleCount), computed HR 1064–1066 (`Lamp_Calc`, `BlowPressure`, `OvenError`), 11 alarms in two blocks (8232–8239, 8248–8250), conditioned 8216–8223, setpoints HR 1054–1058, manual buttons 8208–8214, `SIM_WRITE_*` | unit: numbers = `io-list.md` and the located variables of `plcs/blowmoulder/.../main.ld`, both directions; blocks contiguous; one-writer rule (the simulator never writes HR 0) |
+| 1 | Oven station | `machines/blowmoulder.py` part 1: `Hopper` (preform count, `Preform_Low`, `Hopper_Empty`, chute: a preform reaches the loader `CHUTE_S` after `HopperFeed`), loader (spring return, pushes the waiting preform into the pocket at full stroke), oven pocket + `OvenThermal` (preform temperature from `LampPower`, room loss, cold preform in = drop, pocket wall when empty) | load < `MoveTimeout` 3 s; a Python P controller (rule 5, Kp 10, Bias 0) heats 20 → `Oven_Ready` and `Preform_Hot` well under `HeatTimeout` 15 s, load + heat + soak ≈ 5 s (the mould's cycle); steady offset ≈ 3 °C (rule 5's teaching point, inside `OvenBand`); stable at Kp 1–30 with one tick + one scan of dead time (or Q5); lamps at 100 % reach `OvenMax` 130 °C; loader into a full pocket = audit |
+| 2 | Mould station | part 2: transfer arm + gripper (a closed gripper at the pocket takes the preform; `Preform_In_Oven` drops when the arm leaves; opened at the mould = preform in the mould, elsewhere = dropped), mould halves (double acting), stretch rod (spring return), **blow pressure** (pre-blow to the 8 bar regulator, high blow to the `HIGH_BLOW_BAR` 39 regulator, exhaust, first order each), transducer → raw counts, ejector → **dead plate** (Q3) → C1 entry, `Bottle_Ejected` timed pulse, `Bottle_In_Mould` = content of the cavity; audits: arm into a closed mould, mould closed on the arm, rod down in an open mould, **mould opened under pressure**, blow with the exhaust open, ejector into an occupied dead plate | every move < `MoveTimeout` 3 s; 8 → 35 bar < `BlowTimeout` 2 s (38 bar too); held ≤ 39 bar < `MaxPressure` 40; 39 → 0.5 bar < `ExhaustTimeout` 3 s; raw 24192 = 35.0 bar after the PLC's scaling; a Python port of the mould step table makes one bottle in ≈ 5.4 s with no warning |
+| 3 | Plant + test controller | `Plant(with_blowmoulder=True)`: the blow moulder replaces `Supply` (`plant.supply` = None, its commands ignored with a warning), C1_Full = C1 slot `C1_FULL_SLOT` 1 (as S7 / C3_Full); `blowmoulder_writes()` (`PulseWire` for `Bottle_Ejected`, shared E-stop, own heartbeat); `BlowmoulderTestController` (both step tables, P controller, `Outfeed_Full` filter, interlocks; no alarms / Stop / modes, as the packer's) | test controllers make N bottles without a PLC: ids 1..N in order on C1, every one blown, no warning; with the filler's `TestController`: the line runs from preform to filled bottle; **filler FAULT → C1 stands → C1_Full → `Outfeed_Full` → oven loads nothing, the last bottle waits in the open mould, oven empty, lamps off** (rule 8), then continues without loss |
+| 4 | Fifth link | `BlowmoulderPlc` (shared `PlcLink` base) on port 5025: `read_outputs()` (coils 0–9 **+ HR 0**: two requests), `write()` (sensor block, extra block, HR 1036–1037 signed), heartbeat, `read_status()` (State, Step, MouldStep, BottleCount, Lamp_Calc, BlowPressure, OvenError, 11 alarms; spanning reads as the packer), `verify_writes()` | unit mapping + local-server link tests (signed raw values, HR 0 read but never written); live `test_link_blowmoulder.py`: heartbeat watchdog, write + read back, the PLC scales a raw value (24192 → 350), `Oven_Ready` from `OvenTemp`, `C1_Full` filter, `LampPower` 0 while idle, counters untouched |
+| 5 | Closed loop, five PLCs | `loop.run(..., blowmoulder_plc=)`, plant lock on 5025, fifth header line; CLI default = five PLCs (Q1), `--no-blowmoulder` keeps `Supply` | live `test_closed_loop_blowmoulder.py`: real preforms → blown bottles → filler, N bottles, `BottleCount` + N, every bottle blown, `OvenTemp` inside the window at every transfer, the P offset seen; `--blowmoulder-only` (the test drains C1) |
+| 6 | Commands + scenarios | faults in the physics (the PLC is never told) and hand actions, `target="blowmoulder"` scenarios (list below) | each scenario gives the alarm / state of `state-diagram.md` on the real blow moulder PLC (`test_blowmoulder_scenarios.py`) |
+| 7 | Panel | tab `5 Blow moulder`: hopper count, loader, pocket with the preform temperature and the lamp power bar, arm / gripper, mould / rod, pressure bar (bar and raw counts), ejector, dead plate, C1's entry; switches and value rows for every blow moulder command | pilot test + one scenario from the panel |
+| 8 | Wrap-up | `demo_check.py` (fifth PLC), design notes, README, report section 7, `CLAUDE.md`; animation words `%MW70–79` decided with the HMI plan (part C) | live `demo_check.py` with five PLCs |
+
+### Proposed parameters (checked against the PLC constants)
+
+| Parameter | Proposed | Must fit with (PLC) |
+| --- | --- | --- |
+| Hopper | 1000 preforms, `Preform_Low` at ≤ 50, `Hopper_Empty` at 0 | warnings only; `Alm_NoPreforms` + Starved after `StarvedDelay` 2 s |
+| Chute (HopperFeed ON → preform at the loader) | 0.6 s | runs during HEAT, so a preform waits before the pocket is free |
+| Loader out / spring return | 0.4 s / 0.3 s | `MoveTimeout` 3 s |
+| Preform heating | `T' = (T_room + G · LampPower − T) / τ`, room 20 °C, **G = 2.83 °C per %** (100 % → 303 °C balance), **τ = 8 s** | cold preform at 100 % reaches 95 °C (start of the P band at Kp 10) in 2.5 s, `Oven_Ready` (100 °C) ≈ 3 s, + `SoakTime` 1 s ≈ 4 s < `HeatTimeout` 15 s; balance at 30 % = 105 °C → **P offset 3 °C** at Kp 10 / Bias 0 (rule 5); 100 % stuck reaches `OvenMax` 130 °C in ≈ 3.9 s |
+| Empty pocket | pyrometer sees the pocket wall, first order to 20 °C with τ 30 s | lamps are off without a preform (rule 5), so nothing to check |
+| Gripper close / open | 0.2 s | `GripTime` 0.3 s |
+| Arm swing / return | 0.5 s / 0.5 s | `MoveTimeout` 3 s |
+| Mould close / open | 0.5 s / 0.5 s | `MoveTimeout` 3 s |
+| Stretch rod down / up | 0.4 s / 0.3 s | `MoveTimeout` 3 s |
+| Pre-blow | first order to 8 bar, τ 0.1 s | ends with `Rod_Down` (0.4 s) |
+| High blow | first order to `HIGH_BLOW_BAR` **39 bar** (the high-blow regulator), τ 0.15 s | 8 → 35 bar in 0.3 s, 8 → 38 bar (HMI max `BlowSetpoint`) in 0.5 s < `BlowTimeout` 2 s; held at 39 < `MaxPressure` 40 in HOLD |
+| Exhaust | first order to 0 bar, τ 0.15 s | 39 → 0.5 bar in 0.65 s < `ExhaustTimeout` 3 s |
+| Transducer | raw = round(bar · 27648 / 40), wire break −2000 (as stage 0's test), over range 32767 | `RawMin` −1000, `RawMax` 32511 |
+| Blown bottle | ≥ 30 bar with the rod down and the preform 95–115 °C at the transfer | audits only (unblown, cold, overheated > 120 °C) |
+| Ejector out / return | 0.3 s / 0.3 s, the bottle moves onto the dead plate at full stroke | `MoveTimeout` 3 s |
+| Dead plate → C1 | the bottle drops onto C1's slot 0 as soon as it is free; `Bottle_Ejected` ON 0.2 s | at least one tick (PulseWire); C1_Full = slot 1, as S7 / C3_Full |
+| Throughput | mould cycle ≈ 5.4 s (state-diagram.md), oven ≈ 4–5 s in parallel: ≈ 11 bottles/min | faster than the filler (measured in stage 3): C1 fills and the moulder is Blocked part of the time (expected, as the packer is often Starved); `Supply` gave 30/min |
+
+### Commands and scenarios (stage 6)
+
+| Scenario | Fault / hand action | Expected on the real blow moulder PLC |
+| --- | --- | --- |
+| `hopper_empty` | small hopper; `load_preforms` | `Alm_NoPreforms`, Starved after 2 s when the mould waits too, no FAULT; the refill alone restarts it |
+| `preform_stuck` | loader pushes, the preform does not reach the pocket | `Alm_HandlingJam` 3 s after LOAD began |
+| `lamps_failed` | `LampPower` gives no heat | `Alm_OvenHeatTimeout` 15 s after HEAT began |
+| `lamp_stuck_on` | lamps at 100 % whatever the PLC writes | `Alm_OvenOverTemp` at 130 °C, FAULT in every mode, `LampPower` 0 (no effect: stuck) – Reset only after cooling below `OvenMax` |
+| `arm_stuck` | arm does not swing | `Alm_HandlingJam` 3 s after SWING began |
+| `preform_dropped` | gripper loses the preform in the swing | RELEASE: `Bottle_In_Mould` never → `Alm_HandlingJam` 3 s; preform removed by hand |
+| `mould_stuck` | mould does not close | `Alm_MouldFault` 3 s after CLOSE began, the mould opens again (not yet closed, rule 4) |
+| `air_low` | high-blow regulator at 20 bar | `Alm_BlowFault` 2 s after BLOW began, exhaust open, mould held closed; restart → EXHAUST (rule 9) |
+| `exhaust_blocked` | exhaust does not vent | `Alm_ExhaustFault` 3 s after EXHAUST began, **mould stays closed**; Reset refused until the pressure is safe |
+| `regulator_failed` | high-blow regulator at 45 bar | `Alm_OverPressure` at 40.0 bar, high blow off, exhaust open, FAULT |
+| `sensor_wire_break` | transducer writes −2000 | `Alm_PressureSensor`, FAULT, mould held closed (`Pressure_Safe` FALSE) |
+| `ejector_stuck` | ejector does not move | `Alm_HandlingJam` 3 s after EJECT began |
+| `c1_stopped` | C1's belt does not move (motor ON, drive failed) | C1 fills → `Outfeed_Full` → Blocked with a bottle in the open mould, `Alm_OutfeedBlocked` 2 min later, no FAULT; continues without Reset |
+
+Commands get a `_Spec(blowmoulder=True)` flag (ignored with a warning without the real blow moulder); `blowmoulder_heartbeat` freezes only its heartbeat.
+
+### Open questions (answered 2026-11-25: all as recommended ★)
+
+1. **CLI default:** `uv run simulator` drives five PLCs (`--no-blowmoulder` keeps `Supply`), as the labeler and the packer became the default? ★ yes – but then the blow moulder runtime must run, else no bottle reaches C1 (the filler is Starved, nothing breaks).
+2. **Test controller:** port both step tables and the P controller to Python (`BlowmoulderTestController`) for the unit tests of stages 1–3? ★ yes – it tunes the lamp model (τ, G) and the pressure model without the PLC and gives the line-backup test.
+3. **Ejector → C1:** the C1 entry slot can be taken while C1_Full (slot 1) is still free – the filler stops C1 on its E-stop / FAULT (filler `state-diagram.md`: C1 runs otherwise). ★ a **dead plate** for one bottle between the mould and C1: the ejector always finishes its stroke, the bottle drops onto C1 when slot 0 is free; a second bottle onto an occupied dead plate = audit and the ejector cannot finish (`Alm_HandlingJam`, a real jam). Alternative: the ejector waits with the bottle in the mould (gives a HandlingJam after 3 s on every filler FAULT).
+4. **Preform vs. bottle:** a `Preform` object inside the blow moulder that becomes a new `Bottle` at the ejector (ids 1, 2, 3 … on C1 as today, the filler's audits unchanged)? ★ yes. Alternative: one `Bottle` from the hopper on with a `blown` field (touches the shared `Bottle` class).
+5. **Lamp loop stability:** the P controller runs across Modbus (simulator tick 0.1 s + PLC scan + read/write ≈ 0.1–0.2 s dead time). With τ 8 s and G 2.83 the loop gain at Kp 10 is ≈ 28 (stable); at the HMI maximum Kp 30 it is ≈ 85 and the temperature may **oscillate**. ★ keep the model, measure it in stage 1 and stage 5, and keep a Kp-30 oscillation as a teaching point (P gain vs. dead time) as long as it stays inside `OvenMax`; otherwise lower the HMI limit of `Kp`. Alternative: a slower preform (τ 15 s, ≈ 6 s heat-up) that hides it.
+6. **Scenario list** above: complete, or add / drop one?
