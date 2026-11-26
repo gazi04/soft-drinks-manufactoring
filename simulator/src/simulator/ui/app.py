@@ -1,11 +1,11 @@
 """The control panel: the engineer's test bench (report section 7.5).
 
     ┌ header: one line per PLC (link, step, state, alarms, counter, dt) ───────────────┐
-    │ [1 Filler] [2 Syrup room] [3 Labeler] [4 Packer]  one tab per machine, same layout: │
+    │ [1 Filler] [2 Syrup room] [3 Labeler] [4 Packer] [5 Blow moulder]  one tab per machine: │
     │   world: the physical truth                 │ controls: values, faults, switches  │
     ├ scenario: [select] Run  status   (select: the active tab's scenarios) ─────────────┤
     ├ event log (filter with l) ───────────────────────────────────────────────────────┤
-    └ footer: q quit, l log filter, 1 / 2 / 3 / 4 tabs ──────────────────────────────────┘
+    └ footer: q quit, l log filter, 1 / 2 / 3 / 4 / 5 tabs ──────────────────────────────┘
 
 How it runs:
 - The tick loop (loop.run) is a Textual worker. Textual and the loop share one
@@ -18,7 +18,8 @@ How it runs:
   to the HMI (tests/hmi.py until FUXA exists).
 - The syrup room tab exists only when the plant has a syrup room (not --filler-only), the labeler
   tab only with the real labeler (not --no-labeler / --filler-only), the packer tab only with the real packer
-  (not --no-packer and the options above).
+  (not --no-packer and the options above), the blow moulder tab only with the real blow moulder
+  (not --no-blowmoulder / --filler-only).
 """
 
 import asyncio
@@ -56,6 +57,7 @@ SWITCHES: Switches = {
     "sw-product": ("product_available", lambda p: p.product_available, "Product available"),
     "sw-estop": ("e_stop", lambda p: not p.e_stop_ok, "E-stop pressed"),
     "sw-jam": ("index_jam", lambda p: p.filler.index_jammed, "Index belt jam"),
+    "sw-door": ("filler_door_blocked", lambda p: p.filler.door_blocked, "Filler door blocked"),
     "sw-labeler": ("labeler_running", lambda p: p.labeler_standin is not None and p.labeler_standin.running, "Labeler running"),
     "sw-heartbeat": ("heartbeat", lambda p: p.heartbeat.enabled, "Heartbeat"),
 }
@@ -92,6 +94,19 @@ PACKER_SWITCHES: Switches = {
     "sw-pk-hb": ("packer_heartbeat", lambda p: p.packer_heartbeat.enabled, "Heartbeat"),
 }
 
+# Blow moulder tab: only used when plant.blowmoulder exists. Ids sw-bm-*
+BLOWMOULDER_SWITCHES: Switches = {
+    "sw-bm-preform": ("preform_stuck", lambda p: p.blowmoulder.preform_stuck, "Preform stuck"),
+    "sw-bm-lamps-failed": ("lamps_failed", lambda p: p.blowmoulder.lamps_failed, "Lamps failed"),
+    "sw-bm-lamps-on": ("lamps_stuck_on", lambda p: p.blowmoulder.lamps_stuck_on, "Lamps stuck on"),
+    "sw-bm-arm": ("arm_stuck", lambda p: p.blowmoulder.arm_stuck, "Arm stuck"),
+    "sw-bm-mould": ("mould_stuck", lambda p: p.blowmoulder.mould_stuck, "Mould stuck"),
+    "sw-bm-ejector": ("ejector_stuck", lambda p: p.blowmoulder.ejector_stuck, "Ejector stuck"),
+    "sw-bm-exhaust": ("exhaust_blocked", lambda p: p.blowmoulder.exhaust_blocked, "Exhaust blocked"),
+    "sw-bm-wire": ("pressure_wire_break", lambda p: p.blowmoulder.pressure_wire_break, "Pressure wire break"),
+    "sw-bm-hb": ("blowmoulder_heartbeat", lambda p: p.blowmoulder_heartbeat.enabled, "Heartbeat"),
+}
+
 # button id -> (input id, command, type of the value)
 VALUE_BUTTONS: dict[str, tuple[str, str, type]] = {
     "bt-rate": ("in-rate", "supply_rate", float),
@@ -110,6 +125,9 @@ VALUE_BUTTONS: dict[str, tuple[str, str, type]] = {
     # packer
     "bt-film": ("in-film", "load_film", float),
     "bt-sheet": ("in-sheet", "put_sheet", float),
+    # blow moulder
+    "bt-preforms": ("in-preforms", "load_preforms", int),
+    "bt-high-blow": ("in-high-blow", "high_blow_bar", float),
 }
 
 # button id -> command sent with True: one-off hand actions, not states (nothing to show on a switch)
@@ -119,13 +137,15 @@ ACTION_BUTTONS: dict[str, str] = {
     "bt-clear-gate": "clear_gate",
     "bt-drop-sheet": "drop_sheet",
     "bt-clear-oven": "clear_oven",
+    "bt-drop-preform": "drop_preform",
 }
 
 REFRESH_S = 0.25
 
 
 # tab id -> the scenario target its select shows
-TAB_TARGETS = {"tab-filler": "filler", "tab-syrup": "syrup", "tab-labeler": "labeler", "tab-packer": "packer"}
+TAB_TARGETS = {"tab-filler": "filler", "tab-syrup": "syrup", "tab-labeler": "labeler", "tab-packer": "packer",
+               "tab-blowmoulder": "blowmoulder"}
 
 
 def scenario_options(target: str, with_syrup: bool, with_labeler: bool = False,
@@ -141,6 +161,8 @@ def scenario_options(target: str, with_syrup: bool, with_labeler: bool = False,
             return with_syrup
         if s.target == "packer":
             return with_packer
+        if s.target == "blowmoulder":
+            return with_blowmoulder
         if s.target == "labeler":
             return with_labeler and not (with_packer and uses_command(s, "packer_running"))
         return not (with_labeler and uses_command(s, "labeler_running"))
@@ -178,6 +200,7 @@ class SimulatorApp(App):
         ("2", "tab('tab-syrup')", "Syrup room"),
         ("3", "tab('tab-labeler')", "Labeler"),
         ("4", "tab('tab-packer')", "Packer"),
+        ("5", "tab('tab-blowmoulder')", "Blow moulder"),
     ]
 
     def __init__(
@@ -236,6 +259,8 @@ class SimulatorApp(App):
             switches |= self._labeler_switches()
         if self.has_packer:
             switches |= PACKER_SWITCHES
+        if self.has_blowmoulder:
+            switches |= BLOWMOULDER_SWITCHES
         return switches
 
     def _labeler_switches(self) -> Switches:
@@ -306,6 +331,20 @@ class SimulatorApp(App):
                                 classes="row switch-row",
                             )
                             yield from self._switch_rows(PACKER_SWITCHES)
+            if self.has_blowmoulder:
+                with TabPane("5 Blow moulder", id="tab-blowmoulder"):
+                    with Horizontal(classes="main"):
+                        yield Static(id="blowmoulder-world", classes="world")
+                        with VerticalScroll(classes="controls"):
+                            yield self._value_row("Load preforms", "in-preforms", f"{config.HOPPER_PREFORMS}",
+                                                  "integer", "bt-preforms", "Load")
+                            yield self._value_row("High blow bar", "in-high-blow", f"{config.HIGH_BLOW_BAR:g}",
+                                                  "number", "bt-high-blow", "Set")
+                            yield Horizontal(
+                                Button("Drop preform", id="bt-drop-preform", compact=True),
+                                classes="row switch-row",
+                            )
+                            yield from self._switch_rows(BLOWMOULDER_SWITCHES)
         # One scenario row under the tabs; its select shows the active tab's scenarios (filler at start)
         yield Horizontal(
             Label("Scenario"),
@@ -363,6 +402,8 @@ class SimulatorApp(App):
             self.query_one("#labeler-world", Static).update(view.labeler_world_text(self.plant))
         if self.has_packer:
             self.query_one("#packer-world", Static).update(view.packer_world_text(self.plant))
+        if self.has_blowmoulder:
+            self.query_one("#blowmoulder-world", Static).update(view.blowmoulder_world_text(self.plant))
         self.query_one("#scenario-status", Static).update(view.scenario_text(self.slot))
         # A queued command is applied at the next tick: until then the plant still has the
         # old value, and syncing now would flip the switch back for a moment.
@@ -421,7 +462,8 @@ class SimulatorApp(App):
 
     # --- Tabs ------------------------------------------------------------------------
     def action_tab(self, tab_id: str) -> None:
-        """Keys 1-4: show a machine's tab (syrup tab only with a syrup room, labeler / packer tab only with the real one)."""
+        """Keys 1-5: show a machine's tab (syrup tab only with a syrup room, labeler / packer / blow moulder tab only
+        with the real one)."""
         if tab_id == "tab-syrup" and not self.has_syrup:
             self.notify("no syrup room tab (started with --filler-only)", severity="warning")
             return
@@ -430,6 +472,9 @@ class SimulatorApp(App):
             return
         if tab_id == "tab-packer" and not self.has_packer:
             self.notify("no packer tab (started with --no-packer / --no-labeler / --filler-only)", severity="warning")
+            return
+        if tab_id == "tab-blowmoulder" and not self.has_blowmoulder:
+            self.notify("no blow moulder tab (started with --no-blowmoulder / --filler-only)", severity="warning")
             return
         self.query_one("#tabs", TabbedContent).active = tab_id
 

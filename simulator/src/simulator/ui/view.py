@@ -8,6 +8,8 @@ and the screen code in app.py stays small.
     syrup_world_text(plant)      the syrup room's truth: tanks, temperature, pressure, outputs, faults
     labeler_world_text(plant)    the labeler's truth: gate, pocket, label roll, glue tank, C3, outputs, faults
     packer_world_text(plant)     the packer's truth: gate, table, pusher, wrap conveyor, film, bar, oven, outfeed
+    blowmoulder_world_text(plant) the blow moulder's truth: hopper, loader, oven + lamps, arm, mould, rod, pressure,
+                                 ejector, dead plate, C1's entry
     header_text(stats, plc)      what the PLCs report: link, step, state, alarms (one line per PLC)
     scenario_text(slot)          which scenario runs and how far it is
     event_style(event)           colour of one log line
@@ -22,10 +24,11 @@ from simulator.conveyor import Conveyor
 from simulator.events import Event, Source
 from simulator.loop import LoopStats
 from simulator.machines.filler import CAP, ENTRY, FILL, RINSE
+from simulator.machines.blowmoulder import OvenThermal
 from simulator.machines.labeler import LabelerOutputs
 from simulator.machines.packer import Pack, PackerOutputs
 from simulator.machines.syrup import SyrupOutputs
-from simulator.plant import Plant
+from simulator.plant import BLOWMOULDER_DEAD, Plant
 from simulator.plcs import (
     BLOWMOULDER_MOULD_STEP_NAMES,
     BLOWMOULDER_STATE_NAMES,
@@ -416,6 +419,113 @@ def packer_world_text(plant: Plant) -> Text:
              f"palletized {pallet.taken}  taken out by hand {len(oven.removed)}")
     if plant.packer_outputs is None:
         t.append("\npacker PLC not answering: outputs taken as OFF, C3 stands", style="bold red")
+    return t
+
+
+BM_LAMP_COL = 38  # the world column is ~86 characters at 140x45: two lamps + one output fit after it
+
+
+def blowmoulder_world_text(plant: Plant) -> Text:
+    """The blow moulder's physical truth: hopper, loader, oven pocket and lamps, arm and gripper, mould, stretch
+    rod, blow pressure, ejector, dead plate and C1's entry, the PLC outputs and every injected fault.
+
+    Lamps on the left of a line are SENSORS as written to the blow moulder PLC, the last one (or two) its OUTPUTS
+    from the last tick. The analog values are shown on both sides: LampPower next to the temperature it would
+    hold, the pressure in bar next to the raw counts the transducer writes (a wire break: -2000).
+    """
+    b = plant.blowmoulder
+    if b is None:
+        return Text("no real blow moulder (started with --no-blowmoulder / --filler-only)", style="dim")
+    t = Text()
+    w = plant.blowmoulder_writes()
+    s = w.sensors
+    out = plant.blowmoulder_outputs if plant.blowmoulder_outputs is not None else BLOWMOULDER_DEAD  # no answer
+
+    def left(text: str) -> None:  # left part of a line; the lamps start in the same column on every line
+        t.append(text[:BM_LAMP_COL - 1].ljust(BM_LAMP_COL))
+
+    def lamps(*pairs: tuple[str, bool]) -> None:
+        for i, (name, on) in enumerate(pairs):
+            t.append("  " if i else "")
+            t.append_text(lamp(name, on))
+
+    def name(preform) -> str:
+        return f"preform {preform.id}" if preform is not None else "none"
+
+    hopper = b.hopper
+    left(f"Hopper   {level_bar(hopper.count, config.HOPPER_PREFORMS)} {hopper.count} preforms")
+    lamps(("Preform_Low", s.preform_low), ("Hopper_Empty", s.hopper_empty), ("HopperFeed", out.hopper_feed))
+    t.append("\n")
+    left(f"Loader   {level_bar(b.loader, 1.0, 5)} {b.loader:4.0%}  {name(b.at_loader)}")
+    lamps(("Preform_At_Loader", s.preform_at_loader), ("Loader", out.loader))
+    t.append("\n")
+    if b.pocket is not None:
+        oven = f"Oven     {name(b.pocket)} {b.pocket.temp_c:5.1f} °C"
+    else:
+        oven = f"Oven     empty, wall {b.thermal.wall_c:5.1f} °C"
+    left(oven)
+    lamps(("Preform_In_Oven", s.preform_in_oven))
+    t.append(f"  OvenTemp {s.oven_temp}")
+    if b.pocket is not None:
+        t.append(f"  peak {b.pocket.peak_c:5.1f} °C")
+    t.append("\n")
+    left(f"Lamps    {level_bar(out.lamp_power, 100)} {out.lamp_power:3d} %")
+    t.append(f"LampPower holds {OvenThermal.balance_c(out.lamp_power):5.1f} °C")
+    t.append("\n\n")
+
+    gripper = "closed" if b.gripper_closed else ("open" if b.gripper <= 1e-9 else "moving")
+    left(f"Arm      {level_bar(b.arm, 1.0, 5)} {b.arm:4.0%}  gripper {gripper}")
+    lamps(("Arm_At_Oven", s.arm_at_oven), ("Arm_At_Mould", s.arm_at_mould))
+    t.append("\n")
+    left(f"         holds {name(b.held)}")
+    lamps(("ArmToMould", out.arm_to_mould), ("Gripper", out.gripper))
+    t.append("\n")
+    left(f"Mould    {level_bar(b.mould, 1.0, 5)} {b.mould:4.0%}")
+    lamps(("Mould_Closed", s.mould_closed), ("Mould_Open", s.mould_open), ("MouldClose", out.mould_close))
+    content = name(b.cavity)
+    if b.cavity is not None and b.cavity.stretched:
+        content += f", stretched, max {b.cavity.max_bar:4.1f} bar"
+    t.append(f"\n         in the mould: {content}\n")
+    left(f"Rod      {level_bar(b.rod, 1.0, 5)} {b.rod:4.0%}")
+    lamps(("Rod_Up", s.rod_up), ("Rod_Down", s.rod_down), ("StretchRod", out.stretch_rod))
+    t.append("\n")
+    left(f"Pressure {level_bar(b.pressure_bar, 40.0)} {b.pressure_bar:4.1f} bar")
+    t.append(f"raw {s.blow_pressure_raw}  regulator {b.high_blow_bar:g} bar")
+    t.append("\n")
+    left("         valves")
+    lamps(("PreBlowValve", out.pre_blow_valve), ("HighBlowValve", out.high_blow_valve),
+          ("ExhaustValve", out.exhaust_valve))
+    t.append("\n")
+    left(f"Ejector  {level_bar(b.ejector, 1.0, 5)} {b.ejector:4.0%}")
+    lamps(("Bottle_In_Mould", s.bottle_in_mould), ("Ejector", out.ejector))
+    t.append("\n")
+    left(f"Plate    {name(b.dead_plate)}")
+    lamps(("Bottle_Ejected", s.bottle_ejected))
+    t.append("\n")
+    slots = "".join("●" if x else "·" for x in plant.c1.slots)  # compact: the full row is on the filler tab
+    left(f"C1       [{slots}]")
+    lamps(("C1_Full", s.c1_full))
+    t.append("\n")
+    # every injected fault on one line: a red marker after a full row of lamps would pass the world's width
+    faults = [text for on, text in (
+        (b.preform_stuck, "PREFORM STUCK"), (b.lamps_failed, "LAMPS FAILED"),
+        (b.lamps_stuck_on and not b.lamps_failed, "LAMPS STUCK ON"), (b.arm_stuck, "ARM STUCK"),
+        (b.mould_stuck, "MOULD STUCK"), (b.exhaust_blocked, "EXHAUST BLOCKED"), (b.pressure_wire_break, "WIRE BREAK"),
+        (b.ejector_stuck, "EJECTOR STUCK"), (b.high_blow_bar != config.HIGH_BLOW_BAR,
+                                              f"REGULATOR {b.high_blow_bar:g} BAR"),
+        (plant.filler.door_blocked, "FILLER DOOR BLOCKED")) if on]
+    if faults:
+        t.append("Faults   ")
+        t.append("  ".join(faults), style="bold red")
+    t.append("\n")
+
+    t.append("Wires    ")
+    lamps(("E_Stop_OK", w.e_stop_ok), ("Heartbeat", w.heartbeat))
+    _fault(t, not plant.blowmoulder_heartbeat.enabled, "FROZEN")
+    t.append(f"\nCount    loaded {b.loaded}  ejected {b.ejected}  dropped {len(b.dropped)}")
+    if plant.blowmoulder_outputs is None:
+        t.append("\nblow moulder PLC not answering: outputs taken as OFF (the exhaust vents), no bottles",
+                 style="bold red")
     return t
 
 
