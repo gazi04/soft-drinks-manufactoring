@@ -28,6 +28,8 @@ SCRIPTS = [
     Script("test_link_blowmoulder.py", "simulator link: BlowmoulderPlc heartbeat, write + read back incl. a negative raw pressure, OvenTemp / BlowPressure_Raw / C1_Full read by the PLC, LampPower 0, counters untouched"),
     Script("test_closed_loop_blowmoulder.py", "closed loop (blow moulder only, the test empties C1): 6 bottles blown, every preform in the window with the P offset, empty after Stop",
            args=("--blowmoulder-only",)),
+    Script("test_blowmoulder_scenarios.py", "13 fault scenarios on the real PLC (the test plays C1): jams, lamps, blow air, exhaust, regulator, wire break, C1 backed up; Reset refused while the cause lasts, the mould never opens under pressure",
+           quick_args=("--quick",)),
 ]
 
 if __name__ == "__main__":

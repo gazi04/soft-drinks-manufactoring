@@ -111,6 +111,7 @@ class Filler:
 
         self._phase = 0.0  # seconds the belt has run since the last pitch boundary
         self._door_timer = 0.0  # how long the current bottle has been passing the door
+        self.door_blocked = False  # injected fault (blow moulder stage 6): a bottle across the door, nothing passes
         self._rinse_timer = 0.0  # rinse time the bottle at the rinse station has had
         self._cap_timer = 0.0  # cap head time the bottle at the cap station has had
         self._s6_timer = 0.0  # remaining time of the S6 pulse
@@ -184,7 +185,7 @@ class Filler:
 
     # --- 3b: door ------------------------------------------------------------------
     def _door(self, door_open: bool, dt: float) -> None:
-        if not (door_open and self.c1.exit_bottle is not None):
+        if self.door_blocked or not (door_open and self.c1.exit_bottle is not None):
             self._door_timer = 0.0  # door closed or nobody waiting: nothing passes
             return
         self._door_timer += dt

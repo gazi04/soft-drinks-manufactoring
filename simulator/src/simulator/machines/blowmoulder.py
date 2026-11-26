@@ -149,6 +149,10 @@ class Hopper:
         self._chute_s = 0.0  # how long the elevator has run for the next preform
         self._next_id = 1
 
+    def load(self, count: int) -> None:
+        """Hand action (stage 6): the hopper is filled (or emptied) to `count` preforms."""
+        self.count = count
+
     def step(self, feed_on: bool, place_free: bool, dt: float) -> Preform | None:
         """The next preform when it reaches the loader place in this step, else None.
 
@@ -221,7 +225,16 @@ class Blowmoulder:
         self.dead_plate: Preform | None = None  # blown bottle waiting to drop onto C1
         self.dropped: list[Preform] = []  # preforms the gripper let fall (taken away by hand)
         self.pressure_bar = 0.0  # cavity pressure
-        self.high_blow_bar = config.HIGH_BLOW_BAR  # the high-blow regulator (stage 6 faults change it)
+        self.high_blow_bar = config.HIGH_BLOW_BAR  # the high-blow regulator (air_low / regulator_failed change it)
+        # Injected faults (stage 6), set only by commands; the PLC only sees their effect
+        self.preform_stuck = False  # the loader strokes, the preform sticks in the throat: it never reaches the pocket
+        self.lamps_failed = False  # lamps burnt out: no heat whatever the PLC writes (wins over lamps_stuck_on)
+        self.lamps_stuck_on = False  # lamp driver welded: 100 % whatever the PLC writes
+        self.arm_stuck = False  # transfer arm does not move (output ON or OFF)
+        self.mould_stuck = False  # mould halves do not move
+        self.ejector_stuck = False  # ejector does not move
+        self.exhaust_blocked = False  # the exhaust valve opens, no air leaves (silencer blocked)
+        self.pressure_wire_break = False  # the transducer's wire is cut: it reads WIRE_BREAK_RAW
         self.bottles = factory if factory is not None else BottleFactory()  # bottle ids 1, 2, 3 ... on C1
         self.ejected = 0  # bottles put onto C1
         self._ejected_timer = 0.0  # remaining time of the Bottle_Ejected pulse
@@ -238,7 +251,12 @@ class Blowmoulder:
         self._move_loader(out.loader, dt)
         events += self._load()
         # 3. Lamps
-        self.thermal.step(self.pocket, self._lamp_pct(out.lamp_power), dt)
+        lamp_pct = self._lamp_pct(out.lamp_power)
+        if self.lamps_stuck_on:
+            lamp_pct = bm.LAMP_POWER_MAX
+        if self.lamps_failed:
+            lamp_pct = 0
+        self.thermal.step(self.pocket, lamp_pct, dt)
         # 4.-5. Gripper and arm: the hand-over and the transfer into the mould
         events += self._move_gripper(out.gripper, dt)
         events += self._move_arm(out.arm_to_mould, dt)
@@ -273,7 +291,7 @@ class Blowmoulder:
 
     def _load(self) -> list[Event]:
         """At full stroke the waiting preform goes into the pocket, never into an occupied one."""
-        pushing = self.loader_out and self.at_loader is not None
+        pushing = self.loader_out and self.at_loader is not None and not self.preform_stuck
         refused = pushing and self.pocket is not None
         self._audit.warn("pocket_full", refused, "loader pushed a preform against the preform in the oven pocket")
         if not pushing or refused:
@@ -307,7 +325,8 @@ class Blowmoulder:
     # --- 5: arm -----------------------------------------------------------------------
     def _move_arm(self, to_mould: bool, dt: float) -> list[Event]:
         was_home = self.arm_at_oven
-        self.arm = _move(self.arm, to_mould, config.ARM_SWING_S, config.ARM_RETURN_S, dt)
+        if not self.arm_stuck:
+            self.arm = _move(self.arm, to_mould, config.ARM_SWING_S, config.ARM_RETURN_S, dt)
         if not (was_home and not self.arm_at_oven and self.gripper_closed and self.held is None):
             return []
         preform = self.take_preform()  # the hand-over: Preform_In_Oven drops now
@@ -319,7 +338,8 @@ class Blowmoulder:
 
     # --- 6: mould ---------------------------------------------------------------------
     def _move_mould(self, close: bool, dt: float) -> None:
-        self.mould = _move(self.mould, close, config.MOULD_CLOSE_S, config.MOULD_OPEN_S, dt)
+        if not self.mould_stuck:
+            self.mould = _move(self.mould, close, config.MOULD_CLOSE_S, config.MOULD_OPEN_S, dt)
         if self.mould_closed:
             return
         under_pressure = self.pressure_bar > config.OPEN_SAFE_BAR
@@ -353,7 +373,7 @@ class Blowmoulder:
             paths.append((config.PRE_BLOW_BAR, config.PRE_BLOW_TAU_S))
         if out.high_blow_valve:
             paths.append((self.high_blow_bar, config.HIGH_BLOW_TAU_S))
-        if out.exhaust_valve:
+        if out.exhaust_valve and not self.exhaust_blocked:
             paths.append((0.0, config.EXHAUST_TAU_S))
         if paths:
             rate = sum(1.0 / tau for _, tau in paths)
@@ -365,7 +385,8 @@ class Blowmoulder:
 
     # --- 9: ejector -------------------------------------------------------------------
     def _move_ejector(self, on: bool, dt: float) -> list[Event]:
-        self.ejector = _move(self.ejector, on, config.EJECTOR_OUT_S, config.EJECTOR_RETURN_S, dt)
+        if not self.ejector_stuck:
+            self.ejector = _move(self.ejector, on, config.EJECTOR_OUT_S, config.EJECTOR_RETURN_S, dt)
         self._audit.warn("eject_closed", not self.ejector_home and not self.mould_open,
                          "ejector out with the mould not open")
         blocked = self.cavity is not None and self.dead_plate is not None and self.mould_open
@@ -417,6 +438,12 @@ class Blowmoulder:
         self._audit.warn("arm_ejector", in_mould and not self.ejector_home, "arm inside the mould with the ejector out")
 
     # --- The hand-over ----------------------------------------------------------------
+    def drop_preform(self) -> None:
+        """Injected fault (stage 6): the gripper loses the preform it holds (it falls beside the mould)."""
+        if self.held is not None:
+            self.dropped.append(self.held)
+            self.held = None
+
     def take_preform(self) -> Preform | None:
         """The gripper takes the preform out of the pocket (None if empty). The pyrometer now sees the
         wall, which starts at the preform's temperature: no jump on the trend."""
@@ -527,5 +554,7 @@ class Blowmoulder:
     @property
     def blow_pressure_raw(self) -> int:
         """BlowPressure_Raw: transducer counts, RAW_FULL at 40.0 bar (PRESS_FULL in 0.1 bar), signed INT."""
+        if self.pressure_wire_break:
+            return config.WIRE_BREAK_RAW  # a cut 4-20 mA loop reads below the live zero
         raw = round(self.pressure_bar * bm.RAW_FULL * 10 / bm.PRESS_FULL)
         return max(-_INT_MAX - 1, min(raw, _INT_MAX))

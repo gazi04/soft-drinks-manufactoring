@@ -221,6 +221,9 @@ def main() -> None:
     if args.scenario and not args.with_packer and SCENARIOS[args.scenario].target == "packer":
         raise SystemExit(f"scenario {args.scenario!r} needs the real packer: leave out --no-packer / --no-labeler / "
                          "--filler-only")
+    if args.scenario and not args.with_blowmoulder and SCENARIOS[args.scenario].target == "blowmoulder":
+        raise SystemExit(f"scenario {args.scenario!r} needs the real blow moulder: leave out --no-blowmoulder / "
+                         "--filler-only")
     if args.scenario and not args.with_labeler and SCENARIOS[args.scenario].target == "labeler":
         raise SystemExit(f"scenario {args.scenario!r} needs the real labeler: leave out --no-labeler / --filler-only")
     if args.with_blowmoulder and (args.rate is not None or args.add):

@@ -44,6 +44,7 @@ class _Spec:
     packer_standin: bool = False  # needs the packer stand-in; with the real packer the command is ignored with a warning
     packer: bool = False  # needs the real packer; with the stand-in the command is ignored with a warning
     supply: bool = False  # needs the bottle supply; with the real blow moulder the command is ignored with a warning
+    blowmoulder: bool = False  # needs the real blow moulder; with the supply the command is ignored with a warning
 
 
 def _set_supply_rate(plant: Plant, v) -> None:
@@ -242,6 +243,35 @@ def _packer_heartbeat(plant: Plant, v) -> None:
     plant.packer_heartbeat.enabled = v  # its own bit: a comm fault can hit the packer PLC alone
 
 
+# --- blow moulder (stage 6): faults in its physics and hand actions --------------------------
+def _load_preforms(plant: Plant, v) -> None:
+    plant.blowmoulder.hopper.load(v)
+
+
+def _bm_flag(name: str):
+    """Setter for one of the blow moulder's fault switches (an attribute of plant.blowmoulder)."""
+    def setter(plant: Plant, v) -> None:
+        setattr(plant.blowmoulder, name, v)
+    return setter
+
+
+def _drop_preform(plant: Plant, v) -> None:
+    if v:  # an action, not a state
+        plant.blowmoulder.drop_preform()
+
+
+def _high_blow_bar(plant: Plant, v) -> None:
+    plant.blowmoulder.high_blow_bar = v
+
+
+def _blowmoulder_heartbeat(plant: Plant, v) -> None:
+    plant.blowmoulder_heartbeat.enabled = v  # its own bit: a comm fault can hit the blow moulder PLC alone
+
+
+def _filler_door_blocked(plant: Plant, v) -> None:
+    plant.filler.door_blocked = v
+
+
 COMMANDS: dict[str, _Spec] = {
     "supply_rate": _Spec(float, _set_supply_rate, "bottles per minute put on C1 (0 = none)", supply=True),
     "add_bottles": _Spec(int, _add_bottles, "put n extra bottles on C1", supply=True),
@@ -250,6 +280,8 @@ COMMANDS: dict[str, _Spec] = {
     "product_available": _Spec(bool, _set_product_available, "Product_Available wire from the syrup room (FALSE = pipe cut)"),
     "e_stop": _Spec(bool, _set_e_stop, "TRUE = E-stop pressed (E_Stop_OK FALSE)"),
     "index_jam": _Spec(bool, _set_index_jam, "TRUE = index belt blocked (motor ON, belt stands)"),
+    "filler_door_blocked": _Spec(bool, _filler_door_blocked,
+                                 "TRUE = a bottle lies across the filler's entry door: it opens, nothing passes (C1 fills)"),
     "labeler_running": _Spec(bool, _set_labeler_running, "FALSE = labeler takes no bottles, C2 fills up", standin=True),
     "heartbeat": _Spec(bool, _set_heartbeat, "FALSE = heartbeat frozen (PLC: Alm_CommLost after 3 s)"),
     # syrup room
@@ -301,11 +333,34 @@ COMMANDS: dict[str, _Spec] = {
                                 packer=True),
     "packer_heartbeat": _Spec(bool, _packer_heartbeat, "FALSE = packer PLC heartbeat frozen (its Alm_CommLost after 3 s)",
                               packer=True),
+    # blow moulder (only with the real blow moulder, not with --no-blowmoulder)
+    "load_preforms": _Spec(int, _load_preforms, "hopper filled (or emptied) to n preforms (1000 = full)",
+                           blowmoulder=True),
+    "preform_stuck": _Spec(bool, _bm_flag("preform_stuck"),
+                           "TRUE = the loader strokes, the preform sticks: it never reaches the oven pocket",
+                           blowmoulder=True),
+    "lamps_failed": _Spec(bool, _bm_flag("lamps_failed"), "TRUE = IR lamps burnt out: no heat", blowmoulder=True),
+    "lamps_stuck_on": _Spec(bool, _bm_flag("lamps_stuck_on"), "TRUE = lamp driver welded: 100 % whatever the PLC writes",
+                            blowmoulder=True),
+    "arm_stuck": _Spec(bool, _bm_flag("arm_stuck"), "TRUE = transfer arm does not move", blowmoulder=True),
+    "drop_preform": _Spec(bool, _drop_preform, "TRUE = the gripper loses the preform it holds", blowmoulder=True),
+    "mould_stuck": _Spec(bool, _bm_flag("mould_stuck"), "TRUE = mould halves do not move", blowmoulder=True),
+    "high_blow_bar": _Spec(float, _high_blow_bar, "high-blow regulator in bar (39 = normal, 20 = air low, 45 = failed)",
+                           blowmoulder=True),
+    "exhaust_blocked": _Spec(bool, _bm_flag("exhaust_blocked"), "TRUE = the exhaust opens, no air leaves",
+                             blowmoulder=True),
+    "pressure_wire_break": _Spec(bool, _bm_flag("pressure_wire_break"),
+                                 "TRUE = pressure transducer wire cut: BlowPressure_Raw -2000", blowmoulder=True),
+    "ejector_stuck": _Spec(bool, _bm_flag("ejector_stuck"), "TRUE = ejector does not move", blowmoulder=True),
+    "blowmoulder_heartbeat": _Spec(bool, _blowmoulder_heartbeat,
+                                   "FALSE = blow moulder PLC heartbeat frozen (its Alm_CommLost after 3 s)",
+                                   blowmoulder=True),
 }
 
 SYRUP_COMMANDS = frozenset(name for name, spec in COMMANDS.items() if spec.syrup)
 LABELER_COMMANDS = frozenset(name for name, spec in COMMANDS.items() if spec.labeler)
 PACKER_COMMANDS = frozenset(name for name, spec in COMMANDS.items() if spec.packer)
+BLOWMOULDER_COMMANDS = frozenset(name for name, spec in COMMANDS.items() if spec.blowmoulder)
 
 
 def check(command: Command) -> None:
@@ -360,6 +415,11 @@ class CommandQueue:
             if spec.packer and plant.packer is None:
                 events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "
                                         "no real packer (run without --no-packer / --no-labeler / --filler-only)",
+                                        warning=True))
+                continue
+            if spec.blowmoulder and plant.blowmoulder is None:
+                events.append(Event.sim(plant.now, f"command {command.name} = {command.value} ignored: "
+                                        "no real blow moulder (run without --no-blowmoulder / --filler-only)",
                                         warning=True))
                 continue
             if spec.supply and plant.supply is None:

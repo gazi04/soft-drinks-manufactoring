@@ -1,6 +1,7 @@
 """commands.py: the command queue and every command's effect on the plant.  uv run pytest"""
 
 import pytest
+from test_blowmoulder_faults import BLOWMOULDER_COMMANDS_TESTED
 
 from simulator import config
 from simulator.commands import COMMANDS, LABELER_COMMANDS, SYRUP_COMMANDS, Command, CommandQueue
@@ -132,8 +133,8 @@ def test_labeler_commands_are_marked_and_ignored_without_the_real_labeler():
 def test_every_command_is_tested_above():
     assert set(COMMANDS) == {
         "supply_rate", "add_bottles", "supply_paused", "fill_flow", "product_available",
-        "e_stop", "index_jam", "labeler_running", "heartbeat",
-    } | SYRUP_COMMANDS_TESTED | LABELER_COMMANDS_TESTED | PACKER_COMMANDS_TESTED
+        "e_stop", "index_jam", "labeler_running", "heartbeat", "filler_door_blocked",
+    } | SYRUP_COMMANDS_TESTED | LABELER_COMMANDS_TESTED | PACKER_COMMANDS_TESTED | BLOWMOULDER_COMMANDS_TESTED
 
 
 @pytest.mark.parametrize(

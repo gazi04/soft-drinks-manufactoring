@@ -364,6 +364,12 @@ The filler stops C1 only on E-stop or FAULT, and `C1_Full` watches slot 1: a bot
 **Why does the CLI refuse `--rate` / `--add` with the blow moulder?**
 With the blow moulder the bottle supply does not exist (`plant.supply` is None): the bottles come from preforms. A silent `--add 20` would do nothing and the user would wonder where the 20 bottles went, so the CLI stops with "add --no-blowmoulder"; the commands themselves are ignored with a warning (`_Spec(supply=True)`), and scenarios that set the supply are refused or hidden in the panel (`scenarios.uses_supply`).
 
+**Why do some blow moulder scenarios end with a warning about a bad bottle?**
+The recovery follows rule 9: after Reset + Start the PLC ejects whatever is in the mould (there is no reject, Q4). `mould_stuck` leaves an unblown preform there, `air_low` a half-blown bottle, `lamps_stuck_on` an overheated one; the simulator flags them on C1 as it should. `test_blowmoulder_scenarios.py` lists these expected warnings per scenario and fails on any other, and always on "mould opened under pressure".
+
+**Why `c1_backed_up` and not `c1_stopped`?**
+A C1 belt that stands keeps the bottle in slot 0, and `C1_Full` watches slot 1: the blow moulder never sees a full conveyor and jams (issue I18). A real backup happens when C1 runs and nobody takes: the scenario blocks the filler's door (`filler_door_blocked`), the queue reaches slot 1, the blow moulder is Blocked with its bottle in the open mould and warns after 2 min.
+
 ## Syrup room in the plant (`plant.py`)
 
 **Where is the cable between the two PLCs?**

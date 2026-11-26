@@ -23,7 +23,9 @@ A scenario has a `target`: "filler" (default), "syrup" or "labeler". Its conditi
 that PLC (every status type has .step / .state / .alarms). A syrup scenario needs the syrup room in the
 plant (not --filler-only); the operator presses Reset / Start with `tests/hmi.py --syrup ...`. A labeler
 scenario needs the real labeler (not --no-labeler); Reset / Start with `tests/hmi.py --labeler ...`. A packer
-scenario needs the real packer (not --no-packer); Reset / Start with `tests/hmi.py --packer ...`.
+scenario needs the real packer (not --no-packer); Reset / Start with `tests/hmi.py --packer ...`. A blow moulder
+scenario needs the real blow moulder (not --no-blowmoulder / --filler-only); Reset / Start with
+`tests/hmi.py --blowmoulder ...`.
 Faults that leave a mark the PLC cannot clear itself (tank full of water, 7 bar in the headspace)
 end with the maintenance command (drain_mix_tank, vent_tank) before the note.
 """
@@ -32,10 +34,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 
 from simulator import config
-from simulator.commands import LABELER_COMMANDS, PACKER_COMMANDS, SYRUP_COMMANDS, Command, check
+from simulator.commands import BLOWMOULDER_COMMANDS, LABELER_COMMANDS, PACKER_COMMANDS, SYRUP_COMMANDS, Command, check
 from simulator.events import Event
 from simulator.plant import Plant
-from simulator.plcs import LabelerStatus, PackerStatus, PlcStatus, SyrupStatus
+from simulator.plcs import BlowmoulderStatus, LabelerStatus, PackerStatus, PlcStatus, SyrupStatus
 
 # PLC step and state numbers (plcs.STEP_NAMES / STATE_NAMES)
 IDLE, INDEX, FAULT = 0, 20, 900
@@ -46,7 +48,10 @@ S_WAIT_DEMAND, S_DOSE_WATER, S_MIX, S_COOL, S_CARBONATE, S_TRANSFER = 5, 10, 30,
 L_WAIT_BOTTLE, L_PRESS, L_DISCHARGE = 10, 24, 40
 # Packer steps (plcs.PACKER_STEP_NAMES, PACKER_WRAP_STEP_NAMES)
 P_COUNT, P_CUT = 10, 22
-TARGETS = ("filler", "syrup", "labeler", "packer")
+# Blow moulder steps (plcs.BLOWMOULDER_STEP_NAMES, BLOWMOULDER_MOULD_STEP_NAMES)
+B_HEAT = 20
+B_SWING, B_HOLD = 22, 52
+TARGETS = ("filler", "syrup", "labeler", "packer", "blowmoulder")
 
 
 @dataclass(frozen=True)
@@ -80,6 +85,11 @@ def alarm(name: str) -> Condition:
 def in_wrap_step(step: int) -> Condition:
     """The packer's second sequencer (WrapStep)."""
     return Condition(f"wrap step {step}", lambda p, s: s is not None and s.wrap_step == step)
+
+
+def in_mould_step(step: int) -> Condition:
+    """The blow moulder's second sequencer (MouldStep)."""
+    return Condition(f"mould step {step}", lambda p, s: s is not None and s.mould_step == step)
 
 
 def pack_in_oven() -> Condition:
@@ -116,7 +126,7 @@ class Scenario:
     name: str
     description: str
     steps: tuple[Step, ...]
-    target: str = "filler"  # which PLC's status the conditions see: "filler", "syrup", "labeler" or "packer"
+    target: str = "filler"  # which PLC's status the conditions see: "filler", "syrup", "labeler", "packer", "blowmoulder"
 
     def __post_init__(self) -> None:
         if self.target not in TARGETS:
@@ -130,6 +140,8 @@ class Scenario:
                     raise ValueError(f"scenario {self.name}: {step.command.name} needs target='labeler'")
                 if self.target != "packer" and step.command.name in PACKER_COMMANDS:
                     raise ValueError(f"scenario {self.name}: {step.command.name} needs target='packer'")
+                if self.target != "blowmoulder" and step.command.name in BLOWMOULDER_COMMANDS:
+                    raise ValueError(f"scenario {self.name}: {step.command.name} needs target='blowmoulder'")
 
 
 def uses_command(scenario: Scenario, name: str) -> bool:
@@ -164,17 +176,21 @@ class ScenarioRunner:
         syrup_status: SyrupStatus | None = None,
         labeler_status: LabelerStatus | None = None,
         packer_status: PackerStatus | None = None,
+        blowmoulder_status: BlowmoulderStatus | None = None,
     ) -> tuple[list[Command], list[Event]]:
         """Commands of every step that is due now (several if they follow at once).
 
         Conditions see `syrup_status` in a syrup scenario, `labeler_status` in a labeler scenario,
-        `packer_status` in a packer scenario, `status` (the filler) otherwise."""
+        `packer_status` in a packer scenario, `blowmoulder_status` in a blow moulder scenario, `status` (the
+        filler) otherwise."""
         if self.scenario.target == "syrup":
             status = syrup_status
         elif self.scenario.target == "labeler":
             status = labeler_status
         elif self.scenario.target == "packer":
             status = packer_status
+        elif self.scenario.target == "blowmoulder":
+            status = blowmoulder_status
         if self._since is None:
             self._since = plant.now  # the timeline starts with the first tick
         commands: list[Command] = []
@@ -216,10 +232,11 @@ class ScenarioSlot:
         syrup_status: SyrupStatus | None = None,
         labeler_status: LabelerStatus | None = None,
         packer_status: PackerStatus | None = None,
+        blowmoulder_status: BlowmoulderStatus | None = None,
     ) -> tuple[list[Command], list[Event]]:
         if self.runner is None:
             return [], []
-        return self.runner.due(plant, status, syrup_status, labeler_status, packer_status)
+        return self.runner.due(plant, status, syrup_status, labeler_status, packer_status, blowmoulder_status)
 
 
 # --- Built-in scenarios ------------------------------------------------------------
@@ -230,6 +247,8 @@ def _c(name: str, value) -> Command:
 RESET_START = "cause removed: press Reset + Start on the HMI (tests/hmi.py reset start)"
 RESET_START_LABELER = "cause removed: press Reset + Start on the labeler (tests/hmi.py --labeler reset start)"
 RESET_START_PACKER = "cause removed: press Reset + Start on the packer (tests/hmi.py --packer reset start)"
+RESET_START_BLOWMOULDER = ("cause removed: press Reset + Start on the blow moulder "
+                           "(tests/hmi.py --blowmoulder reset start)")
 
 _ALL: tuple[Scenario, ...] = (
     Scenario("gaps", "bottles in groups of 3, 2, 3 with gaps: empty pockets skipped, Starved in between", (
@@ -437,6 +456,91 @@ _ALL: tuple[Scenario, ...] = (
         Step(plc_running(), _c("palletizer_running", False)),
         Step(alarm("Alm_OutfeedBlocked"), _c("palletizer_running", True), "the packer continues by itself"),
     ), target="packer"),
+    # --- Blow moulder (target="blowmoulder"): Reset + Start with `tests/hmi.py --blowmoulder ...` ----------
+    # A recovery by state-diagram.md rule 9 ejects what is in the mould (no reject, Q4): mould_stuck, air_low and
+    # lamps_stuck_on put one bad bottle onto C1, which the simulator flags (an expected warning).
+    Scenario("hopper_empty", "hopper runs empty: Alm_NoPreforms, Starved when the mould waits too, no FAULT, refill",
+             (
+        Step(plc_running(), _c("load_preforms", 2)),  # two preforms left
+        Step(alarm("Alm_NoPreforms")),
+        Step(5, _c("load_preforms", config.HOPPER_PREFORMS), "hopper refilled: the blow moulder continues by itself"),
+    ), target="blowmoulder"),
+    Scenario("preform_stuck", "preform sticks in the loader: no Preform_In_Oven, Alm_HandlingJam 3 s after LOAD, FAULT",
+             (
+        Step(plc_running(), _c("preform_stuck", True)),
+        Step(alarm("Alm_HandlingJam")),
+        Step(2, _c("preform_stuck", False), RESET_START_BLOWMOULDER + "; the same preform is loaded"),
+    ), target="blowmoulder"),
+    Scenario("lamps_failed", "IR lamps burnt out: the preform stays cold, Alm_OvenHeatTimeout 15 s after HEAT, FAULT", (
+        Step(plc_running(), _c("lamps_failed", True)),
+        Step(alarm("Alm_OvenHeatTimeout")),
+        Step(2, _c("lamps_failed", False), RESET_START_BLOWMOULDER + "; lamps replaced, the preform is heated again"),
+    ), target="blowmoulder"),
+    Scenario("lamps_stuck_on", "lamp driver stuck at 100 %: OvenTemp 130 degC, Alm_OvenOverTemp in every mode, FAULT",
+             (
+        Step(plc_running()),
+        Step(in_step(B_HEAT), _c("lamps_stuck_on", True)),
+        Step(alarm("Alm_OvenOverTemp")),
+        Step(2, _c("lamps_stuck_on", False), RESET_START_BLOWMOULDER + " once OvenTemp < 130 degC; the overheated "
+             "preform's bottle is flagged"),
+    ), target="blowmoulder"),
+    Scenario("arm_stuck", "transfer arm does not swing: no Arm_At_Mould, Alm_HandlingJam 3 s after SWING, FAULT", (
+        Step(plc_running(), _c("arm_stuck", True)),
+        Step(alarm("Alm_HandlingJam")),
+        Step(2, _c("arm_stuck", False), RESET_START_BLOWMOULDER + "; the preform is still in the oven, heated again"),
+    ), target="blowmoulder"),
+    Scenario("preform_dropped", "gripper loses the preform in the swing: no Bottle_In_Mould, Alm_HandlingJam 3 s after "
+             "RELEASE, FAULT", (
+        Step(plc_running()),
+        Step(in_mould_step(B_SWING), _c("drop_preform", True)),
+        Step(alarm("Alm_HandlingJam")),
+        Step(2, None, RESET_START_BLOWMOULDER + "; the dropped preform was taken away by hand"),
+    ), target="blowmoulder"),
+    Scenario("mould_stuck", "mould does not close: no Mould_Closed, Alm_MouldFault 3 s after CLOSE, FAULT", (
+        Step(plc_running(), _c("mould_stuck", True)),
+        Step(alarm("Alm_MouldFault")),
+        Step(2, _c("mould_stuck", False), RESET_START_BLOWMOULDER + "; the unblown preform in the mould is ejected "
+             "(flagged)"),
+    ), target="blowmoulder"),
+    Scenario("air_low", "high-blow air only 20 bar: BlowSetpoint never reached, Alm_BlowFault 2 s after BLOW, FAULT", (
+        Step(plc_running(), _c("high_blow_bar", 20.0)),
+        Step(alarm("Alm_BlowFault")),
+        Step(2, _c("high_blow_bar", config.HIGH_BLOW_BAR), RESET_START_BLOWMOULDER + "; restart at EXHAUST, the "
+             "half-blown bottle is ejected (flagged)"),
+    ), target="blowmoulder"),
+    Scenario("exhaust_blocked", "exhaust does not vent: Pressure_Safe never, Alm_ExhaustFault 3 s after EXHAUST, FAULT, "
+             "the mould stays closed", (
+        Step(plc_running()),
+        Step(in_mould_step(B_HOLD), _c("exhaust_blocked", True)),
+        Step(alarm("Alm_ExhaustFault")),
+        Step(5, _c("exhaust_blocked", False), RESET_START_BLOWMOULDER + " (refused while the bottle is still under "
+             "pressure); restart at EXHAUST"),
+    ), target="blowmoulder"),
+    Scenario("regulator_failed", "high-blow regulator at 45 bar: Alm_OverPressure at 40.0 bar, high blow off, FAULT", (
+        Step(plc_running(), _c("high_blow_bar", 45.0)),
+        Step(alarm("Alm_OverPressure")),
+        Step(2, _c("high_blow_bar", config.HIGH_BLOW_BAR), RESET_START_BLOWMOULDER + "; restart at EXHAUST"),
+    ), target="blowmoulder"),
+    Scenario("sensor_wire_break", "pressure transducer wire cut while blowing: raw -2000, Alm_PressureSensor, FAULT, "
+             "the mould stays closed", (
+        Step(plc_running()),
+        Step(in_mould_step(B_HOLD), _c("pressure_wire_break", True)),
+        Step(alarm("Alm_PressureSensor")),
+        Step(2, _c("pressure_wire_break", False), RESET_START_BLOWMOULDER + " (refused while the wire is cut); "
+             "restart at EXHAUST"),
+    ), target="blowmoulder"),
+    Scenario("ejector_stuck", "ejector does not push: Bottle_In_Mould stays, Alm_HandlingJam 3 s after EJECT, FAULT", (
+        Step(plc_running(), _c("ejector_stuck", True)),
+        Step(alarm("Alm_HandlingJam")),
+        Step(2, _c("ejector_stuck", False), RESET_START_BLOWMOULDER + "; restart at EJECT"),
+    ), target="blowmoulder"),
+    # Not "C1 stopped": a standing C1 keeps the bottle in slot 0 and C1_Full (slot 1) never comes (HMI issue I18).
+    # Here C1 runs and the filler takes nothing, so the queue backs up to slot 1, as on a real line.
+    Scenario("c1_backed_up", "filler takes no bottles (door blocked): C1 fills, Blocked with a bottle in the open "
+             "mould, Alm_OutfeedBlocked 2 min later, no FAULT, continues by itself", (
+        Step(plc_running(), _c("filler_door_blocked", True)),
+        Step(alarm("Alm_OutfeedBlocked"), _c("filler_door_blocked", False), "the blow moulder continues by itself"),
+    ), target="blowmoulder"),
 )
 SCENARIOS: dict[str, Scenario] = {s.name: s for s in _ALL}
 # a second scenario with the same name would silently replace the first (found: the packer's roll_empty

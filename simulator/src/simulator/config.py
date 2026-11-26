@@ -237,4 +237,5 @@ BLOWN_BAR = 30.0  # a preform stretched and blown to at least this is a good bot
 BLOW_MIN_C = 95.0  # audit: colder at the hand-over = blown cold (PLC window 100-110 degC)
 OVERHEAT_C = 120.0  # audit: hotter at any time = overheated (crystallised); the PLC faults at OvenMax 130 degC
 BOTTLE_EJECTED_S = 0.2  # Bottle_Ejected ON while the bottle drops onto C1: 2 ticks, one per bottle (>= 5 s apart)
+WIRE_BREAK_RAW = -2000  # transducer counts with a cut wire (live zero lost); the PLC's RawMin is -1000
 C1_FULL_SLOT = 1  # C1 slot watched by C1_Full, same reason as S7_SLOT / C3_FULL_SLOT (2 s Outfeed_Full filter)
