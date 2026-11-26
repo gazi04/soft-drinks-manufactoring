@@ -137,6 +137,14 @@ def uses_command(scenario: Scenario, name: str) -> bool:
     return any(step.command is not None and step.command.name == name for step in scenario.steps)
 
 
+SUPPLY_COMMANDS = frozenset({"supply_rate", "add_bottles", "supply_paused"})
+
+
+def uses_supply(scenario: Scenario) -> bool:
+    """True if the scenario sets the bottle supply (it needs --no-blowmoulder: the blow moulder makes the bottles)."""
+    return any(uses_command(scenario, name) for name in SUPPLY_COMMANDS)
+
+
 class ScenarioRunner:
     """Walks through a scenario; due() is called once per tick by the loop."""
 

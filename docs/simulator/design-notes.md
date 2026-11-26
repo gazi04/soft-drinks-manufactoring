@@ -361,6 +361,9 @@ The filler stops C1 only on E-stop or FAULT, and `C1_Full` watches slot 1: a bot
 **Why does the blow moulder's link read two blocks for its outputs and decode signed words?**
 `LampPower` is an analog OUTPUT (`%QW0`), and OpenPLC puts `%QWn` at holding register n, below the `%MW` area: one more read per tick next to the coils 0–9. The simulator only reads it; it is not in `SIM_WRITE_REGISTERS`, so the one-writer guard raises before any write to HR 0 (the PLC would overwrite it anyway). Modbus registers are unsigned 16-bit, the PLC's INT is signed: `BlowPressure_Raw` is written with `to_register()` (a wire break, −2000, travels as 63536), and every status word is read with `from_register()` because `BlowPressure` and `OvenError` can be negative (the packer's status has no negative word, so its decoder skips that).
 
+**Why does the CLI refuse `--rate` / `--add` with the blow moulder?**
+With the blow moulder the bottle supply does not exist (`plant.supply` is None): the bottles come from preforms. A silent `--add 20` would do nothing and the user would wonder where the 20 bottles went, so the CLI stops with "add --no-blowmoulder"; the commands themselves are ignored with a warning (`_Spec(supply=True)`), and scenarios that set the supply are refused or hidden in the panel (`scenarios.uses_supply`).
+
 ## Syrup room in the plant (`plant.py`)
 
 **Where is the cable between the two PLCs?**

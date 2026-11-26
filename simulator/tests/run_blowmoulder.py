@@ -26,6 +26,8 @@ SCRIPTS = [
     Script("test_blowmoulder_alarms.py", "timeouts -> FAULT (both 900, exhaust open, closed mould held), limit alarms in every mode, Reset only when the cause is gone, ejector jam only while pushing, blocked warning",
            quick_args=("--quick",)),
     Script("test_link_blowmoulder.py", "simulator link: BlowmoulderPlc heartbeat, write + read back incl. a negative raw pressure, OvenTemp / BlowPressure_Raw / C1_Full read by the PLC, LampPower 0, counters untouched"),
+    Script("test_closed_loop_blowmoulder.py", "closed loop (blow moulder only, the test empties C1): 6 bottles blown, every preform in the window with the P offset, empty after Stop",
+           args=("--blowmoulder-only",)),
 ]
 
 if __name__ == "__main__":

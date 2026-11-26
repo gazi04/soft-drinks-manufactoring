@@ -5,7 +5,8 @@ One tick (report section 7.3):
     2. read the PLC outputs                       plcs.FillerPlc.read_outputs()
        (and the syrup room PLC's: plcs.SyrupPlc.read_signals(), when there is one;
         the labeler PLC's: plcs.LabelerPlc.read_outputs(), when there is one;
-        the packer PLC's: plcs.PackerPlc.read_outputs(), when there is one)
+        the packer PLC's: plcs.PackerPlc.read_outputs(), when there is one;
+        the blow moulder PLC's: plcs.BlowmoulderPlc.read_outputs(), when there is one)
     3. move the world by the measured dt          plant.Plant.step()
     4. write sensors + wiring values to the PLC   plcs.FillerPlc.write()
     5. read the PLC status: watcher events, setpoints for the audit
@@ -35,10 +36,16 @@ from simulator.events import Event, EventLog
 from simulator.machines.filler import FillerOutputs
 from simulator.plant import Plant
 from simulator.scenarios import ScenarioRunner, ScenarioSlot
+from simulator.machines.blowmoulder import BlowmoulderOutputs
 from simulator.machines.labeler import LabelerOutputs
 from simulator.machines.packer import PackerOutputs
 from simulator.plant import SyrupSignals
 from simulator.plcs import (
+    BLOWMOULDER_MOULD_STEP_NAMES,
+    BLOWMOULDER_STATE_NAMES,
+    BLOWMOULDER_STEP_NAMES,
+    BlowmoulderPlc,
+    BlowmoulderStatus,
     LABELER_STATE_NAMES,
     LABELER_STEP_NAMES,
     MODE_NAMES,
@@ -73,7 +80,8 @@ class PlcWatcher:
     The same class watches every PLC: the names, a text prefix ("syrup: ") and the counter
     that is shown in the first line differ. `log_count` also reports every increase of that
     counter (the syrup room's batches; the filler's GoodCount would flood the log).
-    `wrap_step_names`: the packer's second sequencer (WrapStep), reported like the step.
+    `wrap_step_names`: the second sequencer's step names (the packer's WrapStep, the blow moulder's MouldStep),
+    reported like the step; `second_attr` is its status field, `second_label` its name in the log.
     """
 
     def __init__(
@@ -85,6 +93,8 @@ class PlcWatcher:
         count=lambda status: status.good_count,
         log_count: bool = False,
         wrap_step_names: dict[int, str] | None = None,
+        second_attr: str = "wrap_step",
+        second_label: str = "wrap step",
     ) -> None:
         self.step_names = step_names
         self.state_names = state_names
@@ -93,6 +103,8 @@ class PlcWatcher:
         self.count = count
         self.log_count = log_count
         self.wrap_step_names = wrap_step_names
+        self.second_attr = second_attr
+        self.second_label = second_label
         self.last = None
 
     def update(self, status, now: float) -> list[Event]:
@@ -106,7 +118,8 @@ class PlcWatcher:
 
         if last is None:
             wrap = self.wrap_step_names
-            wrap_text = f"wrap step {wrap.get(status.wrap_step, status.wrap_step)}, " if wrap is not None else ""
+            second = getattr(status, self.second_attr) if wrap is not None else None
+            wrap_text = f"{self.second_label} {wrap.get(second, second)}, " if wrap is not None else ""
             plc(f"status: mode {MODE_NAMES.get(status.mode, status.mode)}, "
                 f"step {step.get(status.step, status.step)}, {wrap_text}"
                 f"state {state.get(status.state, status.state)}, {self.count_label} {self.count(status)}")
@@ -118,9 +131,11 @@ class PlcWatcher:
             plc(f"mode {MODE_NAMES.get(last.mode, last.mode)} -> {MODE_NAMES.get(status.mode, status.mode)}")
         if status.step != last.step:
             plc(f"step {step.get(last.step, last.step)} -> {step.get(status.step, status.step)}")
-        if self.wrap_step_names is not None and status.wrap_step != last.wrap_step:
-            wrap = self.wrap_step_names
-            plc(f"wrap step {wrap.get(last.wrap_step, last.wrap_step)} -> {wrap.get(status.wrap_step, status.wrap_step)}")
+        if self.wrap_step_names is not None:
+            wrap, attr = self.wrap_step_names, self.second_attr
+            before, after = getattr(last, attr), getattr(status, attr)
+            if after != before:
+                plc(f"{self.second_label} {wrap.get(before, before)} -> {wrap.get(after, after)}")
         if status.state != last.state:
             plc(f"state {state.get(last.state, last.state)} -> {state.get(status.state, status.state)}")
         if self.log_count and self.count(status) > self.count(last):
@@ -182,6 +197,9 @@ class LoopStats:
     packer_status: PackerStatus | None = None  # same for the packer PLC (None without a packer link)
     packer_count_start: int | None = None  # the packer's PackCount
     packer_count_end: int | None = None
+    blowmoulder_status: BlowmoulderStatus | None = None  # same for the blow moulder PLC (None without its link)
+    blowmoulder_count_start: int | None = None  # the blow moulder's BottleCount
+    blowmoulder_count_end: int | None = None
     problems: set[str] = field(default_factory=set)  # distinct problems already logged
 
     def summary(self) -> str:
@@ -205,8 +223,13 @@ class LoopStats:
             if self.packer_count_start is not None and self.packer_count_end is not None
             else ""
         )
+        blown = (
+            f", BottleCount +{self.blowmoulder_count_end - self.blowmoulder_count_start}"
+            if self.blowmoulder_count_start is not None and self.blowmoulder_count_end is not None
+            else ""
+        )
         dt = f"dt {self.dt_min * 1000:.0f}-{self.dt_max * 1000:.0f} ms" if self.ticks else "no ticks"
-        return f"{self.ticks} ticks in {self.seconds:.1f} s, {dt}{made}{batches}{labelled}{packed}"
+        return f"{self.ticks} ticks in {self.seconds:.1f} s, {dt}{blown}{made}{batches}{labelled}{packed}"
 
 
 async def run(
@@ -224,6 +247,7 @@ async def run(
     syrup_plc: SyrupPlc | None = None,
     labeler_plc: LabelerPlc | None = None,
     packer_plc: PackerPlc | None = None,
+    blowmoulder_plc: BlowmoulderPlc | None = None,
 ) -> LoopStats:
     """Run the loop until `seconds` have passed, `until()` is true or `stop` is set.
 
@@ -238,6 +262,11 @@ async def run(
     `packer_plc`: the fourth PLC, needed exactly when the plant has the real packer
     (Plant(with_packer=True)): it drives C3's motor, so without it the labeler would block. A packer
     PLC that does not answer switches all its outputs off: C3 stands, the oven is off.
+
+    `blowmoulder_plc`: the fifth PLC, needed exactly when the plant has the real blow moulder
+    (Plant(with_blowmoulder=True)): it makes the bottles on C1, so without it the filler would starve. A blow
+    moulder PLC that does not answer switches all its outputs off except the exhaust, which vents
+    (plant.BLOWMOULDER_DEAD).
 
     `commands`: queue filled by the caller (panel, test); applied at the start of every
     tick, the only place where the world changes from outside the physics.
@@ -255,6 +284,11 @@ async def run(
         raise ValueError("a packer PLC link needs a plant with the packer: Plant(with_labeler=True, with_packer=True)")
     if packer_plc is None and plant.packer is not None:
         raise ValueError("a plant with the packer needs its PLC link (packer_plc=): nobody else drives C3")
+    if blowmoulder_plc is not None and plant.blowmoulder is None:
+        raise ValueError("a blow moulder PLC link needs a plant with the blow moulder: Plant(with_blowmoulder=True)")
+    if blowmoulder_plc is None and plant.blowmoulder is not None:
+        raise ValueError("a plant with the blow moulder needs its PLC link (blowmoulder_plc=): nobody else makes "
+                         "the bottles")
     plant_lock.acquire(plc.host, plc.port, "simulator loop")
     if syrup_plc is not None:
         plant_lock.acquire(syrup_plc.host, syrup_plc.port, "simulator loop")
@@ -262,6 +296,8 @@ async def run(
         plant_lock.acquire(labeler_plc.host, labeler_plc.port, "simulator loop")
     if packer_plc is not None:
         plant_lock.acquire(packer_plc.host, packer_plc.port, "simulator loop")
+    if blowmoulder_plc is not None:
+        plant_lock.acquire(blowmoulder_plc.host, blowmoulder_plc.port, "simulator loop")
     stats = LoopStats()
     watcher = PlcWatcher()
     filler = LinkTrack(plc, "PLC")
@@ -273,6 +309,10 @@ async def run(
     packer = LinkTrack(packer_plc, "packer PLC") if packer_plc is not None else None
     packer_watcher = PlcWatcher(PACKER_STEP_NAMES, PACKER_STATE_NAMES, "packer: ", "PackCount",
                                 lambda status: status.pack_count, wrap_step_names=PACKER_WRAP_STEP_NAMES)
+    blowmoulder = LinkTrack(blowmoulder_plc, "blow moulder PLC") if blowmoulder_plc is not None else None
+    blowmoulder_watcher = PlcWatcher(BLOWMOULDER_STEP_NAMES, BLOWMOULDER_STATE_NAMES, "blow moulder: ", "BottleCount",
+                                     lambda status: status.bottle_count, wrap_step_names=BLOWMOULDER_MOULD_STEP_NAMES,
+                                     second_attr="mould_step", second_label="mould step")
     if scenario is not None and commands is None:
         commands = CommandQueue()
     start = last = time.monotonic()
@@ -351,8 +391,23 @@ async def run(
                                f"{packer_plc.reconnect_s:g} s: C3 stands, the labeler will block "
                                "(run with --no-packer to keep the packer stand-in)")
 
+        # 2e. The blow moulder PLC: its outputs incl. LampPower (link down: None = all OFF, the exhaust vents)
+        blowmoulder_out: BlowmoulderOutputs | None = None
+        if blowmoulder is not None:
+            if await blowmoulder_plc.ensure_connected():
+                try:
+                    blowmoulder_out = await blowmoulder_plc.read_outputs()
+                except PlcCommError as error:
+                    blowmoulder.problem(stats, log, plant.now, f"read:{type(error).__name__}",
+                                        f"reading the blow moulder PLC outputs failed: {error}")
+            elif not blowmoulder.was_ok:
+                blowmoulder.problem(stats, log, plant.now, "connect",
+                                    f"blow moulder PLC {blowmoulder_plc.host}:{blowmoulder_plc.port} not reachable, "
+                                    f"retrying every {blowmoulder_plc.reconnect_s:g} s: no bottles onto C1, the filler "
+                                    "will starve (run with --no-blowmoulder to keep the bottle supply)")
+
         # 3. Physics (the first tick has dt = 0: only the start state is written)
-        writes, events = plant.step(out, dt, signals, labeler_out, packer_out)
+        writes, events = plant.step(out, dt, signals, labeler_out, packer_out, blowmoulder=blowmoulder_out)
         log.extend(events)
 
         # 4.+5. Write sensors, read the status back
@@ -450,6 +505,29 @@ async def run(
             except PlcCommError:
                 packer.last_writes = None
 
+        # 4e.+5e. The same for the blow moulder PLC, on its own
+        if blowmoulder is not None and blowmoulder_plc.connected:
+            blowmoulder_writes = plant.blowmoulder_writes()
+            try:
+                if blowmoulder.last_writes is not None and stats.ticks % VERIFY_EVERY == 0:
+                    wrong = await blowmoulder_plc.verify_writes(blowmoulder.last_writes)
+                    if wrong:
+                        blowmoulder.problem(stats, log, plant.now, f"foreign:{wrong}",
+                                            "blow moulder PLC: written values changed by someone else: "
+                                            f"{', '.join(wrong)} (debugger force or a second writer, e.g. a test script)")
+                await blowmoulder_plc.write(blowmoulder_writes)
+                blowmoulder.last_writes = blowmoulder_writes
+                blowmoulder_status = await blowmoulder_plc.read_status()
+                stats.blowmoulder_status = blowmoulder_status
+                log.extend(blowmoulder_watcher.update(blowmoulder_status, plant.now))
+                if stats.blowmoulder_count_start is None:
+                    stats.blowmoulder_count_start = blowmoulder_status.bottle_count
+                stats.blowmoulder_count_end = blowmoulder_status.bottle_count
+            except PlcReplyError as error:
+                blowmoulder.problem(stats, log, plant.now, f"reply:{error}", str(error))
+            except PlcCommError:
+                blowmoulder.last_writes = None
+
         # 6. Link changes
         filler.report_link(stats, log, plant.now)
         if syrup is not None:
@@ -458,6 +536,8 @@ async def run(
             labeler.report_link(stats, log, plant.now)
         if packer is not None:
             packer.report_link(stats, log, plant.now)
+        if blowmoulder is not None:
+            blowmoulder.report_link(stats, log, plant.now)
 
         stats.ticks += 1
         stats.seconds = time.monotonic() - start

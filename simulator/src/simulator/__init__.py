@@ -1,18 +1,21 @@
-"""Plant simulator for the soft drink line: the filler, the syrup room, the labeler and the packer.
+"""Plant simulator for the soft drink line: the blow moulder, the filler, the syrup room, the labeler and the packer.
 
-    uv run simulator                                 # control panel (q quits), all four PLCs
-    uv run simulator --no-packer                     # three PLCs, a stand-in takes the bottles off C3
+    uv run simulator                                 # control panel (q quits), all five PLCs
+    uv run simulator --no-blowmoulder                # four PLCs, the bottle supply puts bottles onto C1
+    uv run simulator --no-packer                     # a stand-in takes the bottles off C3
     uv run simulator --no-labeler                    # filler + syrup room, a stand-in takes the bottles off C2
-    uv run simulator --filler-only                   # the filler alone, Product_Available held TRUE, labeler stand-in
+    uv run simulator --filler-only                   # the filler alone, Product_Available held TRUE, supply + labeler stand-in
     uv run simulator --headless                      # no panel: console + log, until Ctrl+C
-    uv run simulator --headless --add 20 --rate 0    # exactly 20 bottles, no rate supply
+    uv run simulator --headless --no-blowmoulder --add 20 --rate 0    # exactly 20 bottles, no rate supply
     uv run simulator --headless --seconds 120 --log logs/run.log
     uv run simulator --headless --scenario index_jam # a fixed fault sequence (scenarios.py)
     uv run simulator --list-scenarios
 
-Panel and headless take the same options (--rate, --add, --scenario, --log, ...).
-Press Reset / Start with the HMI (tests/hmi.py until FUXA exists; `hmi.py --syrup ...` for the
-syrup room, `hmi.py --labeler ...` for the labeler, `hmi.py --packer ...` for the packer): the simulator never writes commands, modes or setpoints. A scenario waits until the PLC runs,
+Panel and headless take the same options (--rate, --add, --scenario, --log, ...); --rate / --add need the
+bottle supply, so they go with --no-blowmoulder (or --filler-only).
+Press Reset / Start with the HMI (FUXA's header, or tests/hmi.py; `hmi.py --syrup ...` for the
+syrup room, `hmi.py --labeler ...` for the labeler, `hmi.py --packer ...` for the packer, `hmi.py --blowmoulder ...`
+for the blow moulder, which has no FUXA screen yet): the simulator never writes commands, modes or setpoints. A scenario waits until the PLC runs,
 so it does not matter whether Start is pressed before or after the simulator starts.
 """
 
@@ -36,15 +39,21 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--labeler-port", type=int, default=config.LABELER_PORT)
     parser.add_argument("--packer-host", default=None, help="packer PLC host (default: same as --host)")
     parser.add_argument("--packer-port", type=int, default=config.PACKER_PORT)
+    parser.add_argument("--blowmoulder-host", default=None, help="blow moulder PLC host (default: same as --host)")
+    parser.add_argument("--blowmoulder-port", type=int, default=config.BLOWMOULDER_PORT)
     parser.add_argument("--filler-only", action="store_true",
-                        help="the filler alone: no syrup room (Product_Available held TRUE), labeler stand-in")
+                        help="the filler alone: no syrup room (Product_Available held TRUE), bottle supply and "
+                             "labeler stand-in")
     parser.add_argument("--no-labeler", action="store_true",
                         help="keep the labeler stand-in (no labeler PLC): it drives C2 and takes its bottles")
     parser.add_argument("--no-packer", action="store_true",
                         help="keep the packer stand-in (no packer PLC): it drives C3 and takes its bottles")
+    parser.add_argument("--no-blowmoulder", action="store_true",
+                        help="keep the bottle supply (no blow moulder PLC): it puts bottles onto C1")
     parser.add_argument("--seconds", type=float, help="stop after this many seconds (default: until Ctrl+C)")
-    parser.add_argument("--rate", type=float, default=config.SUPPLY_PER_MIN, help="bottle supply per minute")
-    parser.add_argument("--add", type=int, default=0, help="extra bottles put on C1 at the start")
+    parser.add_argument("--rate", type=float, default=None,
+                        help=f"bottle supply per minute (default {config.SUPPLY_PER_MIN:g}; needs --no-blowmoulder)")
+    parser.add_argument("--add", type=int, default=0, help="extra bottles put on C1 at the start (needs --no-blowmoulder)")
     parser.add_argument("--log", type=Path, help="log file (default: logs/run-<date>-<time>.log)")
     parser.add_argument("--scenario", help="run a fixed command sequence (see --list-scenarios)")
     parser.add_argument("--list-scenarios", action="store_true", help="print the scenarios and exit")
@@ -55,8 +64,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         args.labeler_host = args.host
     if args.packer_host is None:
         args.packer_host = args.host
+    if args.blowmoulder_host is None:
+        args.blowmoulder_host = args.host
     args.with_labeler = not (args.filler_only or args.no_labeler)
     args.with_packer = args.with_labeler and not args.no_packer  # the packer takes its bottles from the labeler
+    args.with_blowmoulder = not (args.filler_only or args.no_blowmoulder)
     return args
 
 
@@ -79,17 +91,20 @@ async def run_headless(args: argparse.Namespace) -> None:
     syrup_plc = _syrup_plc(args)
     labeler_plc = _labeler_plc(args)
     packer_plc = _packer_plc(args)
+    blowmoulder_plc = _blowmoulder_plc(args)
 
     stop = asyncio.Event()
     asyncio.get_running_loop().add_signal_handler(signal.SIGINT, stop.set)  # Ctrl+C: clean stop
     syrup_text = f" + syrup PLC {args.syrup_host}:{args.syrup_port}" if syrup_plc else " (no syrup room)"
     labeler_text = f" + labeler PLC {args.labeler_host}:{args.labeler_port}" if labeler_plc else " (labeler stand-in)"
     packer_text = f" + packer PLC {args.packer_host}:{args.packer_port}" if packer_plc else " (packer stand-in)"
-    print(f"Simulator headless -> PLC {args.host}:{args.port}{syrup_text}{labeler_text}{packer_text}, log {log_path}. "
-          "Ctrl+C to stop.")
+    blowmoulder_text = (f" + blow moulder PLC {args.blowmoulder_host}:{args.blowmoulder_port}" if blowmoulder_plc
+                        else " (bottle supply)")
+    print(f"Simulator headless -> PLC {args.host}:{args.port}{syrup_text}{labeler_text}{packer_text}{blowmoulder_text}, "
+          f"log {log_path}. Ctrl+C to stop.")
     try:
         stats = await loop.run(plc, plant, log, seconds=args.seconds, stop=stop, scenario=runner, syrup_plc=syrup_plc,
-                               labeler_plc=labeler_plc, packer_plc=packer_plc)
+                               labeler_plc=labeler_plc, packer_plc=packer_plc, blowmoulder_plc=blowmoulder_plc)
     finally:
         plc.close()
         if syrup_plc is not None:
@@ -98,6 +113,8 @@ async def run_headless(args: argparse.Namespace) -> None:
             labeler_plc.close()
         if packer_plc is not None:
             packer_plc.close()
+        if blowmoulder_plc is not None:
+            blowmoulder_plc.close()
         log.close()
     print(f"\n{_summary(stats, plant, log.warning_count)}")
 
@@ -111,9 +128,11 @@ def _log_path(args: argparse.Namespace) -> Path:
 def _plant(args: argparse.Namespace):
     from simulator.plant import Plant
 
-    plant = Plant(with_syrup=not args.filler_only, with_labeler=args.with_labeler, with_packer=args.with_packer)
-    plant.supply.per_min = args.rate
-    plant.supply.add(args.add)
+    plant = Plant(with_syrup=not args.filler_only, with_labeler=args.with_labeler, with_packer=args.with_packer,
+                  with_blowmoulder=args.with_blowmoulder)
+    if plant.supply is not None:  # the blow moulder makes its own bottles (main() refuses --rate / --add with it)
+        plant.supply.per_min = config.SUPPLY_PER_MIN if args.rate is None else args.rate
+        plant.supply.add(args.add)
     return plant
 
 
@@ -138,7 +157,19 @@ def _packer_plc(args: argparse.Namespace):
     return PackerPlc(args.packer_host, args.packer_port) if args.with_packer else None
 
 
+def _blowmoulder_plc(args: argparse.Namespace):
+    """The fifth PLC link, or None when the bottle supply is used (--no-blowmoulder, --filler-only)."""
+    from simulator.plcs import BlowmoulderPlc
+
+    return BlowmoulderPlc(args.blowmoulder_host, args.blowmoulder_port) if args.with_blowmoulder else None
+
+
 def _summary(stats, plant, warnings: int) -> str:
+    blown = f"blown {plant.blowmoulder.ejected}, " if plant.blowmoulder is not None else ""
+    return blown + _line_summary(stats, plant, warnings)
+
+
+def _line_summary(stats, plant, warnings: int) -> str:
     if plant.labeler is None:
         return (f"{stats.summary()}, bottles out {plant.labeler_standin.taken + plant.c2.count}, "
                 f"lost {len(plant.filler.lost)}, warnings {warnings}")
@@ -161,7 +192,8 @@ def run_panel(args: argparse.Namespace) -> None:
     log_path = _log_path(args)
     plant = _plant(args)
     app = SimulatorApp(plant, FillerPlc(args.host, args.port), log_path, args.scenario, syrup_plc=_syrup_plc(args),
-                       labeler_plc=_labeler_plc(args), packer_plc=_packer_plc(args))
+                       labeler_plc=_labeler_plc(args), packer_plc=_packer_plc(args),
+                       blowmoulder_plc=_blowmoulder_plc(args))
     stats = app.run()  # returns after q: the loop has stopped and the log file is closed
     print(f"Log {log_path}")
     if stats is not None:
@@ -180,7 +212,7 @@ def main() -> None:
         raise SystemExit(f"unknown scenario {args.scenario!r} (known: {', '.join(SCENARIOS)})")
     if args.scenario and args.filler_only and SCENARIOS[args.scenario].target == "syrup":
         raise SystemExit(f"scenario {args.scenario!r} needs the syrup room: leave out --filler-only")
-    from simulator.scenarios import uses_command
+    from simulator.scenarios import uses_command, uses_supply
 
     if args.scenario and args.with_labeler and uses_command(SCENARIOS[args.scenario], "labeler_running"):
         raise SystemExit(f"scenario {args.scenario!r} stops the labeler stand-in: add --no-labeler")
@@ -191,6 +223,11 @@ def main() -> None:
                          "--filler-only")
     if args.scenario and not args.with_labeler and SCENARIOS[args.scenario].target == "labeler":
         raise SystemExit(f"scenario {args.scenario!r} needs the real labeler: leave out --no-labeler / --filler-only")
+    if args.with_blowmoulder and (args.rate is not None or args.add):
+        raise SystemExit("--rate / --add set the bottle supply, but the blow moulder makes the bottles: "
+                         "add --no-blowmoulder")
+    if args.scenario and args.with_blowmoulder and uses_supply(SCENARIOS[args.scenario]):
+        raise SystemExit(f"scenario {args.scenario!r} uses the bottle supply: add --no-blowmoulder")
     from simulator import plant_lock
 
     who = "simulator" + (" --headless" if args.headless else " (panel)")
@@ -202,6 +239,8 @@ def main() -> None:
             plant_lock.acquire(args.labeler_host, args.labeler_port, who)
         if args.with_packer:
             plant_lock.acquire(args.packer_host, args.packer_port, who)
+        if args.with_blowmoulder:
+            plant_lock.acquire(args.blowmoulder_host, args.blowmoulder_port, who)
     except plant_lock.PlantLockError as error:
         raise SystemExit(f"simulator: {error}") from None
     if args.headless:

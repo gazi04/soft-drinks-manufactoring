@@ -45,8 +45,8 @@ from simulator import config, loop
 from simulator.commands import CommandQueue
 from simulator.events import Event, EventLog
 from simulator.plant import Plant
-from simulator.plcs import FillerPlc, LabelerPlc, PackerPlc, SyrupPlc
-from simulator.scenarios import SCENARIOS, ScenarioSlot, uses_command
+from simulator.plcs import BlowmoulderPlc, FillerPlc, LabelerPlc, PackerPlc, SyrupPlc
+from simulator.scenarios import SCENARIOS, ScenarioSlot, uses_command, uses_supply
 from simulator.ui import view
 
 # switch id -> (command, the plant value the switch shows, label)
@@ -129,13 +129,13 @@ TAB_TARGETS = {"tab-filler": "filler", "tab-syrup": "syrup", "tab-labeler": "lab
 
 
 def scenario_options(target: str, with_syrup: bool, with_labeler: bool = False,
-                     with_packer: bool = False) -> list[tuple[str, str]]:
+                     with_packer: bool = False, with_blowmoulder: bool = False) -> list[tuple[str, str]]:
     """(label, name) for the scenario select of one machine's tab: only scenarios with that target, and only
     what the plant can run: syrup scenarios need the syrup room, labeler scenarios the real labeler, packer
     scenarios the real packer, and a scenario that stops a stand-in (labeler_stopped, packer_stopped) needs
-    that stand-in."""
+    that stand-in, and one that sets the bottle supply needs the supply (no blow moulder)."""
     def offered(s) -> bool:
-        if s.target != target:
+        if s.target != target or (with_blowmoulder and uses_supply(s)):
             return False
         if s.target == "syrup":
             return with_syrup
@@ -184,6 +184,7 @@ class SimulatorApp(App):
         self, plant: Plant, plc: FillerPlc, log_path: Path | None, scenario: str | None = None,
         syrup_plc: SyrupPlc | None = None, labeler_plc: LabelerPlc | None = None,
         packer_plc: PackerPlc | None = None,
+        blowmoulder_plc: BlowmoulderPlc | None = None,
     ) -> None:
         super().__init__()
         self.plant = plant
@@ -191,6 +192,7 @@ class SimulatorApp(App):
         self.syrup_plc = syrup_plc  # the second PLC (None = filler only)
         self.labeler_plc = labeler_plc  # the third PLC (None = labeler stand-in, no labeler tab)
         self.packer_plc = packer_plc  # the fourth PLC (None = packer stand-in on C3)
+        self.blowmoulder_plc = blowmoulder_plc  # the fifth PLC (None = the bottle supply fills C1)
         self.queue = CommandQueue()
         self.slot = ScenarioSlot()
         if scenario:
@@ -215,9 +217,19 @@ class SimulatorApp(App):
     def has_packer(self) -> bool:
         return self.plant.packer is not None
 
+    @property
+    def has_blowmoulder(self) -> bool:
+        return self.plant.blowmoulder is not None
+
+    def _filler_switches(self) -> Switches:
+        """The filler tab's switches; "Pause supply" only with the bottle supply (not with the blow moulder)."""
+        if self.plant.supply is not None:
+            return SWITCHES
+        return {k: v for k, v in SWITCHES.items() if k != "sw-paused"}
+
     def _switches(self) -> Switches:
         """The switches that exist on this panel (syrup ones only with a syrup room, labeler ones only with the labeler)."""
-        switches = dict(SWITCHES)
+        switches = dict(self._filler_switches())
         if self.has_syrup:
             switches |= SYRUP_SWITCHES
         if self.has_labeler:
@@ -240,12 +252,13 @@ class SimulatorApp(App):
                 with Horizontal(classes="main"):
                     yield Static(id="world", classes="world")
                     with VerticalScroll(classes="controls"):
-                        yield self._value_row("Supply /min", "in-rate", f"{self.plant.supply.per_min:g}", "number",
-                                              "bt-rate", "Set")
-                        yield self._value_row("Add bottles", "in-add", "5", "integer", "bt-add", "Add")
+                        if self.plant.supply is not None:  # with the blow moulder: its tab (stage 7)
+                            yield self._value_row("Supply /min", "in-rate", f"{self.plant.supply.per_min:g}",
+                                                  "number", "bt-rate", "Set")
+                            yield self._value_row("Add bottles", "in-add", "5", "integer", "bt-add", "Add")
                         yield self._value_row("Fill flow ml/s", "in-flow", f"{config.FILL_FLOW_ML_S:g}", "number",
                                               "bt-flow", "Set")
-                        yield from self._switch_rows(SWITCHES)
+                        yield from self._switch_rows(self._filler_switches())
             if self.has_syrup:
                 with TabPane("2 Syrup room", id="tab-syrup"):
                     with Horizontal(classes="main"):
@@ -296,7 +309,8 @@ class SimulatorApp(App):
         # One scenario row under the tabs; its select shows the active tab's scenarios (filler at start)
         yield Horizontal(
             Label("Scenario"),
-            Select(scenario_options("filler", self.has_syrup, self.has_labeler, self.has_packer), id="in-scenario",
+            Select(scenario_options("filler", self.has_syrup, self.has_labeler, self.has_packer, self.has_blowmoulder),
+                   id="in-scenario",
                    compact=True, prompt="choose"),
             Button("Run", id="bt-scenario", compact=True),
             Static(id="scenario-status"),
@@ -332,6 +346,7 @@ class SimulatorApp(App):
             self.plc, self.plant, self.events,
             stop=self._stop, on_tick=self._on_tick, commands=self.queue, scenario=self.slot,
             syrup_plc=self.syrup_plc, labeler_plc=self.labeler_plc, packer_plc=self.packer_plc,
+            blowmoulder_plc=self.blowmoulder_plc,
         )
 
     def _on_tick(self, stats: loop.LoopStats) -> None:
@@ -340,7 +355,7 @@ class SimulatorApp(App):
     # --- Redraw ----------------------------------------------------------------------
     def refresh_view(self) -> None:
         self.query_one("#header", Static).update(view.header_text(self.stats, self.plc, self.syrup_plc, self.labeler_plc,
-                                                                    self.packer_plc))
+                                                                    self.packer_plc, self.blowmoulder_plc))
         self.query_one("#world", Static).update(view.world_text(self.plant))
         if self.has_syrup:
             self.query_one("#syrup-world", Static).update(view.syrup_world_text(self.plant))
@@ -423,7 +438,7 @@ class SimulatorApp(App):
         target = TAB_TARGETS.get(message.pane.id)
         if target is not None:
             self.query_one("#in-scenario", Select).set_options(
-                scenario_options(target, self.has_syrup, self.has_labeler, self.has_packer))
+                scenario_options(target, self.has_syrup, self.has_labeler, self.has_packer, self.has_blowmoulder))
 
     # --- Event log -------------------------------------------------------------------
     def _show_event(self, event: Event) -> None:
@@ -458,5 +473,7 @@ class SimulatorApp(App):
             self.labeler_plc.close()
         if self.packer_plc is not None:
             self.packer_plc.close()
+        if self.blowmoulder_plc is not None:
+            self.blowmoulder_plc.close()
         self.events.close()
         self.exit(self.stats)

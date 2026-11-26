@@ -8,7 +8,7 @@ and the screen code in app.py stays small.
     syrup_world_text(plant)      the syrup room's truth: tanks, temperature, pressure, outputs, faults
     labeler_world_text(plant)    the labeler's truth: gate, pocket, label roll, glue tank, C3, outputs, faults
     packer_world_text(plant)     the packer's truth: gate, table, pusher, wrap conveyor, film, bar, oven, outfeed
-    header_text(stats, plc)      what the PLC reports: link, step, state, alarms
+    header_text(stats, plc)      what the PLCs report: link, step, state, alarms (one line per PLC)
     scenario_text(slot)          which scenario runs and how far it is
     event_style(event)           colour of one log line
     LOG_FILTERS / matches()      the event log filters (all, bottle, PLC, warnings)
@@ -27,6 +27,9 @@ from simulator.machines.packer import Pack, PackerOutputs
 from simulator.machines.syrup import SyrupOutputs
 from simulator.plant import Plant
 from simulator.plcs import (
+    BLOWMOULDER_MOULD_STEP_NAMES,
+    BLOWMOULDER_STATE_NAMES,
+    BLOWMOULDER_STEP_NAMES,
     LABELER_STATE_NAMES,
     LABELER_STEP_NAMES,
     MODE_NAMES,
@@ -37,6 +40,7 @@ from simulator.plcs import (
     STEP_NAMES,
     SYRUP_STATE_NAMES,
     SYRUP_STEP_NAMES,
+    BlowmoulderPlc,
     FillerPlc,
     LabelerPlc,
     PackerPlc,
@@ -63,6 +67,20 @@ def bottle_label(bottle: Bottle | None, show_ml: bool = False) -> str:
     return f"{bottle.id}{ml}{' ' + flags if flags else ''}"
 
 
+def _c1_source_text(plant: Plant) -> Text:
+    """The first line of the filler tab: what puts the bottles onto C1 (the supply or the blow moulder)."""
+    supply = plant.supply
+    if supply is not None:
+        rate = "paused" if supply.paused else f"{supply.per_min:g}/min"
+        return Text(f"Supply   {rate}, {supply.pending} waiting\n")
+    bm = plant.blowmoulder
+    t = Text(f"Blow mld hopper {bm.hopper.count}, oven {bm.oven_temp / 10:.1f} degC, "
+             f"{bm.ejected} bottles onto C1\n")
+    if plant.blowmoulder_outputs is None:
+        t.append("blow moulder PLC not answering: outputs taken as OFF, no bottles\n", style="bold red")
+    return t
+
+
 def conveyor_text(conveyor: Conveyor) -> str:
     """Slots from the entry (left) to the exit (right), as the bottles flow."""
     return "[ " + " ".join(f"{b.id if b else '.':>3}" for b in conveyor.slots) + " ]"
@@ -71,11 +89,8 @@ def conveyor_text(conveyor: Conveyor) -> str:
 def world_text(plant: Plant) -> Text:
     s = plant.writes()  # exactly what is written to the PLC (S6/S8 kept ON for one write)
     f = plant.filler
-    supply = plant.supply
     t = Text()
-
-    rate = "paused" if supply.paused else f"{supply.per_min:g}/min"
-    t.append(f"Supply   {rate}, {supply.pending} waiting\n")
+    t.append_text(_c1_source_text(plant))
 
     t.append(f"C1       {conveyor_text(plant.c1)} ─► ")
     t.append_text(lamp("S2", s.s2))
@@ -477,11 +492,36 @@ def packer_header_text(stats: LoopStats | None, plc: PackerPlc) -> Text:
     return t
 
 
+def blowmoulder_header_text(stats: LoopStats | None, plc: BlowmoulderPlc) -> Text:
+    """The blow moulder PLC's line (link, mode, both steps, state, BottleCount, alarms), like the packer's."""
+    t = Text()
+    link = "up" if plc.link_ok else "not connected"
+    t.append(f"blow moulder PLC {plc.host}:{plc.port} {link}", style="green" if plc.link_ok else "bold red")
+    status = stats.blowmoulder_status if stats else None
+    if status is None:
+        return t
+    mode = MODE_NAMES.get(status.mode, status.mode)
+    t.append(f"  │  mode {mode}", style="" if status.mode == MODE_AUTO else "bold yellow")
+    t.append(f"  │  step {BLOWMOULDER_STEP_NAMES.get(status.step, status.step)}"
+             f" / mould {BLOWMOULDER_MOULD_STEP_NAMES.get(status.mould_step, status.mould_step)}"
+             f"  │  state {BLOWMOULDER_STATE_NAMES.get(status.state, status.state)}"
+             f"  │  BottleCount {status.bottle_count}  │  ")
+    active = [name for name, on in status.alarms.items() if on]
+    t.append(f"alarms: {', '.join(active)}" if active else "alarms: none", style="bold red" if active else "")
+    hint = "uv run python tests/hmi.py --blowmoulder auto reset start"
+    if status.mode != MODE_AUTO:
+        t.append(f"\nblow moulder mode {mode}: Start is ignored. Auto + start:  {hint}", style="yellow")
+    elif status.step == IDLE and status.mould_step == IDLE:
+        t.append(f"\nblow moulder PLC in IDLE: start it with  {hint}", style="yellow")
+    return t
+
+
 def header_text(
     stats: LoopStats | None, plc: FillerPlc, syrup_plc: SyrupPlc | None = None, labeler_plc: LabelerPlc | None = None,
-    packer_plc: PackerPlc | None = None,
+    packer_plc: PackerPlc | None = None, blowmoulder_plc: BlowmoulderPlc | None = None,
 ) -> Text:
-    """The filler PLC's line, and under it the syrup room's, the labeler's and the packer's when there are ones."""
+    """The filler PLC's line, and under it the syrup room's, the labeler's, the packer's and the blow moulder's
+    when there are ones."""
     t = filler_header_text(stats, plc)
     if syrup_plc is not None:
         t.append("\n")
@@ -492,6 +532,9 @@ def header_text(
     if packer_plc is not None:
         t.append("\n")
         t.append_text(packer_header_text(stats, packer_plc))
+    if blowmoulder_plc is not None:
+        t.append("\n")
+        t.append_text(blowmoulder_header_text(stats, blowmoulder_plc))
     return t
 
 

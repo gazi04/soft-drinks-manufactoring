@@ -20,6 +20,9 @@ addresses (Cmd, ModeReq) and is not part of the simulator package.
     uv run python tests/hmi.py --packer auto reset start  # the same for the packer PLC (port 5024; FUXA has no
                                                           # packer device before its HMI part C)
     uv run python tests/hmi.py --packer resetcount        # Cmd = 4: PackCount -> 0
+    uv run python tests/hmi.py --blowmoulder auto reset start  # the blow moulder PLC (port 5025; FUXA has no
+                                                               # blow moulder device before its HMI part C)
+    uv run python tests/hmi.py --blowmoulder resetcount   # Cmd = 4: BottleCount -> 0
 
 The PLC sets Cmd back to 0 after reading it, so each command acts once.
 Reset of Alm_CommLost only works while the simulator's heartbeat is running.
@@ -34,6 +37,7 @@ from hmi_guard import warn_if_fuxa
 
 from simulator import address_map as am
 from simulator import config
+from simulator import address_map_blowmoulder as bm
 from simulator import address_map_labeler as lm
 from simulator import address_map_packer as pm
 from simulator import address_map_syrup as sm
@@ -43,6 +47,8 @@ from simulator.plcs import STEP_NAMES as STEPS
 from simulator.plcs import LABELER_ALARM_NAMES, LABELER_STATE_NAMES, LABELER_STEP_NAMES
 from simulator.plcs import SYRUP_ALARM_NAMES, SYRUP_STATE_NAMES, SYRUP_STEP_NAMES
 from simulator.plcs import PACKER_ALARM_NAMES, PACKER_STATE_NAMES, PACKER_STEP_NAMES, PACKER_WRAP_STEP_NAMES
+from simulator.plcs import (BLOWMOULDER_ALARM_NAMES, BLOWMOULDER_MOULD_STEP_NAMES, BLOWMOULDER_STATE_NAMES,
+                            BLOWMOULDER_STEP_NAMES)
 
 COMMANDS = {"start": (am.CMD, 1), "stop": (am.CMD, 2), "reset": (am.CMD, 3)}
 MODES = {"stopmode": (am.MODE_REQ, 0), "auto": (am.MODE_REQ, 1), "manual": (am.MODE_REQ, 2)}
@@ -86,14 +92,28 @@ def packer_status(client: ModbusTcpClient) -> None:
           f"State {PACKER_STATE_NAMES.get(state, state)}, PackCount {packs}, alarms: {', '.join(active)}")
 
 
+def blowmoulder_status(client: ModbusTcpClient) -> None:
+    mode = client.read_holding_registers(bm.MODE_REQ, count=1).registers[0]
+    state, step, mould_step, bottles = client.read_holding_registers(bm.STATUS_START, count=bm.STATUS_COUNT).registers
+    alarms = client.read_coils(bm.ALARMS_START, count=bm.ALARMS_COUNT).bits[: bm.ALARMS_COUNT]
+    alarms += client.read_coils(bm.EXTRA_ALARMS_START, count=bm.EXTRA_ALARMS_COUNT).bits[: bm.EXTRA_ALARMS_COUNT]
+    active = [name for name, on in zip(BLOWMOULDER_ALARM_NAMES, alarms) if on] or ["none"]
+    print(f"Blow moulder: Mode {mode}, Step {step} {BLOWMOULDER_STEP_NAMES.get(step, '?')}, "
+          f"MouldStep {mould_step} {BLOWMOULDER_MOULD_STEP_NAMES.get(mould_step, '?')}, "
+          f"State {BLOWMOULDER_STATE_NAMES.get(state, state)}, BottleCount {bottles}, alarms: {', '.join(active)}")
+
+
 def main() -> None:
     args = sys.argv[1:]
     # Cmd / ModeReq are the same registers (HR 1024 / 1025) in every PLC; only the port differs
     syrup, labeler, packer = "--syrup" in args, "--labeler" in args, "--packer" in args
-    if syrup + labeler + packer > 1:
-        raise SystemExit("one PLC at a time: --syrup, --labeler or --packer")
-    words = [a for a in args if a not in ("--syrup", "--labeler", "--packer")] or ["status"]
-    if packer:
+    blowmoulder = "--blowmoulder" in args
+    if syrup + labeler + packer + blowmoulder > 1:
+        raise SystemExit("one PLC at a time: --syrup, --labeler, --packer or --blowmoulder")
+    words = [a for a in args if a not in ("--syrup", "--labeler", "--packer", "--blowmoulder")] or ["status"]
+    if blowmoulder:
+        port, show = config.BLOWMOULDER_PORT, blowmoulder_status
+    elif packer:
         port, show = config.PACKER_PORT, packer_status
     elif syrup:
         port, show = config.SYRUP_PORT, syrup_status
@@ -101,7 +121,8 @@ def main() -> None:
         port, show = config.LABELER_PORT, labeler_status
     else:
         port, show = config.PLC_PORT, status
-    commands = COMMANDS | ({"resetcount": (lm.CMD, 4)} if labeler or packer else {})  # Cmd = 4: labeler, packer
+    # Cmd = 4 (reset the machine's counter): labeler, packer, blow moulder
+    commands = COMMANDS | ({"resetcount": (lm.CMD, 4)} if labeler or packer or blowmoulder else {})
     unknown = [w for w in words if w not in commands | MODES | {"status": None}]
     if unknown:
         raise SystemExit(f"unknown: {' '.join(unknown)} (use {', '.join([*commands, *MODES, 'status'])})")
